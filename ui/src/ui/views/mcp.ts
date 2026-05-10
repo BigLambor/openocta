@@ -121,6 +121,50 @@ function parseEnvFromEdit(text: string): Record<string, string> {
   return out;
 }
 
+function showMcpTooltip(e: Event) {
+  const target = e.currentTarget as HTMLElement;
+  const hint = target.classList.contains("mcp-field-hint")
+    ? target
+    : (target.closest(".mcp-field-hint") as HTMLElement);
+  if (!hint) return;
+  const tooltip = hint.querySelector(".mcp-field-hint__tooltip") as HTMLElement;
+  if (!tooltip) return;
+  const rect = hint.getBoundingClientRect();
+  tooltip.style.left = rect.left + "px";
+  tooltip.style.top = rect.bottom + 6 + "px";
+  tooltip.classList.add("is-visible");
+}
+
+function hideMcpTooltip(e: Event) {
+  const target = e.currentTarget as HTMLElement;
+  const hint = target.classList.contains("mcp-field-hint")
+    ? target
+    : (target.closest(".mcp-field-hint") as HTMLElement);
+  if (!hint) return;
+  const tooltip = hint.querySelector(".mcp-field-hint__tooltip") as HTMLElement;
+  if (!tooltip) return;
+  window.setTimeout(() => {
+    if (!hint.matches(":hover") && !tooltip.matches(":hover")) {
+      tooltip.classList.remove("is-visible");
+    }
+  }, 100);
+}
+
+/** 渲染带悬浮提示的字段 label，tooltip 使用 position: fixed 跳出 modal overflow 裁剪 */
+export function renderFieldLabelWithTooltip(label: string, tooltipText: string) {
+  return html`
+    <span style="display: flex; align-items: center; gap: 6px;">
+      ${label}
+      <span class="mcp-field-hint" @mouseenter=${showMcpTooltip} @mouseleave=${hideMcpTooltip}>
+        ${icons.helpCircle}
+        <span class="mcp-field-hint__tooltip" @mouseenter=${showMcpTooltip} @mouseleave=${hideMcpTooltip}>
+          ${tooltipText}
+        </span>
+      </span>
+    </span>
+  `;
+}
+
 const MCP_COMMAND_PRESETS = ["npx", "docker", "uv"] as const;
 
 /** 与配置 JSON 对齐：trim；自定义 command（或带空格）不得误显示为 npx。 */
@@ -189,16 +233,10 @@ export function renderMcpAddConnectionFields(
         /></span>
       </div>
       <div class="field">
-        <span style="display: flex; align-items: center; gap: 6px;">
-          ${t("mcpEnv")}
-          <span class="mcp-field-hint">
-            ${icons.helpCircle}
-            <span class="mcp-field-hint__tooltip">每行一个环境变量，格式为 KEY=VALUE
-例如：
-API_KEY=your-api-key
-DEBUG=true</span>
-          </span>
-        </span>
+        ${renderFieldLabelWithTooltip(
+          t("mcpEnv"),
+          "每行一个环境变量，格式为 KEY=VALUE\n例如：\nAPI_KEY=your-api-key\nDEBUG=true",
+        )}
         <span class="textarea"><textarea
           style="min-height: 80px; font-family: var(--mono); font-size: 12px;"
           .value=${formatEnvForEdit(draft?.env)}
@@ -275,16 +313,10 @@ function renderEditConnectionTypeFields(
         /></span>
       </div>
       <div class="field">
-        <span style="display: flex; align-items: center; gap: 6px;">
-          ${t("mcpEnv")}
-          <span class="mcp-field-hint">
-            ${icons.helpCircle}
-            <span class="mcp-field-hint__tooltip">每行一个环境变量，格式为 KEY=VALUE
-例如：
-API_KEY=your-api-key
-DEBUG=true</span>
-          </span>
-        </span>
+        ${renderFieldLabelWithTooltip(
+          t("mcpEnv"),
+          "每行一个环境变量，格式为 KEY=VALUE\n例如：\nAPI_KEY=your-api-key\nDEBUG=true",
+        )}
         <span class="textarea"><textarea
           style="min-height: 80px; font-family: var(--mono); font-size: 12px;"
           .value=${formatEnvForEdit(selected.env)}
@@ -450,22 +482,10 @@ export function renderMcpEditModal(props: McpEditModalProps) {
               `
             : html`
                 <div class="field">
-                  <span style="display: flex; align-items: center; gap: 6px;">
-                    ${t("mcpRawJson")}
-                    <span class="mcp-field-hint">
-                      ${icons.helpCircle}
-                      <span class="mcp-field-hint__tooltip">JSON 格式示例：
-{
-  "command": "npx",
-  "args": ["-y", "prometheus-mcp-server"],
-  "env": { "API_KEY": "xxx" }
-}
-或 URL 形式：
-{
-  "url": "https://mcp.example.com/sse"
-}</span>
-                    </span>
-                  </span>
+                  ${renderFieldLabelWithTooltip(
+                    t("mcpRawJson"),
+                    'JSON 格式示例：\n{\n  "command": "npx",\n  "args": ["-y", "prometheus-mcp-server"],\n  "env": { "API_KEY": "xxx" }\n}\n或 URL 形式：\n{\n  "url": "https://mcp.example.com/sse"\n}',
+                  )}
                   <span class="textarea"><textarea
                     style="min-height: 200px; font-family: var(--mono);"
                     .value=${props.rawJson}
@@ -630,22 +650,10 @@ export function renderMcp(props: McpProps) {
                         `
                       : html`
                           <div class="field">
-                            <span style="display: flex; align-items: center; gap: 6px;">
-                              ${t("mcpRawJson")}
-                              <span class="mcp-field-hint">
-                                ${icons.helpCircle}
-                                <span class="mcp-field-hint__tooltip">JSON 格式示例：
-{
-  "command": "npx",
-  "args": ["-y", "prometheus-mcp-server"],
-  "env": { "API_KEY": "xxx" }
-}
-或 URL 形式：
-{
-  "url": "https://mcp.example.com/sse"
-}</span>
-                              </span>
-                            </span>
+                            ${renderFieldLabelWithTooltip(
+                              t("mcpRawJson"),
+                              'JSON 格式示例：\n{\n  "command": "npx",\n  "args": ["-y", "prometheus-mcp-server"],\n  "env": { "API_KEY": "xxx" }\n}\n或 URL 形式：\n{\n  "url": "https://mcp.example.com/sse"\n}',
+                            )}
                             <span class="textarea"><textarea
                               style="min-height: 180px; font-family: var(--mono);"
                               .value=${props.addRawJson}

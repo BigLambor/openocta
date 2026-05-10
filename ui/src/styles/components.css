@@ -861,10 +861,7 @@
 
 .mcp-field-hint__tooltip {
   display: none;
-  position: absolute;
-  bottom: calc(100% + 6px);
-  left: 50%;
-  transform: translateX(-50%);
+  position: fixed;
   padding: 10px 14px;
   background: var(--bg-content);
   border: 1px solid var(--border);
@@ -881,8 +878,7 @@
   user-select: text;
 }
 
-.mcp-field-hint:hover .mcp-field-hint__tooltip,
-.mcp-field-hint__tooltip:hover {
+.mcp-field-hint__tooltip.is-visible {
   display: block;
 }
 

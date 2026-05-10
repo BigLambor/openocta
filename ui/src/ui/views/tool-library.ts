@@ -10,6 +10,7 @@ import { t } from "../strings.js";
 import {
   isMcpAddFormValid,
   renderMcpAddConnectionFields,
+  renderFieldLabelWithTooltip,
   type McpServerEntry,
 } from "./mcp.ts";
 
@@ -457,22 +458,10 @@ export function renderToolLibrary(props: ToolLibraryProps) {
                               `
                             : html`
                                 <div class="field">
-                                  <span style="display: flex; align-items: center; gap: 6px;">
-                                    ${t("mcpRawJson")}
-                                    <span class="mcp-field-hint">
-                                      ${icons.helpCircle}
-                                      <span class="mcp-field-hint__tooltip">JSON 格式示例：
-{
-  "command": "npx",
-  "args": ["-y", "prometheus-mcp-server"],
-  "env": { "API_KEY": "xxx" }
-}
-或 URL 形式：
-{
-  "url": "https://mcp.example.com/sse"
-}</span>
-                                    </span>
-                                  </span>
+                                  ${renderFieldLabelWithTooltip(
+                                    t("mcpRawJson"),
+                                    'JSON 格式示例：\n{\n  "command": "npx",\n  "args": ["-y", "prometheus-mcp-server"],\n  "env": { "API_KEY": "xxx" }\n}\n或 URL 形式：\n{\n  "url": "https://mcp.example.com/sse"\n}',
+                                  )}
                                   <span class="textarea"><textarea
                                     style="min-height: 180px; font-family: var(--mono);"
                                     .value=${props.addRawJson ?? ""}
