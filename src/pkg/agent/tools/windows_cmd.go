@@ -7,7 +7,6 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/stellarlinkco/agentsdk-go/pkg/tool"
@@ -136,16 +135,6 @@ func (t WindowsCmdTool) Execute(ctx context.Context, params map[string]interface
 		output = "(command completed with no output)"
 	}
 	return &tool.ToolResult{Success: true, Output: output}, nil
-}
-
-// applyExecNoWindow applies Windows-specific process creation flags to hide console window.
-// This is the key mechanism to prevent console window popup at the Go system call level.
-func applyExecNoWindow(cmd *exec.Cmd) {
-	if runtime.GOOS == "windows" {
-		cmd.SysProcAttr = &syscall.SysProcAttr{
-			CreationFlags: syscall.CREATE_NO_WINDOW,
-		}
-	}
 }
 
 // isPowershellNotFound checks if the error indicates PowerShell is not available.
