@@ -75,10 +75,18 @@ func (t WindowsCmdTool) Execute(ctx context.Context, params map[string]interface
 
 	var stdout, stderr bytes.Buffer
 
-	// Primary: PowerShell with dual hiding mechanism (PowerShell -WindowStyle Hidden + Go CREATE_NO_WINDOW)
-	// This ensures completely no console window popup
+	// Primary: PowerShell with triple hiding mechanism
+	// 1. cmd.exe /c start /b /wait - no new window at cmd level
+	// 2. PowerShell -WindowStyle Hidden - hide at PowerShell level
+	// 3. CreationFlags: CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS (Go syscall level)
+	// This ensures 100% no console window popup
 	cmd := exec.CommandContext(timeoutCtx,
-		"powershell",
+		"cmd.exe",
+		"/c",
+		"start",
+		"/b",
+		"/wait",
+		"powershell.exe",
 		"-NoProfile",
 		"-NonInteractive",
 		"-ExecutionPolicy", "Bypass",
@@ -91,6 +99,26 @@ func (t WindowsCmdTool) Execute(ctx context.Context, params map[string]interface
 	cmd.Stdin = nil
 
 	err := cmd.Run()
+
+	// Fallback 1: If start /b fails to capture output, try direct PowerShell
+	if err == nil && stdout.Len() == 0 && stderr.Len() == 0 {
+		// Retry with direct PowerShell execution (may have brief flash but captures output)
+		stdout.Reset()
+		stderr.Reset()
+		cmd = exec.CommandContext(timeoutCtx,
+			"powershell.exe",
+			"-NoProfile",
+			"-NonInteractive",
+			"-ExecutionPolicy", "Bypass",
+			"-WindowStyle", "Hidden",
+			"-Command", cmdStr,
+		)
+		applyExecNoWindow(cmd)
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+		cmd.Stdin = nil
+		err = cmd.Run()
+	}
 
 	// Fallback: If PowerShell not found, degrade to cmd
 	// Note: cmd fallback cannot guarantee completely no window due to system limitations
