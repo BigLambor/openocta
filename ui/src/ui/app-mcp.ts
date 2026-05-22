@@ -308,21 +308,22 @@ export function handleMcpEditConnectionTypeChange(host: AppViewState, type: "std
 }
 
 export async function handleMcpToggle(host: AppViewState, key: string, enabled: boolean) {
-  const base = cloneConfigObject(host.configForm ?? host.configSnapshot?.config ?? {});
-  if (!base.mcp) {
-    base.mcp = { servers: {} };
-  }
-  const mcp = base.mcp as { servers?: Record<string, McpServerEntry> };
-  if (!mcp.servers) {
-    mcp.servers = {};
-  }
-  if (!mcp.servers[key]) {
-    mcp.servers[key] = {};
-  }
-  mcp.servers[key] = { ...mcp.servers[key], enabled };
-  host.configForm = base;
+  // Get current entry to preserve other fields (command, args, env, etc.)
+  const currentEntry = (host.configSnapshot?.config as { mcp?: { servers?: Record<string, McpServerEntry> } } | undefined)
+    ?.mcp?.servers?.[key] ?? (host.configForm as { mcp?: { servers?: Record<string, McpServerEntry> } } | undefined)
+    ?.mcp?.servers?.[key] ?? {};
+
+  // Build incremental patch: only update the target key, avoid overwriting other servers
+  const patch = {
+    mcp: {
+      servers: {
+        [key]: { ...currentEntry, enabled }
+      }
+    }
+  };
+
   host.configFormDirty = true;
-  await saveConfigPatch(host, { mcp: base.mcp });
+  await saveConfigPatch(host, patch);
 }
 
 export function handleMcpFormPatch(host: AppViewState, key: string, patch: Partial<McpServerEntry>) {

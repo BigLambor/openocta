@@ -146,7 +146,7 @@ type McpConfig struct {
 // 2) URL: connect to existing MCP server via SSE/HTTP (no Command).
 // 3) Service + ServiceURL: backend service URL; we start the matching MCP server locally (stdio).
 type McpServerEntry struct {
-	Enabled    bool              `json:"enabled,omitempty"`
+	Enabled    bool              `json:"enabled"`              // explicit field: false must be serialized (omitempty drops false)
 	Command    string            `json:"command,omitempty"`    // e.g. "docker", "npx"
 	Args       []string          `json:"args,omitempty"`       // e.g. ["run","-i","--rm","-e","PROMETHEUS_URL","..."]
 	Env        map[string]string `json:"env,omitempty"`        // env for command (stdio)

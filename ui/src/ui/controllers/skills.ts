@@ -167,10 +167,17 @@ export async function updateSkillEnabled(state: SkillsState, skillKey: string, e
     state.skillsError = "无法连接网关，无法更新技能启用状态。请在 Overview 确认 Gateway 已连接。";
     return;
   }
+
+  // Resolve the correct skillKey: prefer skillKey, fallback to name or baseDir basename
+  const resolvedKey = state.skillsReport?.skills.find((s) =>
+    s.skillKey === skillKey || s.name === skillKey ||
+    (s.baseDir && s.baseDir.split(/[/\\]/).pop() === skillKey)
+  )?.skillKey ?? skillKey;
+
   state.skillsBusyKey = skillKey;
   state.skillsError = null;
   try {
-    await state.client.request("skills.update", { skillKey, enabled });
+    await state.client.request("skills.update", { skillKey: resolvedKey, enabled });
     await loadSkills(state);
     setSkillMessage(state, skillKey, {
       kind: "success",

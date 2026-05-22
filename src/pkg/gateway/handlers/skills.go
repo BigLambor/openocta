@@ -135,11 +135,14 @@ func canonicalSkillEntryConfigKey(e SkillEntry) string {
 }
 
 // resolveWorkspaceSkillConfigKey maps a client id (e.g. market folder) to the config entry key, or returns id if unknown.
+// Searches across all skill sources: workspace, managed, and extra directories.
 func resolveWorkspaceSkillConfigKey(cfg *config.OpenOctaConfig, env func(string) string, clientKey string) string {
 	clientKey = strings.TrimSpace(clientKey)
 	if cfg == nil || clientKey == "" {
 		return clientKey
 	}
+
+	// 1. Search all workspace directories
 	for _, wsDir := range listWorkspaceDirs(cfg, env) {
 		for _, e := range loadWorkspaceSkillEntries(wsDir, cfg) {
 			if skillEntryMatchesClientKey(e, clientKey) {
@@ -147,6 +150,31 @@ func resolveWorkspaceSkillConfigKey(cfg *config.OpenOctaConfig, env func(string)
 			}
 		}
 	}
+
+	// 2. Search managed skills directory (~/.openocta/skills)
+	managedDir := ResolveManagedSkillsDir(env)
+	for _, e := range loadWorkspaceSkillEntries(managedDir, cfg) {
+		if skillEntryMatchesClientKey(e, clientKey) {
+			return canonicalSkillEntryConfigKey(e)
+		}
+	}
+
+	// 3. Search extra directories (skills.load.extraDirs)
+	if cfg.Skills != nil && cfg.Skills.Load != nil {
+		for _, extraDir := range cfg.Skills.Load.ExtraDirs {
+			trimmed := strings.TrimSpace(extraDir)
+			if trimmed == "" {
+				continue
+			}
+			absDir := agentSkills.ResolveUserPath(trimmed, env)
+			for _, e := range loadWorkspaceSkillEntries(absDir, cfg) {
+				if skillEntryMatchesClientKey(e, clientKey) {
+					return canonicalSkillEntryConfigKey(e)
+				}
+			}
+		}
+	}
+
 	return clientKey
 }
 
