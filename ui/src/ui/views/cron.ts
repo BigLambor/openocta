@@ -464,9 +464,7 @@ function renderCronForm(props: CronProps) {
                           ${t("cronTo")}
                           <span class="mcp-field-hint" @mouseenter=${showCronToTooltip} @mouseleave=${hideCronToTooltip}>
                             ${icons.info}
-                            <span class="mcp-field-hint__tooltip" @mouseenter=${showCronToTooltip} @mouseleave=${hideCronToTooltip}>
-                              ${t("cronToTooltip")}
-                            </span>
+                            <span class="mcp-field-hint__tooltip" @mouseenter=${showCronToTooltip} @mouseleave=${hideCronToTooltip}>${t("cronToTooltip")}</span>
                           </span>
                         </span>
                         <span class="input"><input

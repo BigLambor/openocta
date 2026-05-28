@@ -156,7 +156,7 @@ export function renderFieldLabelWithTooltip(label: string, tooltipText: string) 
     <span style="display: flex; align-items: center; gap: 6px;">
       ${label}
       <span class="mcp-field-hint" @mouseenter=${showMcpTooltip} @mouseleave=${hideMcpTooltip}>
-        ${icons.helpCircle}
+        ${icons.info}
         <span class="mcp-field-hint__tooltip" @mouseenter=${showMcpTooltip} @mouseleave=${hideMcpTooltip}>
           ${tooltipText}
         </span>
@@ -234,8 +234,7 @@ export function renderMcpAddConnectionFields(
       </div>
       <div class="field">
         ${renderFieldLabelWithTooltip(
-          t("mcpEnv"),
-          "每行一个环境变量，格式为 KEY=VALUE\n例如：\nAPI_KEY=your-api-key\nDEBUG=true",
+          t("mcpEnv"),"每行一个环境变量，格式为 KEY=VALUE\n例如：\nAPI_KEY=your-api-key\nDEBUG=true",
         )}
         <span class="textarea"><textarea
           style="min-height: 80px; font-family: var(--mono); font-size: 12px;"
@@ -314,8 +313,7 @@ function renderEditConnectionTypeFields(
       </div>
       <div class="field">
         ${renderFieldLabelWithTooltip(
-          t("mcpEnv"),
-          "每行一个环境变量，格式为 KEY=VALUE\n例如：\nAPI_KEY=your-api-key\nDEBUG=true",
+          t("mcpEnv"),"每行一个环境变量，格式为 KEY=VALUE\n例如：\nAPI_KEY=your-api-key\nDEBUG=true",
         )}
         <span class="textarea"><textarea
           style="min-height: 80px; font-family: var(--mono); font-size: 12px;"
@@ -936,7 +934,7 @@ export function renderMcp(props: McpProps) {
                             <span style="display: flex; align-items: center; gap: 6px;">
                               ${t("mcpRawJson")}
                               <span class="mcp-field-hint">
-                                ${icons.helpCircle}
+                                ${icons.info}
                                 <span class="mcp-field-hint__tooltip">JSON 格式示例：
 {
   "command": "npx",
