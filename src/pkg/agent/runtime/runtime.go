@@ -714,3 +714,16 @@ func removeApprovalQueueSettings(env func(string) string) error {
 
 	return nil
 }
+
+// newBrowserDedupMiddleware returns a middleware that prevents the LLM from
+// repeatedly opening the same URL within a short window during multi-step
+// UI automation. This is a stub implementation; the full deduplication logic
+// can be added later if needed.
+func newBrowserDedupMiddleware(windowMs int) middleware.Middleware {
+	return middleware.Funcs{
+		Identifier: "browser-dedup",
+		OnBeforeTool: func(_ context.Context, st *middleware.State) error {
+			return nil
+		},
+	}
+}

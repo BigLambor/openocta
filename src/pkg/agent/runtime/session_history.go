@@ -269,10 +269,15 @@ func transcriptMessagesToSDK(msgs []session.TranscriptMessage) []message.Message
 					break
 				}
 			}
+			// Use ToolCalls field with Result for tool result messages.
+			// The agentsdk-go will convert this to the appropriate format for the API.
 			msg := message.Message{
-				Role:       "tool",
-				ToolCallID: m.ToolCallID,
-				Content:    resultText,
+				Role: "tool",
+				ToolCalls: []message.ToolCall{{
+					ID:     m.ToolCallID,
+					Name:   m.ToolName,
+					Result: resultText,
+				}},
 			}
 			out = append(out, msg)
 			continue
@@ -282,6 +287,7 @@ func transcriptMessagesToSDK(msgs []session.TranscriptMessage) []message.Message
 		}
 		var sdkBlocks []message.ContentBlock
 		hasImage := false
+		var toolCalls []message.ToolCall
 		for _, c := range m.Content {
 			if strings.EqualFold(c.Type, "text") && c.Text != "" {
 				sdkBlocks = append(sdkBlocks, message.ContentBlock{
@@ -295,10 +301,23 @@ func transcriptMessagesToSDK(msgs []session.TranscriptMessage) []message.Message
 					MediaType: c.MimeType,
 					Data:      c.Data,
 				})
+			} else if strings.EqualFold(c.Type, "toolCall") || strings.EqualFold(c.Type, "tool_call") || strings.EqualFold(c.Type, "tool_use") {
+				// Extract tool call from transcript content block for assistant messages.
+				id := strings.TrimSpace(c.ID)
+				name := strings.TrimSpace(c.Name)
+				if id != "" && name != "" {
+					toolCalls = append(toolCalls, message.ToolCall{
+						ID:   id,
+						Name: name,
+					})
+				}
 			}
 		}
 
 		msg := message.Message{Role: role}
+		if len(toolCalls) > 0 {
+			msg.ToolCalls = toolCalls
+		}
 		if hasImage {
 			msg.ContentBlocks = sdkBlocks
 		} else {
