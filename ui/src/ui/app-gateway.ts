@@ -141,9 +141,10 @@ export function connectGateway(host: GatewayHost) {
   host.execApprovalError = null;
 
   host.client?.stop();
+  const connToken = (host as any).rbacToken || (host.settings.token.trim() ? host.settings.token : undefined);
   host.client = new GatewayBrowserClient({
     url: gatewayWebSocketUrl(host.settings.gatewayUrl),
-    token: host.settings.token.trim() ? host.settings.token : undefined,
+    token: connToken,
     password: host.password.trim() ? host.password : undefined,
     clientName: "openclaw-control-ui",
     mode: "webchat",

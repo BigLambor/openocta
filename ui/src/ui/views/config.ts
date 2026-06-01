@@ -36,6 +36,13 @@ export type ConfigProps = {
   onSave: () => void;
   onApply: () => void;
   onUpdate: () => void;
+  rbacUsersList?: any[];
+  rbacRolesList?: any[];
+  rbacUsersLoading?: boolean;
+  rbacToken?: string | null;
+  rbacUser?: any | null;
+  onCreateUser?: (username: string, password: string, roleId: number) => Promise<void>;
+  onDeleteUser?: (id: number) => Promise<void>;
 };
 
 // SVG Icons for sidebar (Lucide-style)
@@ -309,6 +316,7 @@ type SubsectionEntry = {
 const ALL_SUBSECTION = "__all__";
 
 function getSectionIcon(key: string) {
+  if (key === "rbac") return sidebarIcons.auth;
   return sidebarIcons[key as keyof typeof sidebarIcons] ?? sidebarIcons.default;
 }
 
@@ -420,6 +428,9 @@ export function renderConfig(props: ConfigProps) {
     .map((k) => ({ key: k, label: k.charAt(0).toUpperCase() + k.slice(1) }));
 
   const allSections = [...availableSections, ...extraSections];
+  if (props.rbacUser?.roleName === "admin") {
+    allSections.push({ key: "rbac", label: "用户与权限管理" });
+  }
 
   const activeSectionSchema =
     props.activeSection && analysis.schema && schemaType(analysis.schema) === "object"
@@ -696,8 +707,10 @@ export function renderConfig(props: ConfigProps) {
         <!-- Form content -->
         <div class="config-content ${props.formMode === "raw" ? "config-content--raw" : ""}">
           ${
-            props.formMode === "form"
-              ? html`
+            props.activeSection === "rbac"
+              ? renderRbacManagement(props)
+              : props.formMode === "form"
+                ? html`
                 ${
                   props.schemaLoading
                     ? html`
@@ -751,6 +764,133 @@ ${JSON.stringify(props.issues, null, 2)}</pre
             : nothing
         }
       </main>
+    </div>
+  `;
+}
+
+function renderRbacManagement(props: ConfigProps) {
+  const users = props.rbacUsersList ?? [];
+  const roles = props.rbacRolesList ?? [];
+  const loading = props.rbacUsersLoading ?? false;
+
+  const handleSubmit = (e: Event) => {
+    e.preventDefault();
+    const form = e.target as HTMLFormElement;
+    const usernameInput = form.querySelector("#rbac-username") as HTMLInputElement;
+    const passwordInput = form.querySelector("#rbac-password") as HTMLInputElement;
+    const roleSelect = form.querySelector("#rbac-role") as HTMLSelectElement;
+
+    const username = usernameInput.value.trim();
+    const password = passwordInput.value.trim();
+    const roleId = Number(roleSelect.value);
+
+    if (!username || !password || !roleId) {
+      alert("请填写完整表单项");
+      return;
+    }
+
+    if (props.onCreateUser) {
+      props.onCreateUser(username, password, roleId)
+        .then(() => {
+          usernameInput.value = "";
+          passwordInput.value = "";
+          roleSelect.selectedIndex = 0;
+        })
+        .catch((err) => {
+          alert("创建用户失败: " + err.message);
+        });
+    }
+  };
+
+  return html`
+    <div class="env-vars" style="display: flex; flex-direction: column; gap: 24px;">
+      <section class="env-vars__section card">
+        <h3 class="card-title" style="margin-bottom: 8px;">用户与权限管理</h3>
+        <p class="muted" style="font-size: 12px; margin-bottom: 16px;">
+          在此管理 OpenOcta 系统的登录用户及其对应的角色权限。默认管理员账号 admin 无法删除。
+        </p>
+
+        ${loading
+          ? html`<div style="text-align: center; padding: 20px; color: var(--color-text-muted);">正在加载用户列表...</div>`
+          : html`
+              <table class="env-vars__table">
+                <thead>
+                  <tr>
+                    <th>用户ID</th>
+                    <th>用户名</th>
+                    <th>角色</th>
+                    <th>创建时间</th>
+                    <th>操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${users.map(
+                    (u: any) => html`
+                      <tr>
+                        <td style="padding: 12px 8px;">${u.id}</td>
+                        <td style="font-weight: 500; color: var(--color-text-accent); padding: 12px 8px;">${u.username}</td>
+                        <td style="padding: 12px 8px;">
+                          <span class="pill pill--sm" style="background: rgba(255,255,255,0.05); color: #fff;">
+                            ${u.roleName}
+                          </span>
+                        </td>
+                        <td style="padding: 12px 8px;">${new Date(u.createdAt).toLocaleString()}</td>
+                        <td style="padding: 12px 8px;">
+                          ${u.username === "admin"
+                            ? html`<span class="muted" style="font-size: 12px;">不可修改</span>`
+                            : html`
+                                <button
+                                  class="btn small btn--ghost"
+                                  style="color: var(--color-danger); padding: 2px 6px;"
+                                  @click=${() => {
+                                    if (confirm(`确认删除用户 ${u.username} 吗？`)) {
+                                      props.onDeleteUser?.(u.id);
+                                    }
+                                  }}
+                                >
+                                  删除
+                                </button>
+                              `}
+                        </td>
+                      </tr>
+                    `
+                  )}
+                </tbody>
+              </table>
+            `}
+      </section>
+
+      <section class="env-vars__section card" style="max-width: 500px;">
+        <h3 class="card-title" style="margin-bottom: 12px;">新增系统用户</h3>
+        <form @submit=${handleSubmit} style="display: flex; flex-direction: column; gap: 16px;">
+          <label class="field">
+            <span style="font-size: 13px; font-weight: 500; margin-bottom: 6px;">用户名</span>
+            <span class="input">
+              <input type="text" id="rbac-username" required placeholder="请输入用户名" />
+            </span>
+          </label>
+
+          <label class="field">
+            <span style="font-size: 13px; font-weight: 500; margin-bottom: 6px;">密码</span>
+            <span class="input">
+              <input type="password" id="rbac-password" required placeholder="请输入密码" />
+            </span>
+          </label>
+
+          <label class="field">
+            <span style="font-size: 13px; font-weight: 500; margin-bottom: 6px;">角色</span>
+            <span class="input" style="background: var(--color-bg-content); border-radius: 4px; border: 1px solid var(--color-border);">
+              <select id="rbac-role" style="background: transparent; border: none; color: #fff; width: 100%; height: 36px; padding: 0 8px; outline: none; cursor: pointer;">
+                ${roles.map((r: any) => html`<option value=${r.id} style="background: var(--color-bg-sidebar); color: #fff;">${r.description || r.name}</option>`)}
+              </select>
+            </span>
+          </label>
+
+          <div style="margin-top: 8px;">
+            <button type="submit" class="btn btn--sm primary">确认添加</button>
+          </div>
+        </form>
+      </section>
     </div>
   `;
 }

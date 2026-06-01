@@ -106,10 +106,12 @@ func NewService(storePath string) (*Service, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Service{
+	svc := &Service{
 		storePath: storePath,
 		store:     store,
-	}, nil
+	}
+	_ = svc.ensureDefaultJobs()
+	return svc, nil
 }
 
 // List returns all jobs, optionally including disabled.
@@ -489,4 +491,114 @@ func (s *Service) Stop() {
 	if done != nil {
 		close(done)
 	}
+}
+
+// ensureDefaultJobs populates 5 default health inspection cron jobs for Hadoop, FI, GBase, Governance, and DataApps.
+func (s *Service) ensureDefaultJobs() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now().UnixMilli()
+
+	defaultJobs := []struct {
+		ID          string
+		Name        string
+		Description string
+		Message     string
+	}{
+		{
+			ID:          "job-inspect-hadoop",
+			Name:        "深度健康巡检 - Hadoop",
+			Description: "每天定时对开源 Hadoop 生态集群的 CPU、内存、HDFS 及 YARN 状态进行深度巡检",
+			Message: `你是一个大数据运维专家。请调用 query_vm_metrics 工具对 Hadoop 集群的健康度进行深度巡检。
+请运行以下 VictoriaMetrics PromQL 查询：
+- YARN 节点总数及活跃节点数：sum(yarn_resourcemanager_active_nodes)
+- HDFS 存储容量使用率：sum(hadoop_namenode_dfs_used_percentage)
+- NameNode JVM 堆内存使用情况：hadoop_namenode_jvm_heap_used_bytes / hadoop_namenode_jvm_heap_max_bytes
+- YARN 活跃 Container 数：sum(yarn_resourcemanager_allocated_containers)
+并运行针对 node_cpu_seconds_total 的平均 CPU 负载查询。
+请根据查询结果分析 Hadoop 集群运行状态，给出 0-100 的健康得分（格式如：健康得分：XX），编写结构化的中文巡检报告，包括指标详情、异常诊断和修复优化建议。`,
+		},
+		{
+			ID:          "job-inspect-fi",
+			Name:        "深度健康巡检 - FI 商业生态",
+			Description: "每天定时对 FusionInsight 商业大数据平台健康度及核心组件进行深度巡检",
+			Message: `你是一个 FusionInsight (FI) 商业大数据平台运维专家。请调用 query_vm_metrics 工具对 FusionInsight 集群健康度进行深度巡检。
+请运行以下 VictoriaMetrics PromQL 查询：
+- FI HBase RegionServer 活跃数：sum(fi_hbase_regionserver_active_count)
+- FI YARN 资源队列占比：sum(fi_yarn_queue_allocated_memory_bytes) by (queue)
+根据结果评估集群健康状况，给出 0-100 的健康得分（格式如：健康得分：XX），编写结构化的中文巡检报告，包括主备互信状态、指标详情和优化建议。`,
+		},
+		{
+			ID:          "job-inspect-gbase",
+			Name:        "深度健康巡检 - GBase 数据库",
+			Description: "每天定时对 GBase 数据库连接数、慢 SQL 及吞吐量指标进行深度巡检",
+			Message: `你是一个 GBase 数据库专家。请调用 query_vm_metrics 工具对 GBase 数据库进行巡检。
+请首先调用 query_gbase_slow_sql 获取慢 SQL 列表，再调用 query_vm_metrics 运行以下 VictoriaMetrics PromQL 查询：
+- GBase 活跃连接数：sum(gbase_active_connections)
+- 慢 SQL 数量：sum(gbase_slow_queries_total)
+- QPS (每秒查询数) 或 TPS (每秒事务数)：rate(gbase_queries_total[5m])
+评估数据库运行健康度，给出 0-100 的健康得分（格式如：健康得分：XX），编写结构化的中文巡检报告，包括慢 SQL 诊断、资源占用情况与调优建议。`,
+		},
+		{
+			ID:          "job-inspect-governance",
+			Name:        "深度健康巡检 - 开发治理平台",
+			Description: "每天定时对开发治理平台服务 API 成功率、元数据血缘及质量校验告警进行深度巡检",
+			Message: `你是一个数据开发治理平台运维专家。请首先调用 query_governance_lineage 工具查询元数据链路健康度和规则告警，再调用 query_vm_metrics 运行以下 VictoriaMetrics PromQL 查询：
+- 治理平台服务 API 成功率：rate(governance_api_requests_total{status='200'}[5m]) / rate(governance_api_requests_total[5m])
+- 数据质量规则校验告警数：sum(governance_quality_alerts_total)
+评估治理平台的稳定性和数据资产健康度，给出 0-100 的健康得分（格式如：健康得分：XX），编写结构化的中文巡检报告，包括元数据血缘、质量稽核及资产优化建议。`,
+		},
+		{
+			ID:          "job-inspect-dataapps",
+			Name:        "深度健康巡检 - 数据 App 运维",
+			Description: "每天定时对 30 多个数据 App 跑批 SLA、失败链路及数据管道时延进行深度巡检",
+			Message: `你是一个大数据应用运维专家，负责 30 多个数据 App（调度任务、报表链路等）的运维。请调用 query_vm_metrics 工具对数据 App 链路健康度进行深度巡检。
+请运行以下 VictoriaMetrics PromQL 查询：
+- 调度系统失败任务数：sum(dataapps_scheduler_failed_tasks)
+- 核心数据报表跑批时延/完成度：sum(dataapps_pipeline_delay_seconds)
+评估各数据应用的可用性及跑批 SLA，给出 0-100 的健康得分（格式如：健康得分：XX），编写结构化的中文巡检报告，包括跑批 SLA 达标情况、失败链路根因及运维改进建议。`,
+		},
+	}
+
+	changed := false
+	for _, dj := range defaultJobs {
+		found := false
+		for _, j := range s.store.Jobs {
+			if j.ID == dj.ID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			sched := CronSchedule{Kind: "cron", Expr: "0 8,20 * * *"}
+			next := ComputeNextRunAtMs(sched, now)
+			j := CronJob{
+				ID:            dj.ID,
+				AgentID:       "main",
+				Name:          dj.Name,
+				Description:   dj.Description,
+				Enabled:       true,
+				CreatedAtMs:   now,
+				UpdatedAtMs:   now,
+				Schedule:      sched,
+				SessionTarget: "isolated",
+				SessionKey:    "agent:main:cron:" + dj.ID,
+				WakeMode:      "next-heartbeat",
+				Payload: CronPayload{
+					Kind:    "agentTurn",
+					Message: dj.Message,
+				},
+				State: CronJobState{
+					NextRunAtMs: &next,
+				},
+			}
+			s.store.Jobs = append(s.store.Jobs, j)
+			changed = true
+		}
+	}
+
+	if changed {
+		return SaveStore(s.storePath, s.store)
+	}
+	return nil
 }

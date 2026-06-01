@@ -1,6 +1,7 @@
 import { html, nothing } from "lit";
 import type { AppViewState } from "./app-view-state.ts";
 import type { UsageState } from "./controllers/usage.ts";
+import { renderRbacLogin } from "./views/rbac-login.ts";
 import { parseAgentSessionKey } from "./routing/session-key.js";
 import { refreshChatAvatar } from "./app-chat.ts";
 import { syncUrlWithSessionKey } from "./app-settings.ts";
@@ -359,6 +360,7 @@ import { renderNativeDialogOverlay } from "./views/native-dialog-overlay.ts";
 import { renderLogs } from "./views/logs.ts";
 import { renderNodes } from "./views/nodes.ts";
 import { renderOverview } from "./views/overview.ts";
+import { renderTechOpsDomain } from "./views/tech-ops-domain.ts";
 import { renderSessions } from "./views/sessions.ts";
 import { renderSkillLibrary } from "./views/skill-library.ts";
 import { renderToolLibrary } from "./views/tool-library.ts";
@@ -484,6 +486,10 @@ function resolveAssistantAvatarUrl(state: AppViewState): string | undefined {
 }
 
 export function renderApp(state: AppViewState) {
+  if (state.rbacChecked && !state.rbacUser) {
+    return renderRbacLogin(state);
+  }
+
   const presenceCount = state.presenceEntries.length;
   const sessionsCount = state.sessionsResult?.count ?? null;
   const cronNext = state.cronStatus?.nextWakeAtMs ?? null;
@@ -495,6 +501,144 @@ export function renderApp(state: AppViewState) {
   const chatAvatarUrl = state.chatAvatarUrl ?? assistantAvatarUrl ?? null;
   const configValue =
     state.configForm ?? (state.configSnapshot?.config as Record<string, unknown> | null);
+
+  const modelOptions = (() => {
+    type ModelEntry = { id: string; name?: string };
+    const cfg = configValue as
+      | {
+          agents?: { defaults?: { models?: Record<string, { alias?: string }> } };
+          models?: { providers?: Record<string, { models?: ModelEntry[] }> };
+        }
+      | null;
+    const defaultRef = resolveDefaultModelRef(configValue);
+    const seen = new Set<string>();
+    const opts: Array<{ value: string; label: string }> = [];
+
+    const agentModels = cfg?.agents?.defaults?.models;
+    if (agentModels && typeof agentModels === "object") {
+      for (const [id, raw] of Object.entries(agentModels)) {
+        const value = id.trim();
+        if (!value || seen.has(value)) continue;
+        seen.add(value);
+        const alias =
+          raw && typeof raw === "object" && "alias" in raw && typeof raw.alias === "string"
+            ? raw.alias.trim()
+            : "";
+        const label = alias && alias !== value ? `${alias} (${value})` : value;
+        opts.push({ value, label });
+      }
+    }
+
+    const providers = cfg?.models?.providers;
+    if (providers && typeof providers === "object") {
+      for (const [providerKey, prov] of Object.entries(providers)) {
+        const models = prov && typeof prov === "object" ? (prov as { models?: ModelEntry[] }).models : undefined;
+        if (!Array.isArray(models)) continue;
+        for (const m of models) {
+          const modelId = m?.id?.trim();
+          if (!modelId) continue;
+          const value = `${providerKey}/${modelId}`;
+          if (seen.has(value)) continue;
+          seen.add(value);
+          const label = m.name && m.name !== modelId ? `${m.name} (${value})` : value;
+          opts.push({ value, label });
+        }
+      }
+    }
+
+    opts.unshift({
+      value: "",
+      label: defaultRef ? `默认 (${defaultRef})` : "默认",
+    });
+
+    return opts;
+  })();
+
+  const chatProps = {
+    sessionKey: state.sessionKey,
+    onSessionKeyChange: (next: string) => {
+      state.sessionKey = next;
+      state.chatMessage = "";
+      state.chatAttachments = [];
+      state.chatModelRef = null;
+      state.chatStream = null;
+      state.chatStreamStartedAt = null;
+      state.chatRunId = null;
+      state.chatQueue = [];
+      state.resetToolStream();
+      state.resetChatScroll();
+      state.applySettings({
+        ...state.settings,
+        sessionKey: next,
+        lastActiveSessionKey: next,
+      });
+      void state.loadAssistantIdentity();
+      void loadChatHistory(state);
+      void refreshChatAvatar(state);
+      syncUrlWithSessionKey(state, next, true);
+    },
+    thinkingLevel: state.chatThinkingLevel,
+    showThinking,
+    modelRef: state.chatModelRef,
+    defaultModelRef: resolveDefaultModelRef(configValue),
+    modelOptions,
+    onModelRefChange: (next: string | null) => (state.chatModelRef = next),
+    loading: state.chatLoading,
+    sending: state.chatSending,
+    compactionStatus: state.compactionStatus,
+    assistantAvatarUrl: chatAvatarUrl,
+    messages: state.chatMessages,
+    toolMessages: state.chatToolMessages,
+    stream: state.chatStream,
+    streamStartedAt: state.chatStreamStartedAt,
+    draft: state.chatMessage,
+    queue: state.chatQueue,
+    connected: state.connected,
+    canSend: state.connected && !state.chatSending && state.chatStream === null,
+    disabledReason: chatDisabledReason,
+    error: state.lastError,
+    sessions: state.sessionsResult,
+    focusMode: chatFocus,
+    onRefresh: () => {
+      state.resetToolStream();
+      return Promise.all([loadChatHistory(state), refreshChatAvatar(state)]);
+    },
+    onToggleFocusMode: () => {
+      if (state.onboarding) {
+        return;
+      }
+      state.applySettings({
+        ...state.settings,
+        chatFocusMode: !state.settings.chatFocusMode,
+      });
+    },
+    onChatScroll: (event: Event) => state.handleChatScroll(event),
+    onDraftChange: (next: string) => (state.chatMessage = next),
+    attachments: state.chatAttachments,
+    onAttachmentsChange: (next: ChatAttachment[]) => (state.chatAttachments = next),
+    onSend: () => state.handleSendChat(),
+    canAbort: Boolean(state.chatRunId),
+    onAbort: () => void state.handleAbortChat(),
+    onQueueRemove: (id: string) => state.removeQueuedMessage(id),
+    confirmQueueRemove: state.tab === "message",
+    onNewSession: () => state.handleSendChat("/new", { restoreDraft: true }),
+    showNewMessages: state.chatNewMessagesBelow,
+    onScrollToBottom: () => state.scrollToBottom(),
+    conversationOnly: state.chatConversationOnly,
+    onConversationOnlyChange: (next: boolean) => {
+      state.chatConversationOnly = next;
+    },
+    sidebarOpen: state.sidebarOpen,
+    sidebarContent: state.sidebarContent,
+    sidebarError: state.sidebarError,
+    splitRatio: state.splitRatio,
+    onOpenSidebar: (content: string) => state.handleOpenSidebar(content),
+    onCloseSidebar: () => state.handleCloseSidebar(),
+    onSplitRatioChange: (ratio: number) => state.handleSplitRatioChange(ratio),
+    assistantName: state.assistantName,
+    assistantAvatar: state.assistantAvatar,
+  };
+
   // 列表始终使用已保存的数据 (configSnapshot)，避免显示未保存的修改
   const modelProviders =
     (state.configSnapshot?.config as { models?: { providers?: Record<string, import("./views/models.ts").ModelProvider> } } | undefined)?.models?.providers ?? {};
@@ -519,7 +663,6 @@ export function renderApp(state: AppViewState) {
     state.tab === "debug" ||
     state.tab === "logs" ||
     state.tab === "models" ||
-    state.tab === "overview" ||
     state.tab === "channels" ||
     state.tab === "sessions" ||
     state.tab === "usage" ||
@@ -527,6 +670,12 @@ export function renderApp(state: AppViewState) {
     state.tab === "llmTrace" ||
     state.tab === "documentation" ||
     state.tab === "aboutUs";
+  const isOpsDomainPage =
+    state.tab === "hadoop" ||
+    state.tab === "fi" ||
+    state.tab === "gbase" ||
+    state.tab === "governance" ||
+    state.tab === "dataapps";
   const isCollapsibleNavPage = isMessagePage || isScheduledTasks || isConfigArea;
   const isSideNavCollapsed = isCollapsibleNavPage && state.settings.navCollapsed;
   const renderNavCollapseFooter = html`
@@ -623,17 +772,18 @@ export function renderApp(state: AppViewState) {
         </div>
         <nav class="top-tabs" aria-label="Primary navigation">
           ${[
-            { tab: "message", label: "消息" },
-            // 暂不开放 AgentSwarm 顶栏入口，后期再启用
-            // { tab: "agentSwarm", label: "AgentSwarm", beta: true },
-            { tab: "scheduledTasks", label: "定时任务" },
-            { tab: "employeeMarket", label: "员工市场" },
-            { tab: "skillLibrary", label: "技能库" },
-            { tab: "toolLibrary", label: "工具库" },
-            { tab: "modelLibrary", label: "模型" },
-            { tab: "tutorials", label: "教程" },
-            { tab: "config", label: "配置" },
-          ].map((item) => {
+            { tab: "overview", label: "运维大屏" },
+            { tab: "hadoop", label: "Hadoop生态" },
+            { tab: "fi", label: "FI商业生态" },
+            { tab: "gbase", label: "GBase数据库" },
+            { tab: "governance", label: "开发治理平台" },
+            { tab: "dataapps", label: "数据App运维" },
+            { tab: "config", label: "系统设置" },
+          ].filter((item) => {
+            if (!state.rbacUser) return false;
+            if (state.rbacUser.roleName === "admin") return true;
+            return state.rbacUser.permissions.includes(`menu:${item.tab}`);
+          }).map((item) => {
             const tab = (item as any).tab;
             const active =
               tab === "scheduledTasks"
@@ -669,7 +819,7 @@ export function renderApp(state: AppViewState) {
               <button
                 class="top-tab topbar__no-drag ${active ? "top-tab--active" : ""} ${tourHighlight}"
                 data-tour-tab=${tab ?? ""}
-                @click=${() => state.setTab((tab === "config" ? "overview" : tab)!)}
+                @click=${() => state.setTab(tab!)}
                 type="button"
               >
                 ${iconEl}
@@ -681,7 +831,22 @@ export function renderApp(state: AppViewState) {
             `;
           })}
         </nav>
-        <div class="topbar-status">
+        <div class="topbar-status" style="display: flex; align-items: center; gap: 8px;">
+          ${state.rbacUser ? html`
+            <div class="pill topbar__no-drag" style="display: flex; align-items: center; gap: 8px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); padding: 4px 10px; border-radius: 6px;">
+              <span style="font-size: 12px; color: var(--color-text-muted); font-weight: 500;">
+                ${state.rbacUser.username} (${state.rbacUser.roleName})
+              </span>
+              <button
+                type="button"
+                class="topbar-link"
+                style="padding: 2px 6px; font-size: 11px; background: rgba(239, 68, 68, 0.15); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.2); border-radius: 4px; cursor: pointer; transition: all 0.2s;"
+                @click=${() => (state as any).handleRbacLogout()}
+              >
+                退出
+              </button>
+            </div>
+          ` : nothing}
           <div class="pill pill--link topbar__no-drag">
             <button
               type="button"
@@ -2862,144 +3027,142 @@ export function renderApp(state: AppViewState) {
 
         ${
           isChat
-            ? renderChat({
-                sessionKey: state.sessionKey,
-                onSessionKeyChange: (next) => {
-                  state.sessionKey = next;
-                  state.chatMessage = "";
-                  state.chatAttachments = [];
-                  state.chatModelRef = null;
-                  state.chatStream = null;
-                  state.chatStreamStartedAt = null;
-                  state.chatRunId = null;
-                  state.chatQueue = [];
-                  state.resetToolStream();
-                  state.resetChatScroll();
-                  state.applySettings({
-                    ...state.settings,
-                    sessionKey: next,
-                    lastActiveSessionKey: next,
-                  });
-                  void state.loadAssistantIdentity();
-                  void loadChatHistory(state);
-                  void refreshChatAvatar(state);
-                  syncUrlWithSessionKey(state, next, true);
-                },
-                thinkingLevel: state.chatThinkingLevel,
-                showThinking,
-                modelRef: state.chatModelRef,
-                defaultModelRef: resolveDefaultModelRef(configValue),
-                modelOptions: (() => {
-                  type ModelEntry = { id: string; name?: string };
-                  const cfg = configValue as
-                    | {
-                        agents?: { defaults?: { models?: Record<string, { alias?: string }> } };
-                        models?: { providers?: Record<string, { models?: ModelEntry[] }> };
-                      }
-                    | null;
-                  const defaultRef = resolveDefaultModelRef(configValue);
-                  const seen = new Set<string>();
-                  const opts: Array<{ value: string; label: string }> = [];
+            ? renderChat(chatProps)
+            : nothing
+        }
 
-                  // 1. agents.defaults.models（优先）
-                  const agentModels = cfg?.agents?.defaults?.models;
-                  if (agentModels && typeof agentModels === "object") {
-                    for (const [id, raw] of Object.entries(agentModels)) {
-                      const value = id.trim();
-                      if (!value || seen.has(value)) continue;
-                      seen.add(value);
-                      const alias =
-                        raw && typeof raw === "object" && "alias" in raw && typeof raw.alias === "string"
-                          ? raw.alias.trim()
-                          : "";
-                      const label = alias && alias !== value ? `${alias} (${value})` : value;
-                      opts.push({ value, label });
-                    }
+        ${
+          isOpsDomainPage
+            ? (() => {
+                const jobId = `job-inspect-${state.tab}`;
+                const activeSubTab = state.opsActiveSubTabs[state.tab] || "agent";
+                if (
+                  activeSubTab === "inspections" &&
+                  state.cronRunsJobId !== jobId &&
+                  !(state as any)._loadingCronRunsForJobId
+                ) {
+                  (state as any)._loadingCronRunsForJobId = jobId;
+                  loadCronRuns(state as any, jobId).finally(() => {
+                    (state as any)._loadingCronRunsForJobId = null;
+                  });
+                }
+
+                const domainRuns = state.cronRunsJobId === jobId ? state.cronRuns : [];
+                const inspections = domainRuns.map((entry, idx) => {
+                  let timeStr = "";
+                  if (entry.runAtMs) {
+                    const d = new Date(entry.runAtMs);
+                    timeStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}:${String(d.getSeconds()).padStart(2, "0")}`;
+                  } else {
+                    const d = new Date(entry.ts);
+                    timeStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}:${String(d.getSeconds()).padStart(2, "0")}`;
                   }
 
-                  // 2. models.providers 中的模型（补充）
-                  const providers = cfg?.models?.providers;
-                  if (providers && typeof providers === "object") {
-                    for (const [providerKey, prov] of Object.entries(providers)) {
-                      const models = prov && typeof prov === "object" ? (prov as { models?: ModelEntry[] }).models : undefined;
-                      if (!Array.isArray(models)) continue;
-                      for (const m of models) {
-                        const modelId = m?.id?.trim();
-                        if (!modelId) continue;
-                        const value = `${providerKey}/${modelId}`;
-                        if (seen.has(value)) continue;
-                        seen.add(value);
-                        const label = m.name && m.name !== modelId ? `${m.name} (${value})` : value;
-                        opts.push({ value, label });
-                      }
-                    }
+                  let score = 90;
+                  const summary = entry.summary || "";
+                  const scoreMatch = summary.match(/(?:健康得分|健康度|Score)\s*[：:]\s*(\d+)/i);
+                  if (scoreMatch && scoreMatch[1]) {
+                    score = parseInt(scoreMatch[1], 10);
                   }
 
-                  // 3. 首项固定为「使用默认配置」：modelRef 为 null 时选中此项
-                  opts.unshift({
-                    value: "",
-                    label: defaultRef ? `默认 (${defaultRef})` : "默认",
-                  });
-
-                  return opts;
-                })(),
-                onModelRefChange: (next) => (state.chatModelRef = next),
-                loading: state.chatLoading,
-                sending: state.chatSending,
-                compactionStatus: state.compactionStatus,
-                assistantAvatarUrl: chatAvatarUrl,
-                messages: state.chatMessages,
-                toolMessages: state.chatToolMessages,
-                stream: state.chatStream,
-                streamStartedAt: state.chatStreamStartedAt,
-                draft: state.chatMessage,
-                queue: state.chatQueue,
-                connected: state.connected,
-                canSend: state.connected,
-                disabledReason: chatDisabledReason,
-                error: state.lastError,
-                sessions: state.sessionsResult,
-                focusMode: chatFocus,
-                onRefresh: () => {
-                  state.resetToolStream();
-                  return Promise.all([loadChatHistory(state), refreshChatAvatar(state)]);
-                },
-                onToggleFocusMode: () => {
-                  if (state.onboarding) {
-                    return;
+                  let status: "healthy" | "warning" | "critical" = "healthy";
+                  if (score < 75) {
+                    status = "critical";
+                  } else if (score < 90) {
+                    status = "warning";
                   }
-                  state.applySettings({
-                    ...state.settings,
-                    chatFocusMode: !state.settings.chatFocusMode,
-                  });
-                },
-                onChatScroll: (event) => state.handleChatScroll(event),
-                onDraftChange: (next) => (state.chatMessage = next),
-                attachments: state.chatAttachments,
-                onAttachmentsChange: (next) => (state.chatAttachments = next),
-                onSend: () => state.handleSendChat(),
-                canAbort: Boolean(state.chatRunId),
-                onAbort: () => void state.handleAbortChat(),
-                onQueueRemove: (id) => state.removeQueuedMessage(id),
-                confirmQueueRemove: state.tab === "message",
-                onNewSession: () => state.handleSendChat("/new", { restoreDraft: true }),
-                showNewMessages: state.chatNewMessagesBelow,
-                onScrollToBottom: () => state.scrollToBottom(),
-                conversationOnly: state.chatConversationOnly,
-                onConversationOnlyChange: (next) => {
-                  state.chatConversationOnly = next;
-                },
-                // Sidebar props for tool output viewing
-                sidebarOpen: state.sidebarOpen,
-                sidebarContent: state.sidebarContent,
-                sidebarError: state.sidebarError,
-                splitRatio: state.splitRatio,
-                onOpenSidebar: (content: string) => state.handleOpenSidebar(content),
-                onCloseSidebar: () => state.handleCloseSidebar(),
-                onSplitRatioChange: (ratio: number) => state.handleSplitRatioChange(ratio),
-                assistantName: state.assistantName,
-                assistantAvatar: state.assistantAvatar,
-              })
+
+                  let cleanSummary = summary
+                    .replace(/[#*`\-]/g, "")
+                    .replace(/\s+/g, " ")
+                    .trim();
+                  if (cleanSummary.length > 150) {
+                    cleanSummary = cleanSummary.slice(0, 150) + "...";
+                  }
+                  if (!cleanSummary) {
+                    cleanSummary = entry.status === "ok" ? "巡检成功完成，系统各项指标正常。" : `巡检执行失败: ${entry.error || "未知错误"}`;
+                  }
+
+                  return {
+                    id: entry.sessionId || `ins-${state.tab}-${idx}`,
+                    time: timeStr,
+                    score: score,
+                    status: status,
+                    reportSummary: cleanSummary,
+                    reportMarkdown: summary || (entry.error ? `### 巡检失败\n- **原因**：${entry.error}` : "暂无报告内容"),
+                  };
+                });
+
+                const selectedInspectionId = state.opsSelectedInspectionIds[state.tab] || (inspections[0]?.id ?? null);
+
+                return renderTechOpsDomain({
+                  domainKey: state.tab as any,
+                  domainName: titleForTab(state.tab),
+                  activeSubTab,
+                  onSubTabChange: (nextTab) => {
+                    state.opsActiveSubTabs = {
+                      ...state.opsActiveSubTabs,
+                      [state.tab]: nextTab,
+                    };
+                  },
+                  chatProps,
+                  alertsLoading: false,
+                  alertGroups: getMockAlertGroups(state.tab),
+                  selectedAlertGroupId: state.opsSelectedAlertGroupIds[state.tab] || null,
+                  onSelectAlertGroup: (id) => {
+                    state.opsSelectedAlertGroupIds = {
+                      ...state.opsSelectedAlertGroupIds,
+                      [state.tab]: id,
+                    };
+                  },
+                  inspectionsLoading: state.cronLoading,
+                  inspections,
+                  selectedInspectionId,
+                  onSelectInspection: (id) => {
+                    state.opsSelectedInspectionIds = {
+                      ...state.opsSelectedInspectionIds,
+                      [state.tab]: id,
+                    };
+                  },
+                  onRunInspection: () => {
+                    state.opsIsInspecting = {
+                      ...state.opsIsInspecting,
+                      [state.tab]: true,
+                    };
+                    state.client?.request("cron.run", { id: jobId, mode: "force" })
+                      .then(() => {
+                        let pollCount = 0;
+                        const interval = setInterval(() => {
+                          pollCount++;
+                          loadCronRuns(state as any, jobId).then(() => {
+                            const latestRun = state.cronRuns[0];
+                            if ((latestRun && latestRun.status === "ok") || pollCount >= 15) {
+                              clearInterval(interval);
+                              state.opsIsInspecting = {
+                                ...state.opsIsInspecting,
+                                [state.tab]: false,
+                              };
+                              if (state.cronRuns[0]?.sessionId) {
+                                state.opsSelectedInspectionIds = {
+                                  ...state.opsSelectedInspectionIds,
+                                  [state.tab]: state.cronRuns[0].sessionId,
+                                };
+                              }
+                            }
+                          });
+                        }, 2000);
+                      })
+                      .catch((err) => {
+                        console.error("Failed to run inspection:", err);
+                        state.opsIsInspecting = {
+                          ...state.opsIsInspecting,
+                          [state.tab]: false,
+                        };
+                      });
+                  },
+                  isInspecting: state.opsIsInspecting[state.tab] || false,
+                });
+              })()
             : nothing
         }
 
@@ -3640,6 +3803,13 @@ export function renderApp(state: AppViewState) {
                 searchQuery: state.configSearchQuery,
                 activeSection: state.configActiveSection,
                 activeSubsection: state.configActiveSubsection,
+                rbacUsersList: (state as any).rbacUsersList,
+                rbacRolesList: (state as any).rbacRolesList,
+                rbacUsersLoading: (state as any).rbacUsersLoading,
+                rbacToken: (state as any).rbacToken,
+                rbacUser: (state as any).rbacUser,
+                onCreateUser: (username, password, roleId) => (state as any).handleCreateUser(username, password, roleId),
+                onDeleteUser: (id) => (state as any).handleDeleteUser(id),
                 onRawChange: (next) => {
                   state.configRaw = next;
                 },
@@ -3649,6 +3819,9 @@ export function renderApp(state: AppViewState) {
                 onSectionChange: (section) => {
                   state.configActiveSection = section;
                   state.configActiveSubsection = null;
+                  if (section === "rbac") {
+                    void (state as any).loadRbacData();
+                  }
                 },
                 onSubsectionChange: (section) => (state.configActiveSubsection = section),
                 onReload: () => loadConfig(state),
@@ -4037,4 +4210,224 @@ export function renderApp(state: AppViewState) {
     })}
     ${renderSessionOverflowFlyout(state, basePath)}
   `;
+}
+
+function getMockAlertGroups(tab: string) {
+  if (tab === "hadoop") {
+    return [
+      {
+        id: "alert-group-yarn-oom",
+        title: "YARN ResourceManager 物理内存超限 (OOM) 告警组",
+        severity: "critical" as const,
+        timestamp: "2026-06-01 14:10:05",
+        originalCount: 15,
+        reducedTo: 1,
+        rootCause: "节点 10.200.4.12 上提交的 Spark 任务（ID: app_20260601_002）发生严重的内存倾斜与笛卡尔积关联，触发物理内存超限杀死 Container 事件。",
+        impact: "阻碍了 YARN 核心调度队列，导致同一时间段排队的 12 个生产 App 调度延迟长达 8 分钟。",
+        status: "active" as const
+      },
+      {
+        id: "alert-group-hdfs-replica",
+        title: "HDFS 数据块副本数不足警告",
+        severity: "warning" as const,
+        timestamp: "2026-06-01 12:45:00",
+        originalCount: 32,
+        reducedTo: 1,
+        rootCause: "DataNode（10.200.4.15）网络卡口闪断，导致与 NameNode 失去心跳，触发数据块复制保护机制。",
+        impact: "无数据丢失风险。集群内部分副本数由 3 降为 2，现正自动通过其他活动 DataNode 进行异步复制拉起。",
+        status: "resolved" as const
+      }
+    ];
+  }
+  if (tab === "fi") {
+    return [
+      {
+        id: "alert-group-fi-manager",
+        title: "FusionInsight Manager 互信失效及组件同步告警",
+        severity: "critical" as const,
+        timestamp: "2026-06-01 13:50:22",
+        originalCount: 8,
+        reducedTo: 1,
+        rootCause: "节点间 SSSD 服务异常终止，导致 LDAP 与 Linux 互信认证链断开，引发各主机健康度告警风暴。",
+        impact: "FusionInsight 租户服务提交任务被拒，影响大金融报表 App 的准时跑批，直接导致部分接口超时。",
+        status: "active" as const
+      }
+    ];
+  }
+  if (tab === "gbase") {
+    return [
+      {
+        id: "alert-group-gbase-lock",
+        title: "GBase 数据库活跃死锁与锁等待超时告警",
+        severity: "critical" as const,
+        timestamp: "2026-06-01 14:15:30",
+        originalCount: 22,
+        reducedTo: 1,
+        rootCause: "由于开发平台更新了主表主键，导致数仓跑批 SQL 触发了全表扫描与行级行排他锁冲突，与日常 BI 查询产生死锁环路。",
+        impact: "造成大批量数据库连接池占满，连接数飙升至 500+，BI 报表页面刷新出现超时错误。",
+        status: "active" as const
+      }
+    ];
+  }
+  if (tab === "governance") {
+    return [
+      {
+        id: "alert-group-gov-quality",
+        title: "开发治理平台数据质量规则校验拦截",
+        severity: "warning" as const,
+        timestamp: "2026-06-01 11:20:00",
+        originalCount: 5,
+        reducedTo: 1,
+        rootCause: "ods_user_behavior 数据表的手机号字段空值率从倾向的 0.1% 暴增至 85.6%，触发质量校验熔断。",
+        impact: "已自动拦截下游跑批任务，防止脏数据污染数据仓库核心层。",
+        status: "resolved" as const
+      }
+    ];
+  }
+  return [
+    {
+      id: "alert-group-dataapps-delay",
+      title: "核心大屏数据 App 接口响应超时告警",
+      severity: "critical" as const,
+      timestamp: "2026-06-01 14:02:15",
+      originalCount: 14,
+      reducedTo: 1,
+      rootCause: "底层数据库查询遭遇死锁与长事务，导致接口超时时间（5s）内未能正确回传 JSON。",
+      impact: "决策层驾驶舱大屏数据出现短暂空白或加载转圈，部分指标数值停留在 1 小时前。",
+      status: "active" as const
+    }
+  ];
+}
+
+function getMockInspections(tab: string) {
+  if (tab === "hadoop") {
+    return [
+      {
+        id: "ins-hadoop-1",
+        time: "2026-06-01 10:00:00",
+        score: 95,
+        status: "healthy" as const,
+        reportSummary: "开源 Hadoop 生态集群当前健康度得分 95分。1000个节点均处于活动状态，HDFS 存储使用率 68.2%。各调度队列资源分配合理。",
+        reportMarkdown: `### OpenOcta 深度巡检报告 - Hadoop生态
+- **巡检时间**：2026-06-01 10:00
+- **健康得分**：95 / 100
+- **活动节点数**：1000 / 1000
+
+#### 指标详情
+1. **NameNode JVM 堆内存**：48 GB / 128 GB (正常)
+2. **YARN 活跃 Container**：45,210 / 60,000 (正常)
+3. **倾斜数据块比例**：0.05% (正常)
+
+#### 建议
+目前系统运行状态非常平稳，无须人工干预。建议继续监控凌晨跑批期的存储 I/O 深度。`
+      },
+      {
+        id: "ins-hadoop-2",
+        time: "2026-05-31 22:00:00",
+        score: 82,
+        status: "warning" as const,
+        reportSummary: "健康度 82分。YARN 队列发生局部阻塞，部分物理节点 I/O 深度持续偏高。伴有 42 个坏块警告。",
+        reportMarkdown: `### OpenOcta 深度巡检报告 - Hadoop生态
+- **巡检时间**：2026-05-31 22:00
+- **健康得分**：82 / 100
+
+#### 异常诊断
+- **YARN 队列阻塞**：default 队列使用率达到 102%，有 4 个大任务处于 ACCEPTED 状态排队。
+- **坏块警告**：发现 42 个处于 under-replicated 状态的数据块。
+
+#### AI 修复与优化建议
+1. 建议对 default 队列执行资源限额调整，防止个别离线查询占满全部 Container。
+2. 触发 NameNode 执行块重新备份修复命令：
+   hdfs dfsadmin -metasave
+3. 检查物理节点 node1024.ops.co 的磁盘健康状况，其 I/O 队列等待时间较长。`
+      }
+    ];
+  }
+  if (tab === "fi") {
+    return [
+      {
+        id: "ins-fi-1",
+        time: "2026-06-01 09:30:00",
+        score: 91,
+        status: "healthy" as const,
+        reportSummary: "FusionInsight 商业集群巡检健康得分 91分。Manager 管理服务及主备互信校验通过，组件均绿灯运行。",
+        reportMarkdown: `### 深度巡检报告 - FusionInsight 商业生态
+- **巡检时间**：2026-06-01 09:30
+- **健康得分**：91 / 100
+
+#### 组件状态汇总
+- **HBase (FI)**：RegionServer 负载均衡度良好。
+- **Hive (FI)**：Metastore 响应耗时 24ms。
+
+#### AI 优化建议
+HBase 写入热点目前属于常态，但建议对特定热点表 t_finance_detail 重新划分布防 Split，以实现更均匀的 Region 负载分布。`
+      }
+    ];
+  }
+  if (tab === "gbase") {
+    return [
+      {
+        id: "ins-gbase-1",
+        time: "2026-06-01 10:15:00",
+        score: 74,
+        status: "critical" as const,
+        reportSummary: "GBase 数据库健康得分 74分。发现锁冲突严重的慢 SQL（执行时间超过 10s），临时空间使用率达到 88%。",
+        reportMarkdown: `### 深度巡检报告 - GBase 数据库
+- **巡检时间**：2026-06-01 10:15
+- **健康得分**：74 / 100
+
+#### 异常详情
+1. **长慢 SQL**：发现 12 个长达 15s 以上的 SQL 正在全表扫描 t_user_order 表。
+2. **死锁等待**：锁超时数在最近 10 分钟内发生 42 次。
+3. **表空间压力**：GBase 临时分区分区使用率 88%，即将写满。
+
+#### AI 处理建议
+1. 立即强制中断死锁源头 Session 进程，释放行级排他锁。
+2. 建议为 t_user_order 的查询过滤字段 create_time 与 status 补充联合索引，消除全表扫描。
+3. 扩展 GBase 临时分区或执行临时文件自动清理。`
+      }
+    ];
+  }
+  if (tab === "governance") {
+    return [
+      {
+        id: "ins-gov-1",
+        time: "2026-06-01 09:00:00",
+        score: 96,
+        status: "healthy" as const,
+        reportSummary: "治理平台健康得分 96分。数据元数据解析正常率 100%，血缘依赖层级无死循环闭环，数据质量监控完整度良好。",
+        reportMarkdown: `### 深度巡检报告 - 开发治理平台
+- **巡检时间**：2026-06-01 09:00
+- **健康得分**：96 / 100
+
+#### 指标扫描
+- **血缘正常率**：100% 解析通过。
+- **未映射字段比例**：0.8% (正常)
+- **调度延迟指标**：平均等待时延 450ms (优)。
+
+#### 优化建议
+继续保持当前的元数据拉取策略，无须特殊调整。`
+      }
+    ];
+  }
+  return [
+    {
+      id: "ins-apps-1",
+      time: "2026-06-01 10:30:00",
+      score: 88,
+      status: "warning" as const,
+      reportSummary: "数据 App 运维健康度 88分。30多个 App 中有 2 个 App (财务分析、BI大屏) 响应耗时超标，部分调度上游依赖略有延时。",
+      reportMarkdown: `### 深度巡检报告 - 30+ 数据 App 运维
+- **巡检时间**：2026-06-01 10:30
+- **健康得分**：88 / 100
+
+#### 延时应用
+- **财务分析 App**：API 接口耗时从 450ms 增加到 3200ms。
+- **BI大屏展现 App**：上游跑批任务推迟了 15 分钟，导致界面数据展示出现暂时延迟。
+
+#### AI 处置建议
+1. 财务分析 App 数据加载缓慢系底层 SQL 未走缓存所致，建议更新 API 服务端的 Redis 缓存时间为 5 分钟。
+2. 数据调度侧大屏依赖的跑批任务发生了队列拥堵，建议提高此跑批任务的 YARN 资源调度级别 (Priority=9)。`
+    }
+  ];
 }

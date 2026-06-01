@@ -43,7 +43,13 @@ export type Tab =
   | "debug"
   | "logs"
   | "llmTrace"
-  | "sandbox";
+  | "sandbox"
+  // New operational technology domains
+  | "hadoop"
+  | "fi"
+  | "gbase"
+  | "governance"
+  | "dataapps";
 
 const TAB_PATHS: Record<Tab, string> = {
   message: "/message",
@@ -77,6 +83,12 @@ const TAB_PATHS: Record<Tab, string> = {
   logs: "/logs",
   llmTrace: "/llm-trace",
   sandbox: "/sandbox",
+  // New operational technology domains paths
+  hadoop: "/hadoop",
+  fi: "/fi",
+  gbase: "/gbase",
+  governance: "/governance",
+  dataapps: "/dataapps",
 };
 
 const PATH_TO_TAB = new Map(Object.entries(TAB_PATHS).map(([tab, path]) => [path, tab as Tab]));
@@ -225,8 +237,6 @@ export function iconForTab(tab: Tab, active = false): IconName {
       return "loader";
     case "skills":
       return "zap";
-    case "mcp":
-      return "folder";
     case "llmTrace":
       return "traceBars";
     case "sandbox":
@@ -243,6 +253,16 @@ export function iconForTab(tab: Tab, active = false): IconName {
       return "bug";
     case "logs":
       return "scrollText";
+    case "hadoop":
+      return "overviewGrid";
+    case "fi":
+      return "brain";
+    case "gbase":
+      return "monitor";
+    case "governance":
+      return "scrollText";
+    case "dataapps":
+      return "folder";
     default:
       return "folder";
   }
@@ -294,24 +314,20 @@ export function titleForTab(tab: Tab) {
       return t("navTitleLlmTrace");
     case "sandbox":
       return t("navTitleSandbox");
-    case "nodes":
-      return t("navTitleNodes");
-    case "chat":
-      return t("navTitleChat");
-    case "digitalEmployee":
-      return t("navTitleDigitalEmployee");
-    case "agentSwarm":
-      return t("navTitleAgentSwarm");
-    case "config":
-      return t("navTitleConfig");
-    case "envVars":
-      return t("navTitleEnvVars");
-    case "models":
-      return t("navTitleModels");
     case "debug":
       return t("navTitleDebug");
     case "logs":
       return t("navTitleLogs");
+    case "hadoop":
+      return "Hadoop生态";
+    case "fi":
+      return "FI商业生态";
+    case "gbase":
+      return "GBase数据库";
+    case "governance":
+      return "开发治理平台";
+    case "dataapps":
+      return "数据App运维";
     default:
       return t("navTitleControl");
   }
@@ -454,6 +470,16 @@ export function subtitleForTab(tab: Tab) {
       return t("subtitleDebug");
     case "logs":
       return t("subtitleLogs");
+    case "hadoop":
+      return "开源 Hadoop 生态智能运维";
+    case "fi":
+      return "FusionInsight 商业闭源生态智能运维";
+    case "gbase":
+      return "GBase 数据库智能运维";
+    case "governance":
+      return "开发治理平台与元数据运维";
+    case "dataapps":
+      return "30+数据应用与链路健康运维";
     default:
       return "";
   }

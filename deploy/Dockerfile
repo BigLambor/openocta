@@ -16,7 +16,7 @@ RUN cd ui && (command -v pnpm >/dev/null && pnpm build) || npm run build
 # ------------------------------------------------------------------------------
 # Stage 2: 构建 Go 二进制（后端，含嵌入前端与配置）
 # ------------------------------------------------------------------------------
-FROM golang:1.24-alpine AS go-builder
+FROM golang:1.25-alpine AS go-builder
 WORKDIR /app
 
 RUN apk add --no-cache git ca-certificates

@@ -27,6 +27,7 @@ import (
 	"github.com/openocta/openocta/pkg/logging"
 	"github.com/openocta/openocta/pkg/outbound"
 	"github.com/openocta/openocta/pkg/paths"
+	"github.com/openocta/openocta/pkg/rbac"
 	"github.com/stellarlinkco/agentsdk-go/pkg/middleware"
 	"io"
 	"io/fs"
@@ -100,6 +101,12 @@ func NewServer(addr string, version string) *Server {
 	mux := http.NewServeMux()
 	env := func(k string) string { return os.Getenv(k) }
 	stateDir := paths.ResolveStateDir(env)
+
+	// Initialize RBAC database
+	if err := rbac.InitDB(stateDir); err != nil {
+		slog.Error("Failed to initialize RBAC database", "error", err)
+	}
+
 	skipCron := isTruthyEnv(env, "OPENOCTA_SKIP_CRON")
 	skipChannels := isTruthyEnv(env, "OPENOCTA_SKIP_CHANNELS") || isTruthyEnv(env, "OPENOCTA_SKIP_PROVIDERS")
 
@@ -408,42 +415,51 @@ func (s *Server) registerRoutes() {
 	s.mux.Handle("GET /", http.HandlerFunc(s.handleDist))
 	s.mux.HandleFunc("GET /.well-known/agent.json", s.handleWellKnownAgentJSON)
 	s.mux.HandleFunc("HEAD /.well-known/agent.json", s.handleWellKnownAgentJSON)
-	s.mux.HandleFunc("GET /health", s.requireGatewayToken(s.handleHealth))
-	s.mux.HandleFunc("GET /api/health", s.requireGatewayToken(s.handleHealth))
-	s.mux.HandleFunc("POST /api/skills/upload", s.requireGatewayToken(s.handleSkillsUpload))
-	s.mux.HandleFunc("POST /api/employee-skills/upload", s.requireGatewayToken(s.handleEmployeeSkillsUpload))
+	// Auth & RBAC API Routes
+	s.mux.HandleFunc("POST /api/auth/login", s.handleLogin)
+	s.mux.HandleFunc("POST /api/auth/logout", s.handleLogout)
+	s.mux.HandleFunc("GET /api/auth/me", s.requirePermission("", s.handleGetMe))
+	s.mux.HandleFunc("GET /api/rbac/users", s.requirePermission("menu:config", s.handleListUsers))
+	s.mux.HandleFunc("POST /api/rbac/users", s.requirePermission("menu:config", s.handleCreateUser))
+	s.mux.HandleFunc("DELETE /api/rbac/users/{id}", s.requirePermission("menu:config", s.handleDeleteUser))
+	s.mux.HandleFunc("GET /api/rbac/roles", s.requirePermission("menu:config", s.handleListRoles))
+
+	s.mux.HandleFunc("GET /health", s.requireRbacOrGatewayToken("", s.handleHealth))
+	s.mux.HandleFunc("GET /api/health", s.requireRbacOrGatewayToken("", s.handleHealth))
+	s.mux.HandleFunc("POST /api/skills/upload", s.requireRbacOrGatewayToken("menu:config", s.handleSkillsUpload))
+	s.mux.HandleFunc("POST /api/employee-skills/upload", s.requireRbacOrGatewayToken("menu:config", s.handleEmployeeSkillsUpload))
 	s.mux.HandleFunc("OPTIONS /api/employee-skills/upload", s.handleEmployeeSkillsUpload)
-	s.mux.HandleFunc("DELETE /api/employee-skills/delete", s.requireGatewayToken(s.handleEmployeeSkillsDelete))
+	s.mux.HandleFunc("DELETE /api/employee-skills/delete", s.requireRbacOrGatewayToken("menu:config", s.handleEmployeeSkillsDelete))
 	s.mux.HandleFunc("OPTIONS /api/employee-skills/delete", s.handleEmployeeSkillsDelete)
-	s.mux.HandleFunc("GET /api/config", s.requireGatewayToken(s.handleConfigGet))
-	s.mux.HandleFunc("GET /api/config/env", s.requireGatewayToken(s.handleConfigEnv))
-	s.mux.HandleFunc("POST /api/config/patch", s.requireGatewayToken(s.handleConfigPatch))
-	s.mux.HandleFunc("PATCH /api/config/patch", s.requireGatewayToken(s.handleConfigPatch))
-	s.mux.HandleFunc("POST /api/desktop/uninstall", s.requireGatewayToken(s.handleDesktopUninstall))
+	s.mux.HandleFunc("GET /api/config", s.requireRbacOrGatewayToken("menu:config", s.handleConfigGet))
+	s.mux.HandleFunc("GET /api/config/env", s.requireRbacOrGatewayToken("menu:config", s.handleConfigEnv))
+	s.mux.HandleFunc("POST /api/config/patch", s.requireRbacOrGatewayToken("menu:config", s.handleConfigPatch))
+	s.mux.HandleFunc("PATCH /api/config/patch", s.requireRbacOrGatewayToken("menu:config", s.handleConfigPatch))
+	s.mux.HandleFunc("POST /api/desktop/uninstall", s.requireRbacOrGatewayToken("menu:config", s.handleDesktopUninstall))
 	s.mux.HandleFunc("OPTIONS /api/desktop/uninstall", s.handleDesktopUninstallOptions)
-	s.mux.HandleFunc("POST /api/desktop/clear-workspace", s.requireGatewayToken(s.handleDesktopClearWorkspace))
+	s.mux.HandleFunc("POST /api/desktop/clear-workspace", s.requireRbacOrGatewayToken("menu:config", s.handleDesktopClearWorkspace))
 	s.mux.HandleFunc("OPTIONS /api/desktop/clear-workspace", s.handleDesktopClearWorkspaceOptions)
-	s.mux.HandleFunc("POST /api/desktop/open-url", s.requireGatewayToken(s.handleDesktopOpenURL))
+	s.mux.HandleFunc("POST /api/desktop/open-url", s.requireRbacOrGatewayToken("menu:config", s.handleDesktopOpenURL))
 	s.mux.HandleFunc("OPTIONS /api/desktop/open-url", s.handleDesktopOpenURLOptions)
 
 	// Site API proxies (employee market / skills / mcps / tutorials).
 	// Frontend calls Gateway same-origin; Gateway forwards to OPENOCTA_SITE_API_BASE_URL.
 	// CORS: allow dev UI (e.g. localhost:5173) to call gateway (e.g. 127.0.0.1:18900).
 	s.mux.HandleFunc("OPTIONS /api/v1/", s.handleSiteOptions)
-	s.mux.HandleFunc("GET /api/v1/employees", s.requireGatewayToken(s.handleSiteEmployees))
-	s.mux.HandleFunc("GET /api/v1/employees/{id}", s.requireGatewayToken(s.handleSiteEmployeeDetail))
-	s.mux.HandleFunc("GET /api/v1/employees/{id}/download", s.requireGatewayToken(s.handleSiteEmployeeDownload))
-	s.mux.HandleFunc("GET /api/v1/mcps", s.requireGatewayToken(s.handleSiteMcps))
-	s.mux.HandleFunc("GET /api/v1/mcps/{id}", s.requireGatewayToken(s.handleSiteMcpDetail))
-	s.mux.HandleFunc("GET /api/v1/mcps/{id}/download", s.requireGatewayToken(s.handleSiteMcpDownload))
-	s.mux.HandleFunc("GET /api/v1/skills", s.requireGatewayToken(s.handleSiteSkills))
-	s.mux.HandleFunc("GET /api/v1/skills/{folder}", s.requireGatewayToken(s.handleSiteSkillDetail))
-	s.mux.HandleFunc("GET /api/v1/skills/{folder}/download", s.requireGatewayToken(s.handleSiteSkillDownload))
-	s.mux.HandleFunc("GET /api/v1/categories", s.requireGatewayToken(s.handleSiteCategories))
-	s.mux.HandleFunc("GET /api/v1/edu/categories", s.requireGatewayToken(s.handleSiteEduCategories))
-	s.mux.HandleFunc("GET /api/v1/edu/lessons/{id}", s.requireGatewayToken(s.handleSiteEduLessonDetail))
+	s.mux.HandleFunc("GET /api/v1/employees", s.requireRbacOrGatewayToken("", s.handleSiteEmployees))
+	s.mux.HandleFunc("GET /api/v1/employees/{id}", s.requireRbacOrGatewayToken("", s.handleSiteEmployeeDetail))
+	s.mux.HandleFunc("GET /api/v1/employees/{id}/download", s.requireRbacOrGatewayToken("", s.handleSiteEmployeeDownload))
+	s.mux.HandleFunc("GET /api/v1/mcps", s.requireRbacOrGatewayToken("", s.handleSiteMcps))
+	s.mux.HandleFunc("GET /api/v1/mcps/{id}", s.requireRbacOrGatewayToken("", s.handleSiteMcpDetail))
+	s.mux.HandleFunc("GET /api/v1/mcps/{id}/download", s.requireRbacOrGatewayToken("", s.handleSiteMcpDownload))
+	s.mux.HandleFunc("GET /api/v1/skills", s.requireRbacOrGatewayToken("", s.handleSiteSkills))
+	s.mux.HandleFunc("GET /api/v1/skills/{folder}", s.requireRbacOrGatewayToken("", s.handleSiteSkillDetail))
+	s.mux.HandleFunc("GET /api/v1/skills/{folder}/download", s.requireRbacOrGatewayToken("", s.handleSiteSkillDownload))
+	s.mux.HandleFunc("GET /api/v1/categories", s.requireRbacOrGatewayToken("", s.handleSiteCategories))
+	s.mux.HandleFunc("GET /api/v1/edu/categories", s.requireRbacOrGatewayToken("", s.handleSiteEduCategories))
+	s.mux.HandleFunc("GET /api/v1/edu/lessons/{id}", s.requireRbacOrGatewayToken("", s.handleSiteEduLessonDetail))
 	s.mux.HandleFunc("GET /api/v1/site/uploads/{path...}", s.handleSiteUploads)
-	s.mux.HandleFunc("POST /api/v1/install", s.requireGatewayToken(s.handleSiteInstall))
+	s.mux.HandleFunc("POST /api/v1/install", s.requireRbacOrGatewayToken("menu:config", s.handleSiteInstall))
 
 	//s.mux.HandleFunc("/api/", s.handleAPICatchAll)
 	//s.mux.HandleFunc("POST /v1/chat/completions", s.handleNotImplemented)

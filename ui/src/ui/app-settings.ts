@@ -61,6 +61,7 @@ type SettingsHost = {
   themeMedia: MediaQueryList | null;
   themeMediaHandler: ((event: MediaQueryListEvent) => void) | null;
   pendingGatewayUrl?: string | null;
+  rbacUser?: any;
 };
 
 function scrollContentToTop(host: SettingsHost) {
@@ -158,10 +159,27 @@ export function applySettingsFromUrl(host: SettingsHost) {
 export function setTab(host: SettingsHost, next: Tab) {
   const nextTab =
     next === "chat" && (host.sessionKey?.trim() ?? "") ? ("message" as Tab) : next;
+
+  if (host.rbacUser && host.rbacUser.roleName !== "admin") {
+    const permission = `menu:${nextTab}`;
+    if (["overview", "hadoop", "fi", "gbase", "governance", "dataapps", "config"].includes(nextTab)) {
+      if (!host.rbacUser.permissions.includes(permission)) {
+        return;
+      }
+    }
+  }
+
   const tabChanged = host.tab !== nextTab;
   if (tabChanged) {
     host.tab = nextTab;
     scrollContentToTop(host);
+  }
+  if (nextTab === "hadoop" || nextTab === "fi" || nextTab === "gbase" || nextTab === "governance" || nextTab === "dataapps") {
+    const domainSessionKey = `agent:main:ops:${nextTab}`;
+    if (host.sessionKey !== domainSessionKey) {
+      host.sessionKey = domainSessionKey;
+      host.applySessionKey = domainSessionKey;
+    }
   }
   if (nextTab === "chat") {
     host.chatHasAutoScrolled = false;
@@ -195,6 +213,16 @@ export function setTheme(host: SettingsHost, next: ThemeMode, context?: ThemeTra
 }
 
 export async function refreshActiveTab(host: SettingsHost) {
+  if (host.tab === "hadoop" || host.tab === "fi" || host.tab === "gbase" || host.tab === "governance" || host.tab === "dataapps") {
+    const domainSessionKey = `agent:main:ops:${host.tab}`;
+    const domainLabel = `${titleForTab(host.tab)}智能诊断`;
+    const { ensureSessionForKey } = await import("./controllers/sessions.ts");
+    const { loadChatHistory } = await import("./controllers/chat.ts");
+    const { loadConfig } = await import("./controllers/config.ts");
+    await loadConfig(host as any);
+    await ensureSessionForKey(host as any, { key: domainSessionKey, label: domainLabel });
+    await loadChatHistory(host as any);
+  }
   if (host.tab === "overview") {
     await loadOverview(host);
   }
@@ -429,10 +457,26 @@ export function onPopState(host: SettingsHost) {
 }
 
 export function setTabFromRoute(host: SettingsHost, next: Tab) {
+  if (host.rbacUser && host.rbacUser.roleName !== "admin") {
+    const permission = `menu:${next}`;
+    if (["overview", "hadoop", "fi", "gbase", "governance", "dataapps", "config"].includes(next)) {
+      if (!host.rbacUser.permissions.includes(permission)) {
+        return;
+      }
+    }
+  }
+
   const tabChanged = host.tab !== next;
   if (tabChanged) {
     host.tab = next;
     scrollContentToTop(host);
+  }
+  if (next === "hadoop" || next === "fi" || next === "gbase" || next === "governance" || next === "dataapps") {
+    const domainSessionKey = `agent:main:ops:${next}`;
+    if (host.sessionKey !== domainSessionKey) {
+      host.sessionKey = domainSessionKey;
+      host.applySessionKey = domainSessionKey;
+    }
   }
   if (next === "chat") {
     host.chatHasAutoScrolled = false;

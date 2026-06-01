@@ -40,6 +40,14 @@ export type AppViewState = {
   settings: UiSettings;
   password: string;
   tab: Tab;
+  rbacToken: string | null;
+  rbacUser: { userId: number; username: string; roleName: string; permissions: string[] } | null;
+  rbacChecked: boolean;
+  rbacLoginError: string | null;
+  rbacLoginLoading: boolean;
+  rbacUsersList: any[];
+  rbacRolesList: any[];
+  rbacUsersLoading: boolean;
   onboarding: boolean;
   productTourActive: boolean;
   productTourStepIndex: number;
@@ -526,4 +534,9 @@ export type AppViewState = {
   handleWindowToggleMaximise: () => void;
   handleWindowClose: () => void;
   handleTopbarDoubleClick: (event: MouseEvent) => void;
+  // Tech Ops Domains
+  opsActiveSubTabs: Record<string, "agent" | "alerts" | "inspections">;
+  opsSelectedAlertGroupIds: Record<string, string | null>;
+  opsSelectedInspectionIds: Record<string, string | null>;
+  opsIsInspecting: Record<string, boolean>;
 };

@@ -59,6 +59,14 @@ import {
 import { DEFAULT_CRON_FORM, DEFAULT_LOG_LEVEL_FILTERS } from "./app-defaults.ts";
 import { connectGateway as connectGatewayInternal } from "./app-gateway.ts";
 import {
+  startLogsPolling as startLogsPollingInternal,
+  startNodesPolling as startNodesPollingInternal,
+  stopLogsPolling as stopLogsPollingInternal,
+  stopNodesPolling as stopNodesPollingInternal,
+  startDebugPolling as startDebugPollingInternal,
+  stopDebugPolling as stopDebugPollingInternal,
+} from "./app-polling.ts";
+import {
   handleConnected,
   handleDisconnected,
   handleFirstUpdated,
@@ -79,6 +87,11 @@ import {
   setTab as setTabInternal,
   setTheme as setThemeInternal,
   onPopState as onPopStateInternal,
+  inferBasePath,
+  applySettingsFromUrl,
+  syncTabWithLocation,
+  syncThemeWithSettings,
+  attachThemeListener,
 } from "./app-settings.ts";
 import {
   resetToolStream as resetToolStreamInternal,
@@ -323,10 +336,50 @@ export class OpenClawApp extends LitElement implements NativeDialogInvoker {
   @state() skillsSkillDocError: string | null = null;
   @state() skillsViewMode: "list" | "card" = "card";
 
+  // Tech Ops Domains
+  @state() opsActiveSubTabs: Record<string, "agent" | "alerts" | "inspections"> = {
+    hadoop: "agent",
+    fi: "agent",
+    gbase: "agent",
+    governance: "agent",
+    dataapps: "agent",
+  };
+  @state() opsSelectedAlertGroupIds: Record<string, string | null> = {
+    hadoop: null,
+    fi: null,
+    gbase: null,
+    governance: null,
+    dataapps: null,
+  };
+  @state() opsSelectedInspectionIds: Record<string, string | null> = {
+    hadoop: null,
+    fi: null,
+    gbase: null,
+    governance: null,
+    dataapps: null,
+  };
+  @state() opsIsInspecting: Record<string, boolean> = {
+    hadoop: false,
+    fi: false,
+    gbase: false,
+    governance: false,
+    dataapps: false,
+  };
+
   @state() presenceLoading = false;
   @state() presenceEntries: PresenceEntry[] = [];
   @state() presenceError: string | null = null;
   @state() presenceStatus: string | null = null;
+
+  // RBAC Authentication & Users State
+  @state() rbacToken: string | null = localStorage.getItem("openocta_rbac_token");
+  @state() rbacUser: { userId: number; username: string; roleName: string; permissions: string[] } | null = null;
+  @state() rbacChecked = false;
+  @state() rbacLoginError: string | null = null;
+  @state() rbacLoginLoading = false;
+  @state() rbacUsersList: Array<Record<string, unknown>> = [];
+  @state() rbacRolesList: Array<Record<string, unknown>> = [];
+  @state() rbacUsersLoading = false;
 
   @state() agentsLoading = false;
   @state() agentsList: AgentsListResult | null = null;
@@ -653,12 +706,34 @@ export class OpenClawApp extends LitElement implements NativeDialogInvoker {
     return this;
   }
 
-  connectedCallback() {
+  async connectedCallback() {
     super.connectedCallback();
     registerNativeDialogInvoker(this);
     document.addEventListener("keydown", this.sessionOverflowEscapeHandler);
-    handleConnected(this as unknown as Parameters<typeof handleConnected>[0]);
     void this.initialiseDesktopWindowChrome();
+
+    // Initialize layout and routing state
+    this.basePath = inferBasePath();
+    applySettingsFromUrl(this as any);
+    syncTabWithLocation(this as any, true);
+    syncThemeWithSettings(this as any);
+    attachThemeListener(this as any);
+    window.addEventListener("popstate", this.popStateHandler);
+
+    // Verify authentication state
+    await this.checkRbacSession();
+
+    // If session is valid, establish WebSocket and start polling
+    if (this.rbacUser) {
+      connectGatewayInternal(this as any);
+      startNodesPollingInternal(this as any);
+      if (this.tab === "logs") {
+        startLogsPollingInternal(this as any);
+      }
+      if (this.tab === "debug") {
+        startDebugPollingInternal(this as any);
+      }
+    }
   }
 
   protected firstUpdated() {
@@ -1093,6 +1168,147 @@ export class OpenClawApp extends LitElement implements NativeDialogInvoker {
       window.removeEventListener("resize", this.desktopWindowResizeHandler);
       this.desktopWindowResizeHandler = null;
     }
+  }
+
+  // RBAC State and Authentication Handlers
+  async checkRbacSession() {
+    if (!this.rbacToken) {
+      this.rbacUser = null;
+      this.rbacChecked = true;
+      return;
+    }
+    try {
+      const res = await fetch(`${this.settings.gatewayUrl.replace(/\/$/, "")}/api/auth/me`, {
+        headers: {
+          "Authorization": `Bearer ${this.rbacToken}`
+        }
+      });
+      if (res.ok) {
+        this.rbacUser = await res.json();
+      } else {
+        localStorage.removeItem("openocta_rbac_token");
+        this.rbacToken = null;
+        this.rbacUser = null;
+      }
+    } catch (e) {
+      console.error("RBAC session check failed", e);
+      this.rbacUser = null;
+    } finally {
+      this.rbacChecked = true;
+    }
+  }
+
+  async handleRbacLogin(username, password) {
+    this.rbacLoginLoading = true;
+    this.rbacLoginError = null;
+    try {
+      const res = await fetch(`${this.settings.gatewayUrl.replace(/\/$/, "")}/api/auth/login`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ username, password })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        this.rbacToken = data.token;
+        this.rbacUser = data.user;
+        localStorage.setItem("openocta_rbac_token", data.token);
+        
+        // Trigger connect and polling
+        connectGatewayInternal(this as any);
+        startNodesPollingInternal(this as any);
+        if (this.tab === "logs") startLogsPollingInternal(this as any);
+        if (this.tab === "debug") startDebugPollingInternal(this as any);
+      } else {
+        this.rbacLoginError = data.error || "登录失败";
+      }
+    } catch (e: any) {
+      this.rbacLoginError = e.message || "登录请求失败，请检查网络";
+    } finally {
+      this.rbacLoginLoading = false;
+    }
+  }
+
+  async handleRbacLogout() {
+    try {
+      if (this.rbacToken) {
+        await fetch(`${this.settings.gatewayUrl.replace(/\/$/, "")}/api/auth/logout`, {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${this.rbacToken}`
+          }
+        });
+      }
+    } catch (e) {
+      console.error("Logout request failed", e);
+    } finally {
+      localStorage.removeItem("openocta_rbac_token");
+      this.rbacToken = null;
+      this.rbacUser = null;
+      
+      // Stop connection & polling
+      this.client?.stop();
+      this.client = null;
+      this.connected = false;
+      stopNodesPollingInternal(this as any);
+      stopLogsPollingInternal(this as any);
+      stopDebugPollingInternal(this as any);
+    }
+  }
+
+  async loadRbacData() {
+    this.rbacUsersLoading = true;
+    try {
+      const headers: Record<string, string> = {};
+      if (this.rbacToken) {
+        headers["Authorization"] = `Bearer ${this.rbacToken}`;
+      }
+      
+      const [usersRes, rolesRes] = await Promise.all([
+        fetch(`${this.settings.gatewayUrl.replace(/\/$/, "")}/api/rbac/users`, { headers }),
+        fetch(`${this.settings.gatewayUrl.replace(/\/$/, "")}/api/rbac/roles`, { headers })
+      ]);
+      
+      if (usersRes.ok && rolesRes.ok) {
+        this.rbacUsersList = await usersRes.json();
+        this.rbacRolesList = await rolesRes.json();
+      }
+    } catch (e) {
+      console.error("Failed to load RBAC data", e);
+    } finally {
+      this.rbacUsersLoading = false;
+    }
+  }
+
+  async handleCreateUser(username, password, roleId) {
+    const res = await fetch(`${this.settings.gatewayUrl.replace(/\/$/, "")}/api/rbac/users`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${this.rbacToken}`
+      },
+      body: JSON.stringify({ username, password, roleId })
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || "创建用户失败");
+    }
+    await this.loadRbacData();
+  }
+
+  async handleDeleteUser(id) {
+    const res = await fetch(`${this.settings.gatewayUrl.replace(/\/$/, "")}/api/rbac/users/${id}`, {
+      method: "DELETE",
+      headers: {
+        "Authorization": `Bearer ${this.rbacToken}`
+      }
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || "删除用户失败");
+    }
+    await this.loadRbacData();
   }
 
   render() {

@@ -1,0 +1,21 @@
+{
+  "agents": {
+    "defaults": {
+      "workspace": "~/.openocta/workspace"
+    },
+    "list": [
+      {
+        "id": "default",
+        "default": true,
+        "name": "Default Agent",
+        "workspace": "~/.openocta/workspace",
+        "model": "anthropic/claude-sonnet-4-5",
+        "skills": []
+      }
+    ]
+  },
+  "gateway": {
+    "port": 18900,
+    "bind": "loopback"
+  }
+}

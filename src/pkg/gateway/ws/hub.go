@@ -14,6 +14,7 @@ import (
 	"github.com/openocta/openocta/pkg/gateway/handlers"
 	"github.com/openocta/openocta/pkg/gateway/protocol"
 	"github.com/openocta/openocta/pkg/logging"
+	"github.com/openocta/openocta/pkg/rbac"
 )
 
 var wsLog = logging.Sub("ws")
@@ -406,8 +407,18 @@ func (c *Client) handleConnect(id string, params interface{}) {
 				gotToken = strings.TrimSpace(cp.Auth.Password)
 			}
 		}
-		if gotToken == "" || gotToken != expectedToken {
-			authMsg := "认证失败：网关令牌无效或未提供，请在 Overview 中配置正确的 Gateway Token"
+
+		// 1. Try RBAC validation first
+		rbacValid := false
+		if gotToken != "" {
+			if _, err := rbac.ValidateToken(gotToken); err == nil {
+				rbacValid = true
+			}
+		}
+
+		// 2. Fallback to legacy expectedToken check if not a valid RBAC token
+		if !rbacValid && (gotToken == "" || gotToken != expectedToken) {
+			authMsg := "认证失败：网关令牌/登录会话无效或未提供，请重新登录或配置正确的 Gateway Token"
 			c.sendError(id, "invalid_gateway_token", authMsg)
 			// Do not write/close here: writePump owns Conn writes. Client will close after receiving the error.
 			return

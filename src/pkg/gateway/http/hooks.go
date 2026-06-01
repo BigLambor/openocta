@@ -6,12 +6,31 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/openocta/openocta/pkg/config"
 	"github.com/openocta/openocta/pkg/gateway/handlers"
 	"github.com/openocta/openocta/pkg/logging"
 )
+
+var (
+	alertBatchMu sync.Mutex
+	alertBatches = make(map[string]*alertBatch)
+)
+
+type alertBatch struct {
+	Source     string
+	Alerts     []hooksPayloadAlert
+	FirstSeen  time.Time
+	LastSeen   time.Time
+	SessionKey string
+	RunID      string
+	Timer      *time.Timer
+	Channel    string
+	To         string
+}
 
 var hooksLog = logging.Sub("hooks")
 
@@ -72,6 +91,9 @@ type hooksPayloadAlert struct {
 	Source   string `json:"source"`
 	// Arbitrary original payload from the alert source
 	Data map[string]interface{} `json:"data"`
+	// Delivery target overrides
+	Channel string `json:"channel"`
+	To      string `json:"to"`
 }
 
 func (s *Server) handleHooks(w http.ResponseWriter, r *http.Request) {
@@ -280,7 +302,6 @@ func (s *Server) handleHooksAgentWithMapping(w http.ResponseWriter, r *http.Requ
 }
 
 // handleHooksAlert handles POST /hooks/alert.
-// 与 HooksAgent 保持相同消息发送逻辑：通过 HooksAgent 调用 sessions.reset + chat.send。
 func (s *Server) handleHooksAlert(w http.ResponseWriter, r *http.Request, ctx *handlers.Context) {
 	if ctx == nil || ctx.HooksAgent == nil {
 		hooksLog.Warn("hooks alert not available (HooksAgent not configured)")
@@ -299,94 +320,158 @@ func (s *Server) handleHooksAlert(w http.ResponseWriter, r *http.Request, ctx *h
 		http.Error(w, "empty body", http.StatusBadRequest)
 		return
 	}
-	// 优先尝试按 hooksPayloadAlert 解析；如果结构不匹配或没有 message 字段，
-	// 则将原始内容整体作为 message，提升对不同第三方告警体的兼容性。
 	if err := json.Unmarshal(bodyBytes, &body); err != nil {
 		body.Message = rawStr
 	} else if strings.TrimSpace(body.Message) == "" {
 		body.Message = rawStr
 	}
 
-	alertPrompt := buildAlertPrompt(body)
-	alertUUID := uuid.New().String()
-	sessionKey := fmt.Sprintf("agent:main:alert:%s", alertUUID)
-
-	runID := ctx.HooksAgent(handlers.HooksAgentParams{
-		Message:    alertPrompt,
-		Name:       "Alert",
-		SessionKey: sessionKey,
-		WakeMode:   "now",
-		Deliver:    true,
-	})
+	// Enqueue in sliding-window buffer
+	runID, sessionKey := s.enqueueAlert(body, ctx)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)
 	resp := map[string]interface{}{
+		"ok":         true,
+		"status":     "queued",
 		"runId":      runID,
 		"sessionKey": sessionKey,
 	}
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
-// buildAlertPrompt constructs an analysis prompt for the agent from the alert payload.
-func buildAlertPrompt(body hooksPayloadAlert) string {
-	title := strings.TrimSpace(body.Title)
-	if title == "" {
-		title = "未命名告警"
-	}
-	severity := strings.TrimSpace(body.Severity)
-	if severity == "" {
-		severity = "unknown"
-	}
-	source := strings.TrimSpace(body.Source)
-	if source == "" {
-		source = "unknown"
-	}
-	message := strings.TrimSpace(body.Message)
+func (s *Server) enqueueAlert(alert hooksPayloadAlert, ctx *handlers.Context) (string, string) {
+	alertBatchMu.Lock()
+	defer alertBatchMu.Unlock()
 
-	// Serialize Data for extra context (best-effort).
-	var dataJSON string
-	if body.Data != nil {
-		if b, err := json.MarshalIndent(body.Data, "", "  "); err == nil {
-			dataJSON = string(b)
+	source := alert.Source
+	if strings.TrimSpace(source) == "" {
+		source = "default"
+	}
+
+	batch, ok := alertBatches[source]
+	now := time.Now()
+
+	if !ok || now.Sub(batch.FirstSeen) >= 5*time.Minute {
+		if ok && batch.Timer != nil {
+			batch.Timer.Stop()
+			go triggerMergedAlertAnalysis(ctx, batch)
 		}
+
+		batch = &alertBatch{
+			Source:     source,
+			Alerts:     []hooksPayloadAlert{alert},
+			FirstSeen:  now,
+			LastSeen:   now,
+			SessionKey: fmt.Sprintf("agent:main:alert:%s", uuid.New().String()),
+			RunID:      uuid.New().String(),
+			Channel:    alert.Channel,
+			To:         alert.To,
+		}
+		alertBatches[source] = batch
+	} else {
+		batch.Alerts = append(batch.Alerts, alert)
+		batch.LastSeen = now
+		if batch.Timer != nil {
+			batch.Timer.Stop()
+		}
+		if alert.Channel != "" {
+			batch.Channel = alert.Channel
+		}
+		if alert.To != "" {
+			batch.To = alert.To
+		}
+	}
+
+	if len(batch.Alerts) >= 20 {
+		if batch.Timer != nil {
+			batch.Timer.Stop()
+		}
+		delete(alertBatches, source)
+		go triggerMergedAlertAnalysis(ctx, batch)
+		return batch.RunID, batch.SessionKey
+	}
+
+	b := batch
+	batch.Timer = time.AfterFunc(15*time.Second, func() {
+		alertBatchMu.Lock()
+		defer alertBatchMu.Unlock()
+
+		current, exists := alertBatches[source]
+		if exists && current == b {
+			delete(alertBatches, source)
+			go triggerMergedAlertAnalysis(ctx, b)
+		}
+	})
+
+	return batch.RunID, batch.SessionKey
+}
+
+func triggerMergedAlertAnalysis(ctx *handlers.Context, batch *alertBatch) {
+	if ctx == nil || ctx.HooksAgent == nil {
+		return
 	}
 
 	builder := &strings.Builder{}
 	builder.WriteString("You are a senior SRE/ops alert analysis assistant. ")
-	builder.WriteString("Below is an alert event from a monitoring/alerting system.\n\n")
+	builder.WriteString("A batch of merged alert events has occurred. Please analyze them collectively to identify potential root cause and assess impact.\n\n")
+	builder.WriteString("## Merged Alerts Summary\n")
+	builder.WriteString(fmt.Sprintf("- **Alert Group Source**: %s\n", batch.Source))
+	builder.WriteString(fmt.Sprintf("- **Total Alert Count**: %d\n", len(batch.Alerts)))
+	builder.WriteString(fmt.Sprintf("- **First Seen**: %s\n", batch.FirstSeen.Format("2006-01-02 15:04:05")))
+	builder.WriteString(fmt.Sprintf("- **Last Seen**: %s\n\n", batch.LastSeen.Format("2006-01-02 15:04:05")))
+
+	builder.WriteString("## Alert Event List\n")
+	for idx, alert := range batch.Alerts {
+		builder.WriteString(fmt.Sprintf("### Alert #%d\n", idx+1))
+		builder.WriteString(fmt.Sprintf("- **Title**: %s\n", alert.Title))
+		builder.WriteString(fmt.Sprintf("- **Severity**: %s\n", alert.Severity))
+		builder.WriteString(fmt.Sprintf("- **Message**: %s\n", alert.Message))
+		if alert.Data != nil {
+			if b, err := json.Marshal(alert.Data); err == nil {
+				builder.WriteString(fmt.Sprintf("- **Context Data**: `%s`\n", string(b)))
+			}
+		}
+		builder.WriteString("\n")
+	}
+
 	builder.WriteString("## Important: Fetch data first, then analyze\n")
-	builder.WriteString("Before drawing conclusions, you MUST:\n")
-	builder.WriteString("1. **Use MCP tools**: If you have MCP servers connected (e.g. Prometheus, Grafana, log systems), actively call relevant tools to query metrics, alerts, logs, etc., and use real data to support your analysis. Examples: prometheus_query, prometheus_query_range, prometheus_alerts.\n")
-	builder.WriteString("2. **Use Skills**: If you have available Skills (e.g. Prometheus Analysis, log analysis), select relevant skills based on the alert content and follow their guidance for querying and interpretation.\n")
-	builder.WriteString("3. **Combine context**: Correlate data fetched from MCP/Skills with the alert payload below before inferring root cause and assessing impact.\n\n")
+	builder.WriteString("Before drawing conclusions, you MUST actively call relevant tools to query metrics, logs, database state, or lineage mapping to support your root cause analysis. Examples: query_vm_metrics, query_gbase_slow_sql, query_governance_lineage.\n\n")
 	builder.WriteString("## Analysis requirements\n")
-	builder.WriteString("After fetching data, please: 1) identify possible root causes; 2) assess impact scope and urgency; 3) provide step-by-step troubleshooting suggestions; 4) if needed, provide temporary mitigation and follow-up optimization recommendations. ")
-	builder.WriteString("**Output your final response in Simplified Chinese**, using structured subheadings.\n\n")
+	builder.WriteString("1. **Root Cause Analysis**: Correlate these alerts. Is there a common source (e.g. database overload, network failure, YARN queue exhaustion)?\n")
+	builder.WriteString("2. **Impact Assessment**: What downstream services or applications are impacted?\n")
+	builder.WriteString("3. **Troubleshooting Steps**: Suggest step-by-step remediation commands.\n")
+	builder.WriteString("Output your final response in Simplified Chinese using structured markdown.\n")
 
-	builder.WriteString("【Alert Title】\n")
-	builder.WriteString(title + "\n\n")
-
-	builder.WriteString("【Severity】\n")
-	builder.WriteString(severity + "\n\n")
-
-	builder.WriteString("【Source】\n")
-	builder.WriteString(source + "\n\n")
-
-	if body.AlertID != "" {
-		builder.WriteString("【Alert ID】\n")
-		builder.WriteString(strings.TrimSpace(body.AlertID) + "\n\n")
+	channel := batch.Channel
+	to := batch.To
+	if channel == "" {
+		if ctx.Config != nil && ctx.Config.Channels != nil {
+			if f := ctx.Config.Channels.GetChannelConfig("feishu"); f != nil {
+				if enabled, _ := f["enabled"].(bool); enabled {
+					channel = "feishu"
+				}
+			}
+			if channel == "" {
+				if d := ctx.Config.Channels.GetChannelConfig("dingtalk"); d != nil {
+					if enabled, _ := d["enabled"].(bool); enabled {
+						channel = "dingtalk"
+					}
+				}
+			}
+		}
+	}
+	if to == "" && channel != "" {
+		to = "last"
 	}
 
-	if message != "" {
-		builder.WriteString("【Description】\n")
-		builder.WriteString(message + "\n\n")
-	}
-
-	if dataJSON != "" {
-		builder.WriteString("【Raw Data (JSON)】\n")
-		builder.WriteString(dataJSON + "\n")
-	}
-
-	return builder.String()
+	_ = ctx.HooksAgent(handlers.HooksAgentParams{
+		Message:    builder.String(),
+		Name:       "AlertGroup",
+		SessionKey: batch.SessionKey,
+		WakeMode:   "now",
+		Deliver:    true,
+		Channel:    channel,
+		To:         to,
+	})
 }

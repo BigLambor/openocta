@@ -3,7 +3,9 @@ package handlers
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"regexp"
 	"strings"
 
 	"github.com/openocta/openocta/pkg/cron"
@@ -44,9 +46,62 @@ func DeliverCronResultIfNeeded(ctx *Context, sessionKey, summary, status string)
 			break
 		}
 	}
-	if job == nil || job.Delivery == nil {
+	if job == nil {
 		return
 	}
+
+	// Fallback/Automatic routing for inspection jobs
+	isInspectionJob := strings.HasPrefix(jobID, "job-inspect-")
+	var isCritical bool
+	var score int = 100
+	if isInspectionJob {
+		// Parse score
+		scoreMatch := regexp.MustCompile(`(?i)(?:健康得分|健康度|Score)\s*[：:]\s*(\d+)`).FindStringSubmatch(summary)
+		if len(scoreMatch) > 1 {
+			_, _ = fmt.Sscanf(scoreMatch[1], "%d", &score)
+		}
+		if score < 85 || strings.Contains(strings.ToUpper(summary), "CRITICAL") || strings.Contains(strings.ToUpper(summary), "ERROR") || status != "ok" {
+			isCritical = true
+		}
+	}
+
+	if isCritical && (job.Delivery == nil || job.Delivery.Mode == "none" || job.Delivery.Mode == "") {
+		// Try to find an enabled channel to send the alert
+		var targetChannel string
+		if ctx.Config != nil && ctx.Config.Channels != nil {
+			if f := ctx.Config.Channels.GetChannelConfig("feishu"); f != nil {
+				if enabled, _ := f["enabled"].(bool); enabled {
+					targetChannel = "feishu"
+				}
+			}
+			if targetChannel == "" {
+				if d := ctx.Config.Channels.GetChannelConfig("dingtalk"); d != nil {
+					if enabled, _ := d["enabled"].(bool); enabled {
+						targetChannel = "dingtalk"
+					}
+				}
+			}
+		}
+		if targetChannel != "" && ctx.InvokeMethod != nil {
+			header := "⚠️ 深度巡检告警: " + job.Name
+			alertMessage := fmt.Sprintf("### ⚠️ %s 巡检异常报警\n- **健康得分**：%d 分\n- **异常诊断**：检测到潜在的核心指标异常，请立即登录系统处理！\n\n%s", job.Name, score, summary)
+			if len(alertMessage) > 1500 {
+				alertMessage = alertMessage[:1497] + "..."
+			}
+			params := map[string]interface{}{
+				"channel": targetChannel,
+				"to":      "last", // fallback to last active group/user chat
+				"message": alertMessage,
+				"header":  header,
+			}
+			_, _, _ = ctx.InvokeMethod("send", params)
+		}
+	}
+
+	if job.Delivery == nil {
+		return
+	}
+
 	d := job.Delivery
 	mode := strings.TrimSpace(strings.ToLower(d.Mode))
 	if mode != "announce" && mode != "webhook" {
