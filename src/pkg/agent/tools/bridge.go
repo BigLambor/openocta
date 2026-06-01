@@ -79,6 +79,8 @@ func DefaultTools() []tool.Tool {
 		VMQueryTool{},
 		GBaseSlowSqlTool{},
 		GovernanceLineageTool{},
+		HadoopJMXTool{},
+		FIManagerTool{},
 	}
 }
 
@@ -93,6 +95,8 @@ func DefaultToolsWithInvoker(invoker GatewayInvoker) []tool.Tool {
 		VMQueryTool{},
 		GBaseSlowSqlTool{},
 		GovernanceLineageTool{},
+		HadoopJMXTool{},
+		FIManagerTool{},
 	}
 	//if invoker != nil {
 	//	list = append(list,

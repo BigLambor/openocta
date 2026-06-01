@@ -79,6 +79,8 @@ export type ChatProps = {
   onCloseSidebar?: () => void;
   onSplitRatioChange?: (ratio: number) => void;
   onChatScroll?: (event: Event) => void;
+  /** Ops / domain context shown above the composer (P1-4). */
+  contextBanner?: string | null;
 };
 
 const COMPACTION_TOAST_DURATION_MS = 5000;
@@ -283,8 +285,8 @@ export function renderChat(props: ChatProps) {
   const activeSession = props.sessions?.sessions?.find((row) => row.key === props.sessionKey);
   const reasoningLevel = activeSession?.reasoningLevel ?? "off";
   const showReasoning = props.showThinking && reasoningLevel !== "off";
-  const conversationOnly = true;
-  const showToolTrace = false;
+  const conversationOnly = props.conversationOnly ?? true;
+  const showToolTrace = !conversationOnly;
   const assistantIdentity = {
     name: props.assistantName,
     avatar: props.assistantAvatar ?? props.assistantAvatarUrl ?? null,
@@ -494,6 +496,19 @@ export function renderChat(props: ChatProps) {
               New messages ${icons.arrowDown}
             </button>
           `
+          : nothing
+      }
+
+      ${
+        props.contextBanner
+          ? html`
+              <div
+                class="chat-context-banner"
+                style="margin: 0 16px 8px; padding: 8px 12px; font-size: 12px; line-height: 1.45; color: var(--text-secondary); background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: 8px;"
+              >
+                ${props.contextBanner}
+              </div>
+            `
           : nothing
       }
 

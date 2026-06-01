@@ -13,6 +13,7 @@ import (
 	"github.com/openocta/openocta/pkg/config"
 	"github.com/openocta/openocta/pkg/gateway/handlers"
 	"github.com/openocta/openocta/pkg/logging"
+	"github.com/openocta/openocta/pkg/ops"
 )
 
 var (
@@ -84,16 +85,100 @@ type hooksPayloadAgent struct {
 // It is designed to be flexible for different third-party alert sources.
 type hooksPayloadAlert struct {
 	// Optional high-level fields
-	AlertID  string `json:"alertId"`
-	Title    string `json:"title"`
-	Message  string `json:"message"`
-	Severity string `json:"severity"`
-	Source   string `json:"source"`
+	AlertID   string `json:"alertId"`
+	Title     string `json:"title"`
+	Message   string `json:"message"`
+	Severity  string `json:"severity"`
+	Source    string `json:"source"`
+	Alertname string `json:"alertname"`
+	Service   string `json:"service"`
+	Instance  string `json:"instance"`
+	ClusterID string `json:"clusterId"`
+	Component string `json:"component"`
 	// Arbitrary original payload from the alert source
 	Data map[string]interface{} `json:"data"`
 	// Delivery target overrides
 	Channel string `json:"channel"`
 	To      string `json:"to"`
+}
+
+func extractAlertField(a hooksPayloadAlert, key string) string {
+	switch key {
+	case "alertname":
+		if a.Alertname != "" {
+			return a.Alertname
+		}
+	case "service":
+		if a.Service != "" {
+			return a.Service
+		}
+	case "instance":
+		if a.Instance != "" {
+			return a.Instance
+		}
+	case "clusterId":
+		if a.ClusterID != "" {
+			return a.ClusterID
+		}
+	case "component":
+		if a.Component != "" {
+			return a.Component
+		}
+	}
+
+	if a.Data != nil {
+		if val, ok := a.Data[key]; ok {
+			if s, ok := val.(string); ok && s != "" {
+				return s
+			}
+		}
+		for _, parentKey := range []string{"labels", "commonLabels"} {
+			if labelsVal, ok := a.Data[parentKey]; ok {
+				if labelsMap, ok := labelsVal.(map[string]interface{}); ok {
+					if val, ok := labelsMap[key]; ok {
+						if s, ok := val.(string); ok && s != "" {
+							return s
+						}
+					}
+				}
+			}
+		}
+	}
+	return ""
+}
+
+func calculateAlertFingerprint(a hooksPayloadAlert) string {
+	alertname := extractAlertField(a, "alertname")
+	service := extractAlertField(a, "service")
+	instance := extractAlertField(a, "instance")
+	clusterId := extractAlertField(a, "clusterId")
+	component := extractAlertField(a, "component")
+
+	var parts []string
+	for _, field := range ops.FingerprintFields {
+		var val string
+		switch field {
+		case "alertname":
+			val = alertname
+		case "service":
+			val = service
+		case "instance":
+			val = instance
+		case "clusterId":
+			val = clusterId
+		case "component":
+			val = component
+		default:
+			val = extractAlertField(a, field)
+		}
+		parts = append(parts, val)
+	}
+
+	fp := strings.Join(parts, "|")
+	if strings.ReplaceAll(fp, "|", "") == "" {
+		return fmt.Sprintf("fallback:%s:%s", a.Source, a.Title)
+	}
+	return fp
 }
 
 func (s *Server) handleHooks(w http.ResponseWriter, r *http.Request) {
@@ -344,18 +429,19 @@ func (s *Server) enqueueAlert(alert hooksPayloadAlert, ctx *handlers.Context) (s
 	alertBatchMu.Lock()
 	defer alertBatchMu.Unlock()
 
-	source := alert.Source
-	if strings.TrimSpace(source) == "" {
-		source = "default"
-	}
-
-	batch, ok := alertBatches[source]
+	fp := calculateAlertFingerprint(alert)
+	batch, ok := alertBatches[fp]
 	now := time.Now()
 
 	if !ok || now.Sub(batch.FirstSeen) >= 5*time.Minute {
 		if ok && batch.Timer != nil {
 			batch.Timer.Stop()
 			go triggerMergedAlertAnalysis(ctx, batch)
+		}
+
+		source := alert.Source
+		if strings.TrimSpace(source) == "" {
+			source = "default"
 		}
 
 		batch = &alertBatch{
@@ -368,7 +454,7 @@ func (s *Server) enqueueAlert(alert hooksPayloadAlert, ctx *handlers.Context) (s
 			Channel:    alert.Channel,
 			To:         alert.To,
 		}
-		alertBatches[source] = batch
+		alertBatches[fp] = batch
 	} else {
 		batch.Alerts = append(batch.Alerts, alert)
 		batch.LastSeen = now
@@ -387,7 +473,7 @@ func (s *Server) enqueueAlert(alert hooksPayloadAlert, ctx *handlers.Context) (s
 		if batch.Timer != nil {
 			batch.Timer.Stop()
 		}
-		delete(alertBatches, source)
+		delete(alertBatches, fp)
 		go triggerMergedAlertAnalysis(ctx, batch)
 		return batch.RunID, batch.SessionKey
 	}
@@ -397,9 +483,9 @@ func (s *Server) enqueueAlert(alert hooksPayloadAlert, ctx *handlers.Context) (s
 		alertBatchMu.Lock()
 		defer alertBatchMu.Unlock()
 
-		current, exists := alertBatches[source]
+		current, exists := alertBatches[fp]
 		if exists && current == b {
-			delete(alertBatches, source)
+			delete(alertBatches, fp)
 			go triggerMergedAlertAnalysis(ctx, b)
 		}
 	})
@@ -410,6 +496,25 @@ func (s *Server) enqueueAlert(alert hooksPayloadAlert, ctx *handlers.Context) (s
 func triggerMergedAlertAnalysis(ctx *handlers.Context, batch *alertBatch) {
 	if ctx == nil || ctx.HooksAgent == nil {
 		return
+	}
+
+	inputs := make([]ops.MergedAlertInput, 0, len(batch.Alerts))
+	for _, a := range batch.Alerts {
+		inputs = append(inputs, ops.MergedAlertInput{
+			AlertID:   a.AlertID,
+			Title:     a.Title,
+			Message:   a.Message,
+			Severity:  a.Severity,
+			Alertname: extractAlertField(a, "alertname"),
+			Service:   extractAlertField(a, "service"),
+			Instance:  extractAlertField(a, "instance"),
+			ClusterID: extractAlertField(a, "clusterId"),
+			Component: extractAlertField(a, "component"),
+		})
+	}
+	recorded, err := ops.RecordMergedAlertGroup(batch.Source, batch.SessionKey, batch.RunID, inputs)
+	if err != nil {
+		hooksLog.Warn("failed to persist alert group: %v", err)
 	}
 
 	builder := &strings.Builder{}
@@ -442,6 +547,11 @@ func triggerMergedAlertAnalysis(ctx *handlers.Context, batch *alertBatch) {
 	builder.WriteString("2. **Impact Assessment**: What downstream services or applications are impacted?\n")
 	builder.WriteString("3. **Troubleshooting Steps**: Suggest step-by-step remediation commands.\n")
 	builder.WriteString("Output your final response in Simplified Chinese using structured markdown.\n")
+	if recorded.ID != "" {
+		if link := ops.AlertGroupDeepLink(recorded.Domain, recorded.ID); link != "" {
+			builder.WriteString(fmt.Sprintf("\n\nInclude this UI deep link for on-call engineers: %s\n", link))
+		}
+	}
 
 	channel := batch.Channel
 	to := batch.To
@@ -463,6 +573,17 @@ func triggerMergedAlertAnalysis(ctx *handlers.Context, batch *alertBatch) {
 	}
 	if to == "" && channel != "" {
 		to = "last"
+	}
+
+	if channel != "" && to != "" && ctx.InvokeMethod != nil && recorded.ID != "" {
+		link := ops.AlertGroupDeepLink(recorded.Domain, recorded.ID)
+		card := ops.FormatAlertQueuedCard(recorded, link)
+		_, _, _ = ctx.InvokeMethod("send", map[string]interface{}{
+			"channel": channel,
+			"to":      to,
+			"header":  "告警合并 · " + recorded.Title,
+			"message": card,
+		})
 	}
 
 	_ = ctx.HooksAgent(handlers.HooksAgentParams{

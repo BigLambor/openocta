@@ -903,7 +903,7 @@ export function renderModelsOverlays(props: ModelsProps) {
                                             style="font-size: 11px; margin-top: 4px;"
                                             @click=${() => props.onPatchModelEnv(props.selectedProvider!, m.id, { "__new__": "" })}
                                           >
-                                            <span class="btn__icon">${icons.plus}</span>${t("modelsEnvVars")}
+                                            <span class="btn__icon">${icons.plus}</span>${t("envVarsAdd")}
                                           </button>
                                         `
                                       : html`
@@ -958,7 +958,7 @@ export function renderModelsOverlays(props: ModelsProps) {
                                                 props.onPatchModelEnv(props.selectedProvider!, m.id, next);
                                               }}
                                             >
-                                              <span class="btn__icon">${icons.plus}</span>${t("modelsEnvVars")}
+                                              <span class="btn__icon">${icons.plus}</span>${t("envVarsAdd")}
                                             </button>
                                           </div>
                                         `}

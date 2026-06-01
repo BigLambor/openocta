@@ -2,7 +2,16 @@ package tools
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"strings"
+	"time"
+
+	_ "github.com/go-sql-driver/mysql"
 
 	"github.com/stellarlinkco/agentsdk-go/pkg/tool"
 )
@@ -17,7 +26,7 @@ func (GBaseSlowSqlTool) Name() string {
 
 // Description returns the tool description.
 func (GBaseSlowSqlTool) Description() string {
-	return "Query slow SQL logs from GBase database. Returns SQL text, execution duration, and timestamp."
+	return "Query slow SQL logs from GBase database. Requires GBASE_DSN (or db_url). Returns SQL text, execution duration, and timestamp."
 }
 
 // Schema returns the parameters schema.
@@ -31,13 +40,13 @@ func (GBaseSlowSqlTool) Schema() *tool.JSONSchema {
 			},
 			"db_url": map[string]interface{}{
 				"type":        "string",
-				"description": "Optional database connection string. If omitted, uses simulated slow SQL logs for diagnostics.",
+				"description": "Optional database DSN. Defaults to env GBASE_DSN.",
 			},
 		},
 	}
 }
 
-// Execute runs the slow SQL query simulation or fetch.
+// Execute runs the slow SQL query against a real DSN when configured.
 func (GBaseSlowSqlTool) Execute(ctx context.Context, params map[string]interface{}) (*tool.ToolResult, error) {
 	limit := 5
 	if l, ok := params["limit"].(float64); ok {
@@ -45,50 +54,95 @@ func (GBaseSlowSqlTool) Execute(ctx context.Context, params map[string]interface
 	} else if l, ok := params["limit"].(int); ok {
 		limit = l
 	}
-
-	slowSQLs := []map[string]interface{}{
-		{
-			"sql":              "SELECT COUNT(*), status FROM orders GROUP BY status HAVING COUNT(*) > 100000;",
-			"duration_seconds": 4.5,
-			"timestamp":        "2026-06-01 16:30:22",
-			"client_ip":        "10.20.134.12",
-		},
-		{
-			"sql":              "SELECT * FROM fact_sales WHERE sale_date BETWEEN '2025-01-01' AND '2025-12-31' ORDER BY revenue DESC;",
-			"duration_seconds": 12.8,
-			"timestamp":        "2026-06-01 15:45:10",
-			"client_ip":        "10.20.134.15",
-		},
-		{
-			"sql":              "UPDATE user_profiles SET last_login = NOW() WHERE last_login < '2026-01-01';",
-			"duration_seconds": 3.2,
-			"timestamp":        "2026-06-01 14:12:05",
-			"client_ip":        "10.20.134.13",
-		},
-		{
-			"sql":              "SELECT p.name, sum(s.quantity) FROM dim_products p JOIN fact_sales s ON p.id = s.product_id GROUP BY p.name;",
-			"duration_seconds": 6.7,
-			"timestamp":        "2026-06-01 13:05:41",
-			"client_ip":        "10.20.134.19",
-		},
-		{
-			"sql":              "SELECT * FROM sys_logs WHERE log_level = 'ERROR' AND log_time < DATE_SUB(NOW(), INTERVAL 30 DAY);",
-			"duration_seconds": 5.4,
-			"timestamp":        "2026-06-01 11:22:18",
-			"client_ip":        "10.20.134.12",
-		},
+	if limit < 1 {
+		limit = 5
+	}
+	if limit > 50 {
+		limit = 50
 	}
 
-	if limit > len(slowSQLs) {
-		limit = len(slowSQLs)
+	dsn, _ := params["db_url"].(string)
+	dsn = strings.TrimSpace(dsn)
+	if dsn == "" {
+		opsCtx := ParseOpsContext(ctx)
+		if opsCtx != nil && opsCtx.ClusterID != "" && opsCtx.ClusterID != "all" {
+			if GetClusterConfig != nil {
+				c, err := GetClusterConfig(opsCtx.ClusterID)
+				if err == nil && c.GBaseDsnRef != "" {
+					dsn = c.GBaseDsnRef
+				}
+			}
+		}
+	}
+	if dsn == "" {
+		dsn = strings.TrimSpace(os.Getenv("GBASE_DSN"))
+	}
+	if dsn == "" {
+		return &tool.ToolResult{
+			Success: false,
+			Output:  "GBASE_DSN 未配置：请在环境变量中设置 GBase 连接串，或通过 db_url 参数传入。不会返回模拟慢 SQL 数据。",
+		}, nil
 	}
 
-	res := slowSQLs[:limit]
-	b, err := json.Marshal(res)
+	db, err := sql.Open("mysql", dsn)
+	if err != nil {
+		return &tool.ToolResult{Success: false, Output: fmt.Sprintf("无法连接 GBase: %v", err)}, nil
+	}
+	defer db.Close()
+
+	qctx, cancel := context.WithTimeout(ctx, 12*time.Second)
+	defer cancel()
+	if err := db.PingContext(qctx); err != nil {
+		return &tool.ToolResult{Success: false, Output: fmt.Sprintf("GBase 连接失败: %v", err)}, nil
+	}
+
+	// Generic slow-query probe; adjust table/view via GBASE_SLOW_SQL_QUERY if needed.
+	querySQL := strings.TrimSpace(os.Getenv("GBASE_SLOW_SQL_QUERY"))
+	if querySQL == "" {
+		querySQL = `SELECT sql_text, exec_time_sec, start_time, client_ip
+FROM information_schema.slow_query_log
+ORDER BY exec_time_sec DESC
+LIMIT ?`
+	}
+
+	rows, err := db.QueryContext(qctx, querySQL, limit)
+	if err != nil {
+		return &tool.ToolResult{
+			Success: false,
+			Output:  fmt.Sprintf("慢 SQL 查询失败: %v（可通过 GBASE_SLOW_SQL_QUERY 自定义 SQL）", err),
+		}, nil
+	}
+	defer rows.Close()
+
+	cols, _ := rows.Columns()
+	out := make([]map[string]interface{}, 0, limit)
+	for rows.Next() {
+		vals := make([]interface{}, len(cols))
+		ptrs := make([]interface{}, len(cols))
+		for i := range vals {
+			ptrs[i] = &vals[i]
+		}
+		if err := rows.Scan(ptrs...); err != nil {
+			continue
+		}
+		row := map[string]interface{}{}
+		for i, c := range cols {
+			switch v := vals[i].(type) {
+			case []byte:
+				row[c] = string(v)
+			default:
+				row[c] = v
+			}
+		}
+		out = append(out, row)
+	}
+	if len(out) == 0 {
+		return &tool.ToolResult{Success: true, Output: "[]"}, nil
+	}
+	b, err := json.Marshal(out)
 	if err != nil {
 		return &tool.ToolResult{Success: false, Output: err.Error()}, nil
 	}
-
 	return &tool.ToolResult{Success: true, Output: string(b)}, nil
 }
 
@@ -104,7 +158,7 @@ func (GovernanceLineageTool) Name() string {
 
 // Description returns the tool description.
 func (GovernanceLineageTool) Description() string {
-	return "Query data lineage map status and metadata quality validation alerts."
+	return "Query data lineage and quality alerts from the governance platform API. Requires GOVERNANCE_API_URL (or api_url)."
 }
 
 // Schema returns the parameters schema.
@@ -118,49 +172,74 @@ func (GovernanceLineageTool) Schema() *tool.JSONSchema {
 			},
 			"api_url": map[string]interface{}{
 				"type":        "string",
-				"description": "Optional API endpoint. If omitted, uses simulated governance events.",
+				"description": "Optional API base URL. Defaults to env GOVERNANCE_API_URL.",
 			},
 		},
 	}
 }
 
-// Execute runs the governance query.
+// Execute runs the governance HTTP query when API URL is configured.
 func (GovernanceLineageTool) Execute(ctx context.Context, params map[string]interface{}) (*tool.ToolResult, error) {
-	alerts := []map[string]interface{}{
-		{
-			"table":               "fact_sales",
-			"rule":                "null_check_on_sale_id",
-			"status":              "FAILED",
-			"severity":            "CRITICAL",
-			"value":               "124 nulls found",
-			"timestamp":           "2026-06-01 16:00:00",
-			"impacted_downstream": []string{"sales_dashboard_app", "monthly_financial_report"},
-		},
-		{
-			"table":               "dim_products",
-			"rule":                "unique_check_on_product_id",
-			"status":              "FAILED",
-			"severity":            "WARNING",
-			"value":               "2 duplicates found",
-			"timestamp":           "2026-06-01 15:30:00",
-			"impacted_downstream": []string{"fact_sales"},
-		},
-		{
-			"table":               "user_profiles",
-			"rule":                "format_check_on_email",
-			"status":              "PASSED",
-			"severity":            "INFO",
-			"value":               "0 invalid emails",
-			"timestamp":           "2026-06-01 15:00:00",
-			"impacted_downstream": []string{},
-		},
+	apiURL, _ := params["api_url"].(string)
+	apiURL = strings.TrimSpace(apiURL)
+	if apiURL == "" {
+		apiURL = strings.TrimSpace(os.Getenv("GOVERNANCE_API_URL"))
+	}
+	if apiURL == "" {
+		return &tool.ToolResult{
+			Success: false,
+			Output:  "GOVERNANCE_API_URL 未配置：请设置治理平台 API 地址，或通过 api_url 参数传入。不会返回模拟血缘/质量数据。",
+		}, nil
 	}
 
-	b, err := json.Marshal(alerts)
+	domain, _ := params["domain"].(string)
+	path := strings.TrimSpace(os.Getenv("GOVERNANCE_LINEAGE_PATH"))
+	if path == "" {
+		path = "/api/v1/quality/alerts"
+	}
+	target := strings.TrimSuffix(apiURL, "/") + path
+	if domain != "" {
+		target += "?domain=" + urlQueryEscape(domain)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
 	if err != nil {
 		return &tool.ToolResult{Success: false, Output: err.Error()}, nil
 	}
-	return &tool.ToolResult{Success: true, Output: string(b)}, nil
+	if token := strings.TrimSpace(os.Getenv("GOVERNANCE_API_TOKEN")); token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return &tool.ToolResult{Success: false, Output: fmt.Sprintf("治理 API 请求失败: %v", err)}, nil
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return &tool.ToolResult{Success: false, Output: err.Error()}, nil
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return &tool.ToolResult{
+			Success: false,
+			Output:  fmt.Sprintf("治理 API 返回 %d: %s", resp.StatusCode, truncateToolOutput(string(body), 500)),
+		}, nil
+	}
+	return &tool.ToolResult{Success: true, Output: string(body)}, nil
+}
+
+func urlQueryEscape(s string) string {
+	return strings.ReplaceAll(strings.TrimSpace(s), " ", "%20")
+}
+
+func truncateToolOutput(s string, max int) string {
+	s = strings.TrimSpace(s)
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "…"
 }
 
 var _ tool.Tool = GovernanceLineageTool{}

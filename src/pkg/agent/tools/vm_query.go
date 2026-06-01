@@ -70,6 +70,26 @@ func (VMQueryTool) Execute(ctx context.Context, params map[string]interface{}) (
 	// Resolve target URL
 	targetURL, _ := params["url"].(string)
 	targetURL = strings.TrimSpace(targetURL)
+
+	// Try parsing ops context to find target URL and monitor labels
+	opsCtx := ParseOpsContext(ctx)
+	var monitorLabels string
+	if opsCtx != nil && opsCtx.ClusterID != "" && opsCtx.ClusterID != "all" {
+		if GetClusterConfig != nil {
+			c, err := GetClusterConfig(opsCtx.ClusterID)
+			if err == nil {
+				if targetURL == "" {
+					if c.MetricsBaseUrl != "" {
+						targetURL = c.MetricsBaseUrl
+					} else if c.VMUrlRef != "" {
+						targetURL = c.VMUrlRef
+					}
+				}
+				monitorLabels = c.MonitorLabels
+			}
+		}
+	}
+
 	if targetURL == "" {
 		targetURL = os.Getenv("VICTORIAMETRICS_URL")
 	}
@@ -77,8 +97,14 @@ func (VMQueryTool) Execute(ctx context.Context, params map[string]interface{}) (
 		targetURL = os.Getenv("PROMETHEUS_URL")
 	}
 	if targetURL == "" {
-		// Default VictoriaMetrics single-node address
-		targetURL = "http://localhost:8428"
+		return &tool.ToolResult{
+			Success: false,
+			Output:  "VictoriaMetrics/Prometheus URL is not configured. Please set VICTORIAMETRICS_URL or PROMETHEUS_URL.",
+		}, nil
+	}
+
+	if monitorLabels != "" {
+		query = InjectLabelsIntoPromQL(query, monitorLabels)
 	}
 
 	// Ensure no trailing slash

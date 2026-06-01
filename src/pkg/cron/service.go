@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/openocta/openocta/pkg/agent/tools"
+	"github.com/openocta/openocta/pkg/ops"
 )
 
 // Service manages cron jobs.
@@ -45,6 +47,10 @@ type cronRunLogEntry struct {
 	RunAtMs     *int64 `json:"runAtMs,omitempty"`
 	DurationMs  *int64 `json:"durationMs,omitempty"`
 	NextRunAtMs *int64 `json:"nextRunAtMs,omitempty"`
+	Domain      string              `json:"domain,omitempty"`
+	ClusterID   string              `json:"clusterId,omitempty"`
+	Component   string              `json:"component,omitempty"`
+	Result      *ops.InspectionResult `json:"result,omitempty"`
 }
 
 // resolveRunLogPath returns the JSONL run log path for a job ID.
@@ -54,7 +60,7 @@ func (s *Service) resolveRunLogPath(jobID string) string {
 }
 
 // appendRunLogEntry appends one finished-action entry to the job's run log.
-func (s *Service) appendRunLogEntry(job CronJob, status, errMsg, summary, sessionKey string, runAtMs, durationMs, nextRunAtMs *int64) {
+func (s *Service) appendRunLogEntry(job CronJob, status, errMsg, summary, sessionKey string, runAtMs, durationMs, nextRunAtMs *int64, domain, clusterID, component string, result *ops.InspectionResult) {
 	entry := cronRunLogEntry{
 		Ts:          time.Now().UnixMilli(),
 		JobID:       job.ID,
@@ -66,6 +72,10 @@ func (s *Service) appendRunLogEntry(job CronJob, status, errMsg, summary, sessio
 		RunAtMs:     runAtMs,
 		DurationMs:  durationMs,
 		NextRunAtMs: nextRunAtMs,
+		Domain:      domain,
+		ClusterID:   clusterID,
+		Component:   component,
+		Result:      result,
 	}
 	data, err := json.Marshal(entry)
 	if err != nil {
@@ -266,7 +276,7 @@ func (s *Service) Remove(id string) error {
 }
 
 // Run runs a job by ID. mode is "due" or "force".
-func (s *Service) Run(id string, mode string) error {
+func (s *Service) Run(id string, mode string, domain, clusterId, component string) error {
 	startMs := time.Now().UnixMilli()
 
 	// Snapshot job and deps under lock so we can safely execute without holding the mutex.
@@ -337,13 +347,20 @@ func (s *Service) Run(id string, mode string) error {
 				deps.RequestHeartbeatNow("agent:main:cron:" + id)
 			}
 		} else if jobCopy.SessionTarget == "isolated" && jobCopy.Payload.Kind == "agentTurn" {
+			message := jobCopy.Payload.Message
+			if domain != "" {
+				prefix := tools.BuildOpsContextLine(domain, clusterId, component)
+				if prefix != "" && !strings.Contains(message, "[运维上下文]") {
+					message = prefix + "\n\n" + message
+				}
+			}
 			// Prefer RunCronChat so that cron runs go through chat.send and
 			// produce proper transcripts and session store entries. Fall back
 			// to RunIsolatedAgentJob for backwards compatibility.
 			if deps.RunCronChat != nil {
-				deps.RunCronChat(jobCopy, sessionKey, cronSessionID, jobCopy.Payload.Message)
+				deps.RunCronChat(jobCopy, sessionKey, cronSessionID, message)
 			} else if deps.RunIsolatedAgentJob != nil {
-				deps.RunIsolatedAgentJob(jobCopy, jobCopy.Payload.Message)
+				deps.RunIsolatedAgentJob(jobCopy, message)
 			}
 		}
 	}
@@ -383,7 +400,7 @@ func (s *Service) Run(id string, mode string) error {
 
 	// Append run log entry without holding the lock.
 	runAt := startMs
-	s.appendRunLogEntry(jobCopy, status, errMsg, "", sessionKey, &runAt, &durationMs, nextRunAtMs)
+	s.appendRunLogEntry(jobCopy, status, errMsg, "", sessionKey, &runAt, &durationMs, nextRunAtMs, domain, clusterId, component, nil)
 
 	return nil
 }
@@ -471,7 +488,7 @@ func (s *Service) Start() {
 			nowMs = time.Now().UnixMilli()
 			dueIds := s.dueJobIDs(nowMs)
 			for _, id := range dueIds {
-				_ = s.Run(id, "due")
+				_ = s.Run(id, "due", "", "", "")
 			}
 			// 仅在有任务实际执行时重算下次运行时间，避免覆盖「即将到期」任务的 NextRunAtMs
 			// （例如因时钟偏差未命中 dueJobIDs，RecomputeNextRuns 会错误跳过该次执行）

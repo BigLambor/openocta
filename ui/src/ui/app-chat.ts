@@ -13,7 +13,8 @@ import { setLastActiveSessionKey, syncUrlWithSessionKey } from "./app-settings.t
 import { resetToolStream } from "./app-tool-stream.ts";
 import { abortChatRun, loadChatHistory, sendChatMessage } from "./controllers/chat.ts";
 import { loadSessions } from "./controllers/sessions.ts";
-import { normalizeBasePath } from "./navigation.ts";
+import { normalizeBasePath, titleForTab, type Tab } from "./navigation.ts";
+import { buildOpsContextLine, isOpsDomainTab } from "./ops/entity-config.ts";
 import { generateUUID } from "./uuid.ts";
 
 export type ChatHost = {
@@ -258,6 +259,8 @@ export async function handleSendChat(
     return;
   }
 
+  const messageWithOpsContext = prependOpsContextIfNeeded(host as unknown as OpenClawApp, message);
+
   const refreshSessions = opts?.refreshSessions ?? isChatResetCommand(message);
   if (messageOverride == null) {
     host.chatMessage = "";
@@ -266,11 +269,11 @@ export async function handleSendChat(
   }
 
   if (isChatBusy(host)) {
-    enqueueChatMessage(host, message, attachmentsToSend, refreshSessions);
+    enqueueChatMessage(host, messageWithOpsContext, attachmentsToSend, refreshSessions);
     return;
   }
 
-  await sendChatMessageNow(host, message, {
+  await sendChatMessageNow(host, messageWithOpsContext, {
     previousDraft: messageOverride == null ? previousDraft : undefined,
     restoreDraft: Boolean(messageOverride && opts?.restoreDraft),
     attachments: hasAttachments ? attachmentsToSend : undefined,
@@ -297,6 +300,23 @@ export async function refreshChat(host: ChatHost) {
 }
 
 export const flushChatQueueForEvent = flushChatQueue;
+
+function prependOpsContextIfNeeded(app: OpenClawApp, message: string): string {
+  if (!message || message.startsWith("/")) {
+    return message;
+  }
+  if (message.includes("[运维上下文]")) {
+    return message;
+  }
+  const tab = app.tab;
+  if (!isOpsDomainTab(tab)) {
+    return message;
+  }
+  const clusters = app.opsDomainClusters?.[tab] ?? [];
+  const entityId = app.opsSelectedEntityIds?.[tab] ?? "all";
+  const line = buildOpsContextLine(titleForTab(tab as Tab), entityId, clusters);
+  return `${line}\n\n${message}`;
+}
 
 type SessionDefaultsSnapshot = {
   defaultAgentId?: string;

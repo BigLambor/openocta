@@ -23,6 +23,16 @@
   overflow: hidden;
 }
 
+.shell--no-nav {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas:
+    "topbar"
+    "content";
+}
+.shell--no-nav .nav {
+  display: none;
+}
+
 @supports (height: 100dvh) {
   .shell {
     height: 100dvh;
@@ -1740,8 +1750,176 @@ button.nav-item {
 .topbar-status {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   flex-shrink: 0;
+}
+
+/* P3-2: 顶栏系统 / 账号下拉（原 app-render 内联样式） */
+.agent-core-dropdown {
+  position: relative;
+  display: inline-block;
+}
+
+.agent-core-dropdown--spaced {
+  margin-left: 8px;
+}
+
+.agent-core-dropdown::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  height: 10px;
+  display: none;
+}
+
+.agent-core-dropdown .dropdown-menu-content {
+  display: none;
+  position: absolute;
+  right: 0;
+  top: 100%;
+  margin-top: 4px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 8px);
+  padding: 6px;
+  box-shadow: var(--shadow-md);
+  z-index: 9999;
+  min-width: 180px;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.agent-core-dropdown .dropdown-menu-content--wide {
+  min-width: 180px;
+}
+
+.agent-core-dropdown:hover::after,
+.agent-core-dropdown:hover .dropdown-menu-content,
+.agent-core-dropdown:focus-within::after,
+.agent-core-dropdown:focus-within .dropdown-menu-content {
+  display: flex;
+}
+
+.agent-core-dropdown .dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: transparent;
+  border: none;
+  color: var(--text-regular);
+  border-radius: var(--radius-sm, 6px);
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+  font-size: 13px;
+  font-weight: 500;
+  transition:
+    background-color var(--duration-fast, 0.15s) ease,
+    color var(--duration-fast, 0.15s) ease;
+}
+
+.agent-core-dropdown .dropdown-item:hover,
+.agent-core-dropdown .dropdown-item.active {
+  background: var(--bg-content);
+  color: var(--text-primary);
+}
+
+.agent-core-dropdown .dropdown-item.active {
+  color: var(--accent);
+}
+
+.agent-core-dropdown .dropdown-item .dropdown-icon {
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  opacity: 0.8;
+}
+
+.agent-core-dropdown .dropdown-item:hover .dropdown-icon,
+.agent-core-dropdown .dropdown-item.active .dropdown-icon {
+  opacity: 1;
+}
+
+.dropdown-trigger--round {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  color: var(--text-secondary);
+  transition:
+    background-color var(--duration-fast, 0.15s) ease,
+    color var(--duration-fast, 0.15s) ease;
+}
+
+.dropdown-trigger--round:hover {
+  background: var(--bg-hover, rgba(255, 255, 255, 0.06));
+  color: var(--text-primary);
+}
+
+.dropdown-trigger--round .topbar-link__icon {
+  width: 16px;
+  height: 16px;
+}
+
+.dropdown-trigger--avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  background: var(--accent, #3b82f6);
+  color: #fff;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1;
+  transition: opacity var(--duration-fast, 0.15s) ease;
+}
+
+.dropdown-trigger--avatar:hover {
+  opacity: 0.92;
+}
+
+.dropdown-menu__header {
+  padding: 12px 12px 8px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.dropdown-menu__username {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.2;
+}
+
+.dropdown-menu__role {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.dropdown-item--danger {
+  color: #dc2626;
+}
+
+.dropdown-item--danger:hover {
+  color: #dc2626;
+  background: rgba(220, 38, 38, 0.08);
 }
 
 .window-controls {

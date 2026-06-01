@@ -556,6 +556,29 @@ function segmentAssistantTurn(
         currentRun = newRun;
       }
     }
+
+    const resultCards = cards.filter((card) => card.kind === "result");
+    if (!isToolResult && resultCards.length > 0) {
+      if (!currentToolSegment) {
+        currentToolSegment = { type: "tools", runs: [] };
+        segments.push(currentToolSegment);
+      }
+      for (const card of resultCards) {
+        const output = card.text ? extractToolOutputText(card.text) : "";
+        const unmatchedRun = currentToolSegment.runs.find((r) => r.tool === card.name && r.output === "");
+        if (unmatchedRun) {
+          unmatchedRun.output = output;
+          unmatchedRun.success = inferToolSuccess(output);
+        } else {
+          currentToolSegment.runs.push({
+            command: "command",
+            tool: card.name || "tool",
+            output,
+            success: inferToolSuccess(output),
+          });
+        }
+      }
+    }
   }
 
   return segments;
@@ -620,6 +643,7 @@ function extractGroupMetrics(group: MessageGroup) {
 function renderToolSegment(
   runs: ToolRunEntry[],
   isStreaming: boolean,
+  onOpenSidebar?: (content: string) => void,
 ) {
   const groupsMap = new Map<string, ToolGroup>();
   for (const run of runs) {
@@ -637,6 +661,7 @@ function renderToolSegment(
     group.runs.push(run);
   }
   const toolGroups = Array.from(groupsMap.values());
+  const canClick = Boolean(onOpenSidebar);
 
   return html`
     <div class="chat-tool-segment">
@@ -672,14 +697,26 @@ function renderToolSegment(
                 if (isStreaming && runIdx < tg.runs.length - 1) {
                   return nothing;
                 }
+                const handleOpenClick = (e: Event) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  if (run.output) {
+                    onOpenSidebar!(run.output);
+                  }
+                };
                 return html`
                   <details class="chat-turn-command" ?open=${!run.success}>
-                    <summary class="chat-turn-command__summary">
-                      <span class="chat-turn-command__prompt">$</span>
-                      <span class="chat-turn-command__text">
-                        ${run.command || run.tool}
+                    <summary class="chat-turn-command__summary" style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
+                      <span style="display: flex; align-items: center; gap: 4px;">
+                        <span class="chat-turn-command__prompt">$</span>
+                        <span class="chat-turn-command__text">
+                          ${run.command || run.tool}
+                        </span>
                       </span>
-                      <span class="chat-turn-command__status-dot ${run.success ? "success" : "failed"}"></span>
+                      <span style="display: flex; align-items: center; gap: 8px;">
+                        ${canClick && run.output ? html`<button class="btn btn--text chat-tool-run__open-sidebar" @click=${handleOpenClick} style="font-size: 11px; padding: 2px 4px; color: var(--text-secondary); cursor: pointer; border: none; background: transparent;">在新窗口中打开</button>` : nothing}
+                        <span class="chat-turn-command__status-dot ${run.success ? "success" : "failed"}"></span>
+                      </span>
                     </summary>
                     <pre class="chat-tool-run__output">${run.output || "(no output)"}</pre>
                   </details>
@@ -751,7 +788,7 @@ function renderAssistantTurnMessages(
                     opts.onOpenSidebar,
                   );
                 } else {
-                  return renderToolSegment(seg.runs, !!group.isStreaming);
+                  return renderToolSegment(seg.runs, !!group.isStreaming, opts.onOpenSidebar);
                 }
               })}
             </div>
@@ -780,7 +817,7 @@ function renderCollapsedToolResult(
   markdown: string | null,
   reasoningMarkdown: string | null,
   opts: { isStreaming: boolean; showReasoning: boolean },
-  _onOpenSidebar?: (content: string) => void,
+  onOpenSidebar?: (content: string) => void,
 ) {
   const bodyDoc = mergeToolExpandableBody(markdown, toolCards);
   const primaryCommand =
@@ -790,6 +827,14 @@ function renderCollapsedToolResult(
       .find(Boolean) ?? "";
   const runLabel = toolCards.length ? formatToolRunLabel(toolCards) : "已运行命令";
   const outputText = bodyDoc?.trim() ? extractToolOutputText(bodyDoc) : "";
+  const canClick = Boolean(onOpenSidebar);
+  const handleOpenClick = (e: Event) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (bodyDoc) {
+      onOpenSidebar!(bodyDoc);
+    }
+  };
 
   return html`
     <div class="chat-tool-result-block">
@@ -821,7 +866,10 @@ function renderCollapsedToolResult(
           outputText
             ? html`
                 <div class="chat-tool-run__panel">
-                  <div class="chat-tool-run__panel-title">Shell</div>
+                  <div class="chat-tool-run__panel-title" style="display: flex; justify-content: space-between; align-items: center;">
+                    <span>Shell</span>
+                    ${canClick && bodyDoc ? html`<button class="btn btn--text chat-tool-run__open-sidebar" @click=${handleOpenClick} style="font-size: 11px; padding: 2px 4px; color: var(--text-secondary); cursor: pointer; border: none; background: transparent;">在新窗口中打开</button>` : nothing}
+                  </div>
                   <pre class="chat-tool-run__output">${outputText}</pre>
                 </div>
               `

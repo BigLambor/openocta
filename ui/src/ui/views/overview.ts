@@ -1,264 +1,342 @@
-import { html } from "lit";
-import type { GatewayHelloOk } from "../gateway.ts";
-import type { UiSettings } from "../storage.ts";
-import { formatAgo, formatDurationMs } from "../format.ts";
-import { formatNextRun } from "../presenter.ts";
-import { t } from "../strings.js";
+import { html, nothing } from "lit";
+import { icons } from "../icons.ts";
+import { renderOpsEmpty, renderOpsError, renderOpsSkeleton } from "../components/ops-status.ts";
+import type { OpsDashboardSummary } from "../controllers/ops-clusters.ts";
+import type { Tab } from "../navigation.ts";
 
-export type OverviewProps = {
-  connected: boolean;
-  hello: GatewayHelloOk | null;
-  settings: UiSettings;
-  password: string;
-  lastError: string | null;
-  presenceCount: number;
-  sessionsCount: number | null;
-  cronEnabled: boolean | null;
-  cronNext: number | null;
-  lastChannelsRefresh: number | null;
-  onSettingsChange: (next: UiSettings) => void;
-  onPasswordChange: (next: string) => void;
-  onSessionKeyChange: (next: string) => void;
-  onConnect: () => void;
-  onRefresh: () => void;
+export type OverviewDomainCard = {
+  tab: Tab;
+  name: string;
+  icon: "network" | "building" | "database" | "layout" | "activity";
+  score?: number;
+  clusterCount?: number;
+  note?: string;
 };
 
+export type OverviewStats = {
+  totalClusters: number;
+  healthyClusters: number;
+  warningClusters: number;
+  pendingAlerts: number;
+};
+
+export type OverviewProps = {
+  connected?: boolean;
+  loading?: boolean;
+  dashboardSummary?: OpsDashboardSummary | null;
+  dashboardError?: string | null;
+  stats?: OverviewStats | null;
+  domains?: OverviewDomainCard[] | null;
+  globalInspecting?: boolean;
+  dashboardToast?: string | null;
+  onOpenAssets?: () => void;
+  onOpenConfig?: () => void;
+  onNavigateDomain?: (tab: Tab) => void;
+  onOpenScheduledTasks?: () => void;
+  onRunGlobalInspection?: () => void;
+  onOpenPendingAlerts?: () => void;
+  canInspect?: boolean;
+};
+
+const DOMAIN_TAB: Record<string, Tab> = {
+  hadoop: "hadoop",
+  fi: "fi",
+  gbase: "gbase",
+  governance: "governance",
+  dataapps: "dataapps",
+};
+
+const DOMAIN_ICON: Record<string, OverviewDomainCard["icon"]> = {
+  hadoop: "network",
+  fi: "building",
+  gbase: "database",
+  governance: "layout",
+  dataapps: "activity",
+};
+
+const DOMAIN_PLACEHOLDERS: OverviewDomainCard[] = [
+  { tab: "hadoop", name: "BCH生态", icon: "network" },
+  { tab: "fi", name: "FI商业生态", icon: "building" },
+  { tab: "gbase", name: "GBase数据库", icon: "database" },
+  { tab: "governance", name: "开发治理平台", icon: "layout" },
+  { tab: "dataapps", name: "数据App运维", icon: "activity" },
+];
+
+const DOMAIN_DISPLAY_NAME: Record<string, string> = Object.fromEntries(
+  DOMAIN_PLACEHOLDERS.map((d) => [d.tab, d.name]),
+);
+
+function summaryToCards(summary: OpsDashboardSummary): {
+  stats: OverviewStats;
+  domains: OverviewDomainCard[];
+} {
+  return {
+    stats: {
+      totalClusters: summary.totalClusters,
+      healthyClusters: summary.healthyClusters,
+      warningClusters: summary.warningClusters,
+      pendingAlerts: summary.pendingAlerts,
+    },
+    domains: summary.domains.map((d) => {
+      const score =
+        d.healthScore != null && Number.isFinite(d.healthScore) ? Math.round(d.healthScore) : undefined;
+      const tab = DOMAIN_TAB[d.domain] ?? "hadoop";
+      const note =
+        d.note ||
+        (d.clusterCount > 0 && score == null && d.healthScoreNote ? d.healthScoreNote : undefined);
+      return {
+        tab,
+        name: DOMAIN_DISPLAY_NAME[tab] ?? d.domain,
+        icon: DOMAIN_ICON[d.domain] ?? "network",
+        score,
+        clusterCount: d.clusterCount,
+        note,
+      };
+    }),
+  };
+}
+
+function iconForDomain(icon: OverviewDomainCard["icon"]) {
+  return icons[icon];
+}
+
 export function renderOverview(props: OverviewProps) {
-  const snapshot = props.hello?.snapshot as { uptimeMs?: number } | undefined;
-  // uptimeMs lives on snapshot; tickIntervalMs is on hello-ok root policy (not snapshot.policy).
-  const uptime = formatDurationMs(snapshot?.uptimeMs);
-  const tickMs = props.hello?.policy?.tickIntervalMs;
-  const tick =
-    typeof tickMs === "number" && Number.isFinite(tickMs) && tickMs > 0
-      ? formatDurationMs(tickMs)
-      : "n/a";
-  const authHint = (() => {
-    if (props.connected || !props.lastError) {
-      return null;
-    }
-    const lower = props.lastError.toLowerCase();
-    const authFailed = lower.includes("unauthorized") || lower.includes("connect failed");
-    if (!authFailed) {
-      return null;
-    }
-    const hasToken = Boolean(props.settings.token.trim());
-    const hasPassword = Boolean(props.password.trim());
-    if (!hasToken && !hasPassword) {
-      return html`
-        <div class="muted" style="margin-top: 8px">
-          This gateway requires auth. Add a token or password, then click Connect.
-          <div style="margin-top: 6px">
-            <span class="mono">openclaw dashboard --no-open</span> → open the Control UI<br />
-            <span class="mono">openclaw doctor --generate-gateway-token</span> → set token
-          </div>
-          <div style="margin-top: 6px">
-            <a
-              class="session-link"
-              href="https://docs.openclaw.ai/web/dashboard"
-              target="_blank"
-              rel="noreferrer"
-              title="Open Control UI auth docs"
-              >Docs: Control UI auth</a
-            >
-          </div>
-        </div>
-      `;
-    }
-    return html`
-      <div class="muted" style="margin-top: 8px">
-        Auth failed. Update the token or password in Control UI settings, then click Connect.
-        <div style="margin-top: 6px">
-          <a
-            class="session-link"
-            href="https://docs.openclaw.ai/web/dashboard"
-            target="_blank"
-            rel="noreferrer"
-            title="Open Control UI auth docs"
-            >Docs: Control UI auth</a
-          >
-        </div>
-      </div>
-    `;
-  })();
-  const insecureContextHint = (() => {
-    if (props.connected || !props.lastError) {
-      return null;
-    }
-    const isSecureContext = typeof window !== "undefined" ? window.isSecureContext : true;
-    if (isSecureContext) {
-      return null;
-    }
-    const lower = props.lastError.toLowerCase();
-    if (!lower.includes("secure context") && !lower.includes("device identity required")) {
-      return null;
-    }
-    return html`
-      <div class="muted" style="margin-top: 8px">
-        This page is HTTP, so the browser blocks device identity. Use HTTPS (Tailscale Serve) or open
-        <span class="mono">http://127.0.0.1:18900</span> on the gateway host.
-        <div style="margin-top: 6px">
-          If you must stay on HTTP, set
-          <span class="mono">gateway.controlUi.allowInsecureAuth: true</span> (token-only).
-        </div>
-        <div style="margin-top: 6px">
-          <a
-            class="session-link"
-            href="https://docs.openclaw.ai/gateway/tailscale"
-            target="_blank"
-            rel="noreferrer"
-            title="Open Tailscale Serve docs"
-            >Docs: Tailscale Serve</a
-          >
-          <span class="muted"> · </span>
-          <a
-            class="session-link"
-            href="https://docs.openclaw.ai/web/control-ui#insecure-http"
-            target="_blank"
-            rel="noreferrer"
-            title="Open Insecure HTTP docs"
-            >Docs: Insecure HTTP</a
-          >
-        </div>
-      </div>
-    `;
-  })();
+  const fromApi = props.dashboardSummary ? summaryToCards(props.dashboardSummary) : null;
+  const stats = fromApi?.stats ?? props.stats ?? null;
+  const hasStats = stats != null && (stats.totalClusters > 0 || fromApi != null);
+  const domains =
+    fromApi?.domains ??
+    (props.domains?.length ? props.domains : hasStats && stats && stats.totalClusters > 0 ? [] : null);
+  const showEmptyMetrics = fromApi != null && stats != null && stats.totalClusters === 0;
 
   return html`
-    <section class="grid grid-cols-2">
-      <div class="card">
-        <div class="card-title">${t("overviewGatewayAccess")}</div>
-        <div class="card-sub">${t("overviewGatewayAccessSub")}</div>
-        <div class="form-grid" style="margin-top: 16px;">
-          <label class="field">
-            <span>${t("overviewGatewayHost")}</span>
-            <span class="input"><input
-              .value=${props.settings.gatewayUrl}
-              @input=${(e: Event) => {
-                const v = (e.target as HTMLInputElement).value;
-                props.onSettingsChange({ ...props.settings, gatewayUrl: v });
-              }}
-              placeholder="127.0.0.1:18900"
-            /></span>
-          </label>
-          <label class="field">
-            <span>${t("overviewGatewayToken")}</span>
-            <span class="input"><input
-              .value=${props.settings.token}
-              @input=${(e: Event) => {
-                const v = (e.target as HTMLInputElement).value;
-                props.onSettingsChange({ ...props.settings, token: v });
-              }}
-              placeholder="OPENCLAW_GATEWAY_TOKEN"
-            /></span>
-          </label>
-          <label class="field">
-            <span>${t("overviewPassword")}</span>
-            <span class="input"><input
-              type="password"
-              .value=${props.password}
-              @input=${(e: Event) => {
-                const v = (e.target as HTMLInputElement).value;
-                props.onPasswordChange(v);
-              }}
-              placeholder="system or shared password"
-            /></span>
-          </label>
-          <label class="field">
-            <span>${t("overviewDefaultSessionKey")}</span>
-            <span class="input"><input
-              .value=${props.settings.sessionKey}
-              @input=${(e: Event) => {
-                const v = (e.target as HTMLInputElement).value;
-                props.onSessionKeyChange(v);
-              }}
-            /></span>
-          </label>
-        </div>
-        <div class="row" style="margin-top: 14px;">
-          <button class="btn primary" @click=${() => props.onConnect()}>${t("overviewConnect")}</button>
-          <button class="btn" @click=${() => props.onRefresh()}>${t("overviewRefresh")}</button>
-          <span class="muted">${t("overviewConnectHint")}</span>
+    <div class="ops-page ops-dashboard">
+      <div class="ops-page-header ops-dashboard-header">
+        <div>
+          <h1>运维全局视图</h1>
+          <p>
+            ${stats && stats.totalClusters > 0
+              ? `已纳管 ${stats.totalClusters} 个集群，覆盖 ${domains?.filter((d) => (d.clusterCount ?? 0) > 0).length ?? 0} 个有资产业务域。`
+              : fromApi != null
+                ? "尚未登记集群资产，请先在「集群资产管理」中添加。"
+                : "接入集群资产与 VictoriaMetrics 后，将在此展示纳管规模、健康度与告警概况。"}
+          </p>
         </div>
       </div>
 
-      <div class="card">
-        <div class="card-title">${t("overviewSnapshot")}</div>
-        <div class="card-sub">${t("overviewSnapshotSub")}</div>
-        <div class="stat-grid">
-          <div class="stat">
-            <div class="stat-label">${t("overviewStatus")}</div>
-            <div class="stat-value ${props.connected ? "ok" : "warn"}">
-              ${props.connected ? t("overviewConnected") : t("overviewDisconnected")}
+      ${props.dashboardError
+        ? html`
+            <div class="ops-panel" style="margin-bottom: 16px;">
+              ${renderOpsError({ message: props.dashboardError })}
             </div>
-          </div>
-          <div class="stat">
-            <div class="stat-label">${t("overviewUptime")}</div>
-            <div class="stat-value">${uptime}</div>
-          </div>
-          <div class="stat">
-            <div class="stat-label">${t("overviewTickInterval")}</div>
-            <div class="stat-value">${tick}</div>
-          </div>
-          <div class="stat">
-            <div class="stat-label">${t("overviewLastChannelsRefresh")}</div>
-            <div class="stat-value">
-              ${props.lastChannelsRefresh ? formatAgo(props.lastChannelsRefresh) : "n/a"}
+          `
+        : nothing}
+
+      ${props.loading
+        ? html`
+            <div class="ops-panel" style="margin-bottom: 24px;">${renderOpsSkeleton({ lines: 4 })}</div>
+          `
+        : nothing}
+
+      ${!hasStats && !props.loading && !showEmptyMetrics
+        ? html`
+            <div class="ops-panel ops-panel--empty">
+              ${renderOpsEmpty({
+                icon: "overviewGrid",
+                title: "暂无汇总数据",
+                description:
+                  "运维大屏指标来自集群资产登记与监控查询，当前尚未接入或未返回数据。",
+                hint: "请先在「集群资产管理」登记集群，并在环境变量中配置 VICTORIAMETRICS_URL。",
+                actionLabel: "前往集群资产管理",
+                onAction: props.onOpenAssets,
+                spread: true,
+              })}
             </div>
-          </div>
-        </div>
-        ${
-          props.lastError
-            ? html`<div class="callout danger" style="margin-top: 14px;">
-              <div>${props.lastError}</div>
-              ${authHint ?? ""}
-              ${insecureContextHint ?? ""}
-            </div>`
-            : html`
-                <div class="callout" style="margin-top: 14px">
-                  ${t("overviewChannelsHint")}
+          `
+        : showEmptyMetrics
+          ? html`
+              <div class="ops-panel ops-panel--empty">
+                ${renderOpsEmpty({
+                  icon: "server",
+                  title: "尚无纳管集群",
+                  description: "在集群资产管理中登记后，指标将自动汇总到此页。",
+                  actionLabel: "前往集群资产管理",
+                  onAction: props.onOpenAssets,
+                  spread: true,
+                })}
+              </div>
+            `
+          : stats
+            ? html`
+                <div class="stats-grid">
+                  <div class="stat-card">
+                    <div class="stat-icon stat-icon--blue">${icons.server}</div>
+                    <div class="stat-content">
+                      <h3>纳管集群</h3>
+                      <div class="stat-value">${stats.totalClusters}</div>
+                    </div>
+                  </div>
+                  <div class="stat-card">
+                    <div class="stat-icon stat-icon--ok">${icons.checkCircle}</div>
+                    <div class="stat-content">
+                      <h3>健康</h3>
+                      <div class="stat-value">${stats.healthyClusters}</div>
+                    </div>
+                  </div>
+                  <div class="stat-card">
+                    <div class="stat-icon stat-icon--warn">${icons.alertTriangle}</div>
+                    <div class="stat-content">
+                      <h3>亚健康</h3>
+                      <div class="stat-value">${stats.warningClusters}</div>
+                    </div>
+                  </div>
+                  <div class="stat-card">
+                    <div class="stat-icon stat-icon--danger">${icons.bell}</div>
+                    <div class="stat-content">
+                      <h3>待处理告警</h3>
+                      <div class="stat-value">${stats.pendingAlerts}</div>
+                    </div>
+                  </div>
                 </div>
               `
-        }
-      </div>
-    </section>
+            : nothing}
 
-    <section class="grid grid-cols-3">
-      <div class="card stat-card">
-        <div class="stat-label">${t("overviewInstances")}</div>
-        <div class="stat-value">${props.presenceCount}</div>
-        <div class="muted">${t("overviewInstancesSub")}</div>
-      </div>
-      <div class="card stat-card">
-        <div class="stat-label">${t("overviewSessions")}</div>
-        <div class="stat-value">${props.sessionsCount ?? "n/a"}</div>
-        <div class="muted">${t("overviewSessionsSub")}</div>
-      </div>
-      <div class="card stat-card">
-        <div class="stat-label">${t("overviewCron")}</div>
-        <div class="stat-value">
-          ${props.cronEnabled == null ? "n/a" : props.cronEnabled ? t("overviewCronEnabled") : t("overviewCronDisabled")}
-        </div>
-        <div class="muted">${t("overviewCronNext")} ${formatNextRun(props.cronNext)}</div>
-      </div>
-    </section>
+      <section class="domain-status-section">
+        <h2 class="section-title">
+          <span class="section-title__icon">${icons.activity}</span>
+          业务域健康度
+        </h2>
+        ${domains === null
+          ? html`
+              <div class="domain-grid domain-grid--placeholders">
+                ${DOMAIN_PLACEHOLDERS.map(
+                  (d) => html`
+                    <div class="domain-card domain-card--muted">
+                      <div class="domain-card-header">
+                        <div class="domain-name">${iconForDomain(d.icon)} ${d.name}</div>
+                        <span class="domain-score domain-score--muted">—</span>
+                      </div>
+                      <p class="domain-card-hint">待接入监控指标</p>
+                      ${props.onNavigateDomain
+                        ? html`
+                            <button
+                              type="button"
+                              class="ops-btn domain-card-link"
+                              @click=${() => props.onNavigateDomain!(d.tab)}
+                            >
+                              进入 ${d.name}
+                            </button>
+                          `
+                        : nothing}
+                    </div>
+                  `,
+                )}
+              </div>
+            `
+          : domains.length === 0
+            ? html`
+                <div class="ops-panel">
+                  ${renderOpsEmpty({
+                    icon: "activity",
+                    title: "暂无业务域健康分",
+                    description: "完成 VictoriaMetrics 对接后，将按域聚合健康得分。",
+                    compact: true,
+                  })}
+                </div>
+              `
+            : html`
+                <div class="domain-grid">
+                  ${domains.map((d) => {
+                    const score = d.score;
+                    const scoreClass =
+                      score == null
+                        ? "muted"
+                        : score >= 90
+                          ? ""
+                          : score >= 75
+                            ? "warning"
+                            : "critical";
+                    return html`
+                      <div class="domain-card ${score == null ? "domain-card--muted" : ""}">
+                        <div class="domain-card-header">
+                          <div class="domain-name">${iconForDomain(d.icon)} ${d.name}</div>
+                          <span class="domain-score ${scoreClass}">
+                            ${score != null ? `${score}分` : "—"}
+                          </span>
+                        </div>
+                        <div class="health-bar-container">
+                          <div
+                            class="health-bar ${scoreClass}"
+                            style="width: ${score != null ? Math.min(score, 100) : 0}%;"
+                          ></div>
+                        </div>
+                        <div class="domain-stats">
+                          <span>${d.clusterCount ?? 0} 个集群</span>
+                          <span>${d.note ?? "—"}</span>
+                        </div>
+                        ${props.onNavigateDomain
+                          ? html`
+                              <button
+                                type="button"
+                                class="ops-btn domain-card-link"
+                                @click=${() => props.onNavigateDomain!(d.tab)}
+                              >
+                                打开运维域
+                              </button>
+                            `
+                          : nothing}
+                      </div>
+                    `;
+                  })}
+                </div>
+              `}
+      </section>
 
-    <section class="card">
-      <div class="card-title">${t("overviewNotes")}</div>
-      <div class="card-sub">${t("overviewNotesSub")}</div>
-      <div class="note-grid" style="margin-top: 14px;">
-        <div>
-          <div class="note-title">${t("overviewNoteTailscale")}</div>
-          <div class="muted">${t("overviewNoteTailscaleSub")}</div>
+      ${props.dashboardToast
+        ? html`<div class="ops-dashboard-toast" role="status">${props.dashboardToast}</div>`
+        : nothing}
+
+      <section class="ops-dashboard-actions">
+        <h2 class="section-title">
+          <span class="section-title__icon">${icons.zap}</span>
+          快捷操作
+        </h2>
+        <div class="ops-panel ops-dashboard-actions__inner">
+          <button
+            type="button"
+            class="ops-btn ops-btn--primary ops-dashboard-actions__btn"
+            ?disabled=${!props.onRunGlobalInspection || !props.connected || props.globalInspecting || props.canInspect === false}
+            title=${props.canInspect === false
+              ? "当前账号无 ops:inspect 权限"
+              : !props.connected
+                ? "请先连接网关"
+                : "并行触发五个业务域的深度健康巡检任务"}
+            @click=${() => props.onRunGlobalInspection?.()}
+          >
+            ${props.globalInspecting ? "正在启动全局巡检…" : "启动全局深度巡检"}
+          </button>
+          <button
+            type="button"
+            class="ops-btn ops-dashboard-actions__btn"
+            ?disabled=${!props.onOpenPendingAlerts}
+            title="跳转到业务域「告警降噪与影响评估」子页"
+            @click=${() => props.onOpenPendingAlerts?.()}
+          >
+            查看未处理告警
+          </button>
+          <button
+            type="button"
+            class="ops-btn ops-dashboard-actions__btn"
+            ?disabled=${!props.onOpenScheduledTasks}
+            @click=${() => props.onOpenScheduledTasks?.()}
+          >
+            定时任务与运行历史
+          </button>
+          <button type="button" class="ops-btn ops-dashboard-actions__btn" @click=${() => props.onOpenConfig?.()}>
+            系统与环境配置
+          </button>
         </div>
-        <div>
-          <div class="note-title">${t("overviewNoteSessionHygiene")}</div>
-          <div class="muted">${t("overviewNoteSessionHygieneSub")}</div>
-        </div>
-        <div>
-          <div class="note-title">${t("overviewNoteCron")}</div>
-          <div class="muted">${t("overviewNoteCronSub")}</div>
-        </div>
-      </div>
-    </section>
+      </section>
+    </div>
   `;
 }

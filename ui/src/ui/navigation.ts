@@ -44,6 +44,7 @@ export type Tab =
   | "logs"
   | "llmTrace"
   | "sandbox"
+  | "assetManagement"
   // New operational technology domains
   | "hadoop"
   | "fi"
@@ -83,6 +84,7 @@ const TAB_PATHS: Record<Tab, string> = {
   logs: "/logs",
   llmTrace: "/llm-trace",
   sandbox: "/sandbox",
+  assetManagement: "/asset-management",
   // New operational technology domains paths
   hadoop: "/hadoop",
   fi: "/fi",
@@ -223,6 +225,8 @@ export function iconForTab(tab: Tab, active = false): IconName {
       return "users";
     case "agentSwarm":
       return "brain";
+    case "assetManagement":
+      return "server";
     case "overview":
       return "overviewGrid";
     case "channels":
@@ -254,15 +258,15 @@ export function iconForTab(tab: Tab, active = false): IconName {
     case "logs":
       return "scrollText";
     case "hadoop":
-      return "overviewGrid";
+      return "network";
     case "fi":
-      return "brain";
+      return "building";
     case "gbase":
-      return "monitor";
+      return "database";
     case "governance":
-      return "scrollText";
+      return "layout";
     case "dataapps":
-      return "folder";
+      return "activity";
     default:
       return "folder";
   }
@@ -294,6 +298,8 @@ export function titleForTab(tab: Tab) {
       return "社区";
     case "agents":
       return t("navTitleAgents");
+    case "chat":
+      return t("navTitleChat");
     case "overview":
       return t("navTitleOverview");
     case "channels":
@@ -319,7 +325,7 @@ export function titleForTab(tab: Tab) {
     case "logs":
       return t("navTitleLogs");
     case "hadoop":
-      return "Hadoop生态";
+      return "BCH生态";
     case "fi":
       return "FI商业生态";
     case "gbase":

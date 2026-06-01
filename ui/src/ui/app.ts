@@ -107,6 +107,7 @@ import {
 } from "./native-dialog-bridge.ts";
 import { bootstrapShellModeFromUrl, isDesktopShell } from "./open-external-url.ts";
 import { loadSettings, type UiSettings } from "./storage.ts";
+import { gatewayHttpBase } from "./gateway-url.ts";
 import type { NativeDialogModel } from "./views/native-dialog-overlay.ts";
 import { type ChatAttachment, type ChatQueueItem, type CronFormState } from "./ui-types.ts";
 
@@ -143,6 +144,10 @@ function resolveOnboardingMode(): boolean {
 @customElement("openclaw-app")
 export class OpenClawApp extends LitElement implements NativeDialogInvoker {
   @state() settings: UiSettings = loadSettings();
+
+  get gatewayHttpUrl(): string {
+    return gatewayHttpBase(this.settings.gatewayUrl);
+  }
   @state() password = "";
   @state() tab: Tab = "message";
   @state() onboarding = resolveOnboardingMode();
@@ -358,7 +363,38 @@ export class OpenClawApp extends LitElement implements NativeDialogInvoker {
     governance: null,
     dataapps: null,
   };
+  @state() opsAlertsByDomain: Record<
+    string,
+    import("./controllers/ops-alerts.ts").ReturnType<
+      typeof import("./controllers/ops-alerts.ts").mapAlertGroupForUI
+    >[]
+  > = {};
+  @state() opsAlertsStats: Record<
+    string,
+    { originalTotal: number; reductionRate: number; mergedTotal: number }
+  > = {};
+  @state() opsAlertsLoading: Record<string, boolean> = {};
+  @state() opsAlertsError: Record<string, string | null> = {};
+  @state() opsInspectionImStatus: import("./controllers/ops-inspection.ts").OpsInspectionIMStatus | null =
+    null;
   @state() opsIsInspecting: Record<string, boolean> = {
+    hadoop: false,
+    fi: false,
+    gbase: false,
+    governance: false,
+    dataapps: false,
+  };
+  @state() opsSelectedEntityIds: Record<string, string> = {
+    hadoop: "all",
+    fi: "all",
+    gbase: "all",
+    governance: "all",
+    dataapps: "all",
+  };
+  @state() opsDomainClusters: Record<string, import("./controllers/ops-clusters.ts").OpsClusterRecord[]> =
+    {};
+  @state() opsDomainClustersLoading: Record<string, boolean> = {};
+  @state() opsEntitySelectorOpen: Record<string, boolean> = {
     hadoop: false,
     fi: false,
     gbase: false,
@@ -380,6 +416,16 @@ export class OpenClawApp extends LitElement implements NativeDialogInvoker {
   @state() rbacUsersList: Array<Record<string, unknown>> = [];
   @state() rbacRolesList: Array<Record<string, unknown>> = [];
   @state() rbacUsersLoading = false;
+
+  @state() opsClusters: import("./controllers/ops-clusters.ts").OpsClusterRecord[] = [];
+  @state() opsClustersLoading = false;
+  @state() opsClustersError: string | null = null;
+  @state() opsDashboardSummary: import("./controllers/ops-clusters.ts").OpsDashboardSummary | null =
+    null;
+  @state() opsDashboardLoading = false;
+  @state() opsDashboardError: string | null = null;
+  @state() opsGlobalInspecting = false;
+  @state() opsDashboardToast: string | null = null;
 
   @state() agentsLoading = false;
   @state() agentsList: AgentsListResult | null = null;
@@ -814,6 +860,206 @@ export class OpenClawApp extends LitElement implements NativeDialogInvoker {
     await loadOverviewInternal(this as unknown as Parameters<typeof loadOverviewInternal>[0]);
   }
 
+  @state() opsCmdbSyncing = false;
+  @state() opsCmdbSyncMessage: string | null = null;
+
+  async loadOpsClusters() {
+    this.opsClustersLoading = true;
+    this.opsClustersError = null;
+    try {
+      const { fetchOpsClusters } = await import("./controllers/ops-clusters.ts");
+      this.opsClusters = await fetchOpsClusters(this);
+    } catch (err) {
+      this.opsClustersError = err instanceof Error ? err.message : String(err);
+      this.opsClusters = [];
+    } finally {
+      this.opsClustersLoading = false;
+    }
+  }
+
+  async syncOpsClustersFromCMDB() {
+    this.opsCmdbSyncing = true;
+    this.opsCmdbSyncMessage = null;
+    try {
+      const { syncOpsClustersFromCMDB } = await import("./controllers/ops-clusters.ts");
+      const result = await syncOpsClustersFromCMDB(this);
+      this.opsCmdbSyncMessage = `CMDB 同步完成（${result.source}）：新增 ${result.created}，更新 ${result.updated}，跳过 ${result.skipped}。`;
+      await this.loadOpsClusters();
+      await this.loadOpsDashboard();
+      for (const domain of ["hadoop", "fi", "gbase", "governance", "dataapps"]) {
+        await this.loadOpsDomainClusters(domain);
+      }
+    } catch (err) {
+      this.opsCmdbSyncMessage = err instanceof Error ? err.message : String(err);
+    } finally {
+      this.opsCmdbSyncing = false;
+    }
+  }
+
+  async loadOpsDashboard() {
+    this.opsDashboardLoading = true;
+    this.opsDashboardError = null;
+    try {
+      const { fetchOpsDashboardSummary } = await import("./controllers/ops-clusters.ts");
+      this.opsDashboardSummary = await fetchOpsDashboardSummary(this);
+    } catch (err) {
+      this.opsDashboardError = err instanceof Error ? err.message : String(err);
+      this.opsDashboardSummary = null;
+    } finally {
+      this.opsDashboardLoading = false;
+    }
+  }
+
+  private opsDashboardToastTimer: ReturnType<typeof setTimeout> | null = null;
+
+  private setOpsDashboardToast(message: string | null, autoClearMs = 8000) {
+    if (this.opsDashboardToastTimer) {
+      clearTimeout(this.opsDashboardToastTimer);
+      this.opsDashboardToastTimer = null;
+    }
+    this.opsDashboardToast = message;
+    if (message && autoClearMs > 0) {
+      this.opsDashboardToastTimer = setTimeout(() => {
+        this.opsDashboardToast = null;
+        this.opsDashboardToastTimer = null;
+      }, autoClearMs);
+    }
+  }
+
+  async runGlobalInspectionFromDashboard() {
+    if (!this.connected || !this.client || this.opsGlobalInspecting) {
+      return;
+    }
+    this.opsGlobalInspecting = true;
+    this.setOpsDashboardToast(null, 0);
+    try {
+      const { runGlobalInspection } = await import("./controllers/ops-dashboard.ts");
+      const { started, failed } = await runGlobalInspection(this);
+      const msg =
+        failed > 0
+          ? `已触发 ${started} 个巡检任务，${failed} 个启动失败。`
+          : `已并行启动 ${started} 个业务域深度巡检。`;
+      this.setOpsDashboardToast(msg);
+      void this.setTab("scheduledTasks");
+    } catch (err) {
+      this.setOpsDashboardToast(err instanceof Error ? err.message : String(err));
+    } finally {
+      this.opsGlobalInspecting = false;
+    }
+  }
+
+  async ackOpsAlertGroup(domain: string, groupId: string) {
+    try {
+      const { patchOpsAlertGroup } = await import("./controllers/ops-alerts.ts");
+      await patchOpsAlertGroup(this, groupId, { status: "resolved" });
+      await this.loadOpsDomainAlerts(domain);
+      this.setOpsDashboardToast("告警组已标记为已处理");
+    } catch (err) {
+      this.setOpsDashboardToast(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  openPendingAlertsFromDashboard() {
+    const summary = this.opsDashboardSummary;
+    const firstDomain =
+      summary?.domains.find((d) => d.clusterCount > 0)?.domain ??
+      summary?.domains[0]?.domain ??
+      "hadoop";
+    const tab = firstDomain as import("./navigation.ts").Tab;
+    this.opsActiveSubTabs = { ...this.opsActiveSubTabs, [tab]: "alerts" };
+    void this.setTab(tab);
+    void this.loadOpsDomainAlerts(tab);
+    const pending = summary?.pendingAlerts ?? 0;
+    const msg =
+      pending > 0
+        ? `当前汇总待处理告警 ${pending} 组，列表已刷新。`
+        : "已打开告警降噪页面，暂无待处理告警组。";
+    this.setOpsDashboardToast(msg);
+  }
+
+  async loadOpsInspectionImStatus() {
+    try {
+      const { fetchOpsInspectionIMStatus } = await import("./controllers/ops-inspection.ts");
+      this.opsInspectionImStatus = await fetchOpsInspectionIMStatus(this);
+    } catch {
+      this.opsInspectionImStatus = {
+        imConfigured: false,
+        channels: [],
+        lowScoreThreshold: 85,
+        hint: "无法读取 IM 通道状态，请检查网关连接。",
+      };
+    }
+  }
+
+  async loadOpsDomainAlerts(domain: string) {
+    this.opsAlertsLoading = { ...this.opsAlertsLoading, [domain]: true };
+    this.opsAlertsError = { ...this.opsAlertsError, [domain]: null };
+    try {
+      const { fetchOpsAlertGroups, mapAlertGroupForUI } = await import("./controllers/ops-alerts.ts");
+      const res = await fetchOpsAlertGroups(this, domain);
+      this.opsAlertsByDomain = {
+        ...this.opsAlertsByDomain,
+        [domain]: res.groups.map(mapAlertGroupForUI),
+      };
+      this.opsAlertsStats = {
+        ...this.opsAlertsStats,
+        [domain]: {
+          originalTotal: res.originalTotal,
+          reductionRate: res.reductionRate,
+          mergedTotal: res.mergedTotal,
+        },
+      };
+      const groups = this.opsAlertsByDomain[domain] ?? [];
+      const current = this.opsSelectedAlertGroupIds[domain];
+      if ((!current || !groups.some((g) => g.id === current)) && groups[0]) {
+        this.opsSelectedAlertGroupIds = {
+          ...this.opsSelectedAlertGroupIds,
+          [domain]: groups[0].id,
+        };
+      }
+    } catch (err) {
+      this.opsAlertsError = {
+        ...this.opsAlertsError,
+        [domain]: err instanceof Error ? err.message : String(err),
+      };
+      this.opsAlertsByDomain = { ...this.opsAlertsByDomain, [domain]: [] };
+    } finally {
+      this.opsAlertsLoading = { ...this.opsAlertsLoading, [domain]: false };
+    }
+  }
+
+  async loadOpsDomainClusters(domain: string) {
+    this.opsDomainClustersLoading = {
+      ...this.opsDomainClustersLoading,
+      [domain]: true,
+    };
+    try {
+      const { fetchOpsClusters } = await import("./controllers/ops-clusters.ts");
+      const {
+        buildEntityGroupsFromClusters,
+        entityIdInGroups,
+        getDefaultEntityIdFromClusters,
+      } = await import("./ops/entity-config.ts");
+      const list = await fetchOpsClusters(this, domain);
+      this.opsDomainClusters = { ...this.opsDomainClusters, [domain]: list };
+      const groups = buildEntityGroupsFromClusters(list);
+      const current = this.opsSelectedEntityIds[domain];
+      if (!current || !entityIdInGroups(groups, current)) {
+        this.opsSelectedEntityIds = {
+          ...this.opsSelectedEntityIds,
+          [domain]: getDefaultEntityIdFromClusters(list),
+        };
+      }
+    } catch {
+      this.opsDomainClusters = { ...this.opsDomainClusters, [domain]: [] };
+    } finally {
+      this.opsDomainClustersLoading = {
+        ...this.opsDomainClustersLoading,
+        [domain]: false,
+      };
+    }
+  }
+
   async loadCron() {
     await loadCronInternal(this as unknown as Parameters<typeof loadCronInternal>[0]);
   }
@@ -1178,7 +1424,7 @@ export class OpenClawApp extends LitElement implements NativeDialogInvoker {
       return;
     }
     try {
-      const res = await fetch(`${this.settings.gatewayUrl.replace(/\/$/, "")}/api/auth/me`, {
+      const res = await fetch(`${this.gatewayHttpUrl}/api/auth/me`, {
         headers: {
           "Authorization": `Bearer ${this.rbacToken}`
         }
@@ -1202,7 +1448,7 @@ export class OpenClawApp extends LitElement implements NativeDialogInvoker {
     this.rbacLoginLoading = true;
     this.rbacLoginError = null;
     try {
-      const res = await fetch(`${this.settings.gatewayUrl.replace(/\/$/, "")}/api/auth/login`, {
+      const res = await fetch(`${this.gatewayHttpUrl}/api/auth/login`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
@@ -1233,7 +1479,7 @@ export class OpenClawApp extends LitElement implements NativeDialogInvoker {
   async handleRbacLogout() {
     try {
       if (this.rbacToken) {
-        await fetch(`${this.settings.gatewayUrl.replace(/\/$/, "")}/api/auth/logout`, {
+        await fetch(`${this.gatewayHttpUrl}/api/auth/logout`, {
           method: "POST",
           headers: {
             "Authorization": `Bearer ${this.rbacToken}`
@@ -1266,8 +1512,8 @@ export class OpenClawApp extends LitElement implements NativeDialogInvoker {
       }
       
       const [usersRes, rolesRes] = await Promise.all([
-        fetch(`${this.settings.gatewayUrl.replace(/\/$/, "")}/api/rbac/users`, { headers }),
-        fetch(`${this.settings.gatewayUrl.replace(/\/$/, "")}/api/rbac/roles`, { headers })
+        fetch(`${this.gatewayHttpUrl}/api/rbac/users`, { headers }),
+        fetch(`${this.gatewayHttpUrl}/api/rbac/roles`, { headers })
       ]);
       
       if (usersRes.ok && rolesRes.ok) {
@@ -1282,7 +1528,7 @@ export class OpenClawApp extends LitElement implements NativeDialogInvoker {
   }
 
   async handleCreateUser(username, password, roleId) {
-    const res = await fetch(`${this.settings.gatewayUrl.replace(/\/$/, "")}/api/rbac/users`, {
+    const res = await fetch(`${this.gatewayHttpUrl}/api/rbac/users`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -1298,7 +1544,7 @@ export class OpenClawApp extends LitElement implements NativeDialogInvoker {
   }
 
   async handleDeleteUser(id) {
-    const res = await fetch(`${this.settings.gatewayUrl.replace(/\/$/, "")}/api/rbac/users/${id}`, {
+    const res = await fetch(`${this.gatewayHttpUrl}/api/rbac/users/${id}`, {
       method: "DELETE",
       headers: {
         "Authorization": `Bearer ${this.rbacToken}`

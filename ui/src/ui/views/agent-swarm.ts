@@ -888,7 +888,7 @@ export function renderAgentSwarm(props: AgentSwarmProps) {
                     )}`,
                 props,
               )}
-              ${props.swarmStreamText.trim()
+              ${(props.swarmStreamText ?? "").trim()
                 ? renderRightPanel(
                     "content",
                     "流式内容",
@@ -897,7 +897,7 @@ export function renderAgentSwarm(props: AgentSwarmProps) {
                     props,
                   )
                 : nothing}
-              ${props.swarmReasoningText.trim()
+              ${(props.swarmReasoningText ?? "").trim()
                 ? renderRightPanel(
                     "reasoning",
                     "推理",
@@ -906,12 +906,12 @@ export function renderAgentSwarm(props: AgentSwarmProps) {
                     props,
                   )
                 : nothing}
-              ${props.swarmToolEntries.length > 0
+              ${(props.swarmToolEntries ?? []).length > 0
                 ? renderRightPanel(
                     "tools",
                     "工具",
                     Boolean(props.swarmPanelCollapsed.tools),
-                    renderSwarmToolEntries(props.swarmToolEntries),
+                    renderSwarmToolEntries(props.swarmToolEntries ?? []),
                     props,
                   )
                 : nothing}

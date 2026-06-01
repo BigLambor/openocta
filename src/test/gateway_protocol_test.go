@@ -14,6 +14,8 @@ import (
 )
 
 func TestGatewayProtocol_ConnectHelloOk(t *testing.T) {
+	t.Setenv("OPENOCTA_STATE_DIR", t.TempDir())
+	t.Setenv("OPENOCTA_RUN_MODE", "service")
 	t.Setenv("OPENOCTA_SKIP_CHANNELS", "1")
 	t.Setenv("OPENOCTA_SKIP_CRON", "1")
 
@@ -70,6 +72,8 @@ func TestGatewayProtocol_ConnectHelloOk(t *testing.T) {
 }
 
 func TestGatewayProtocol_HealthRequest(t *testing.T) {
+	t.Setenv("OPENOCTA_STATE_DIR", t.TempDir())
+	t.Setenv("OPENOCTA_RUN_MODE", "service")
 	t.Setenv("OPENOCTA_SKIP_CHANNELS", "1")
 	t.Setenv("OPENOCTA_SKIP_CRON", "1")
 
@@ -133,6 +137,8 @@ func TestGatewayProtocol_HealthRequest(t *testing.T) {
 }
 
 func TestGatewayHTTP_Health(t *testing.T) {
+	t.Setenv("OPENOCTA_STATE_DIR", t.TempDir())
+	t.Setenv("OPENOCTA_RUN_MODE", "service")
 	t.Setenv("OPENOCTA_SKIP_CHANNELS", "1")
 	t.Setenv("OPENOCTA_SKIP_CRON", "1")
 
@@ -151,6 +157,8 @@ func TestGatewayHTTP_Health(t *testing.T) {
 }
 
 func TestGatewayHTTP_HealthAPIPath(t *testing.T) {
+	t.Setenv("OPENOCTA_STATE_DIR", t.TempDir())
+	t.Setenv("OPENOCTA_RUN_MODE", "service")
 	t.Setenv("OPENOCTA_SKIP_CHANNELS", "1")
 	t.Setenv("OPENOCTA_SKIP_CRON", "1")
 
@@ -237,6 +245,8 @@ func TestGatewayProtocol_ResponseFrame(t *testing.T) {
 }
 
 func TestGatewayProtocol_AgentInvalidParams(t *testing.T) {
+	t.Setenv("OPENOCTA_STATE_DIR", t.TempDir())
+	t.Setenv("OPENOCTA_RUN_MODE", "service")
 	t.Setenv("OPENOCTA_SKIP_CHANNELS", "1")
 	t.Setenv("OPENOCTA_SKIP_CRON", "1")
 

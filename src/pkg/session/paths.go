@@ -16,6 +16,16 @@ const (
 	DefaultAgentID = "main"
 )
 
+// ContextKey represents a context key.
+type ContextKey string
+
+const (
+	ContextKeySessionID      = ContextKey("sessionID")
+	ContextKeySessionKey     = ContextKey("sessionKey")
+	ContextKeyTranscriptPath = ContextKey("transcriptPath")
+	ContextKeyPrompt         = ContextKey("prompt")
+)
+
 // SafeSessionIDRe validates session IDs.
 var SafeSessionIDRe = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,127}$`)
 

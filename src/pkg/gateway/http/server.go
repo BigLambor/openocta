@@ -27,6 +27,8 @@ import (
 	"github.com/openocta/openocta/pkg/logging"
 	"github.com/openocta/openocta/pkg/outbound"
 	"github.com/openocta/openocta/pkg/paths"
+	"github.com/openocta/openocta/pkg/agent/tools"
+	"github.com/openocta/openocta/pkg/ops"
 	"github.com/openocta/openocta/pkg/rbac"
 	"github.com/stellarlinkco/agentsdk-go/pkg/middleware"
 	"io"
@@ -105,6 +107,54 @@ func NewServer(addr string, version string) *Server {
 	// Initialize RBAC database
 	if err := rbac.InitDB(stateDir); err != nil {
 		slog.Error("Failed to initialize RBAC database", "error", err)
+	}
+	if err := ops.InitStore(stateDir); err != nil {
+		slog.Error("Failed to initialize ops cluster store", "error", err)
+	}
+	if err := ops.InitAlertsStore(stateDir); err != nil {
+		slog.Error("Failed to initialize ops alerts store", "error", err)
+	}
+
+	// Wire tools hooks to prevent circular dependency
+	tools.GetClusterConfig = func(clusterID string) (tools.ClusterConfig, error) {
+		c, err := ops.GetCluster(clusterID)
+		if err != nil {
+			return tools.ClusterConfig{}, err
+		}
+		return tools.ClusterConfig{
+			ID:             c.ID,
+			Name:           c.Name,
+			Region:         c.Region,
+			MonitorLabels:  c.MonitorLabels,
+			VMUrlRef:       c.VMUrlRef,
+			MetricsBaseUrl: c.MetricsBaseUrl,
+			JMXUrl:         c.JMXUrl,
+			FIManagerUrl:   c.FIManagerUrl,
+			GBaseDsnRef:    c.GBaseDsnRef,
+			CredentialsRef: c.CredentialsRef,
+		}, nil
+	}
+	tools.ListClustersConfig = func(domain string) ([]tools.ClusterConfig, error) {
+		list, err := ops.ListClusters(domain)
+		if err != nil {
+			return nil, err
+		}
+		res := make([]tools.ClusterConfig, len(list))
+		for i, c := range list {
+			res[i] = tools.ClusterConfig{
+				ID:             c.ID,
+				Name:           c.Name,
+				Region:         c.Region,
+				MonitorLabels:  c.MonitorLabels,
+				VMUrlRef:       c.VMUrlRef,
+				MetricsBaseUrl: c.MetricsBaseUrl,
+				JMXUrl:         c.JMXUrl,
+				FIManagerUrl:   c.FIManagerUrl,
+				GBaseDsnRef:    c.GBaseDsnRef,
+				CredentialsRef: c.CredentialsRef,
+			}
+		}
+		return res, nil
 	}
 
 	skipCron := isTruthyEnv(env, "OPENOCTA_SKIP_CRON")
@@ -393,6 +443,15 @@ func (s *Server) Handler() http.Handler {
 			s.handleWSUpgrade(w, r)
 			return
 		}
+		// CORS headers for all API requests (allowing dev environments and cross-origin access)
+		if isAPIPath(r.URL.Path) {
+			applyAPICORS(w, r)
+			if r.Method == http.MethodOptions {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+		}
+
 		// 非 API 路径的 GET/HEAD 直接走前端静态服务，不依赖 ServeMux 匹配
 		if (r.Method == http.MethodGet || r.Method == http.MethodHead) && !isAPIPath(r.URL.Path) {
 			s.handleDist(w, r)
@@ -423,6 +482,19 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /api/rbac/users", s.requirePermission("menu:config", s.handleCreateUser))
 	s.mux.HandleFunc("DELETE /api/rbac/users/{id}", s.requirePermission("menu:config", s.handleDeleteUser))
 	s.mux.HandleFunc("GET /api/rbac/roles", s.requirePermission("menu:config", s.handleListRoles))
+
+	// Ops: cluster assets & dashboard summary (P1)
+	s.mux.HandleFunc("GET /api/ops/clusters", s.requireRbacOrGatewayToken("", s.handleOpsListClusters))
+	s.mux.HandleFunc("POST /api/ops/clusters", s.requireRbacOrGatewayToken("menu:config", s.handleOpsCreateCluster))
+	s.mux.HandleFunc("POST /api/ops/clusters/sync-cmdb", s.requireRbacOrGatewayToken("menu:config", s.handleOpsSyncCMDB))
+	s.mux.HandleFunc("GET /api/ops/clusters/{id}", s.requireRbacOrGatewayToken("", s.handleOpsGetCluster))
+	s.mux.HandleFunc("PATCH /api/ops/clusters/{id}", s.requireRbacOrGatewayToken("menu:config", s.handleOpsPatchCluster))
+	s.mux.HandleFunc("DELETE /api/ops/clusters/{id}", s.requireRbacOrGatewayToken("menu:config", s.handleOpsDeleteCluster))
+	s.mux.HandleFunc("GET /api/ops/dashboard/summary", s.requireRbacOrGatewayToken("", s.handleOpsDashboardSummary))
+	s.mux.HandleFunc("GET /api/ops/alerts/groups", s.requireRbacOrGatewayToken("", s.handleOpsListAlertGroups))
+	s.mux.HandleFunc("GET /api/ops/alerts/groups/{id}", s.requireRbacOrGatewayToken("", s.handleOpsGetAlertGroup))
+	s.mux.HandleFunc("PATCH /api/ops/alerts/groups/{id}", s.requireRbacOrGatewayToken("ops:ack", s.handleOpsPatchAlertGroup))
+	s.mux.HandleFunc("GET /api/ops/inspection/im-status", s.requireRbacOrGatewayToken("", s.handleOpsInspectionIMStatus))
 
 	s.mux.HandleFunc("GET /health", s.requireRbacOrGatewayToken("", s.handleHealth))
 	s.mux.HandleFunc("GET /api/health", s.requireRbacOrGatewayToken("", s.handleHealth))

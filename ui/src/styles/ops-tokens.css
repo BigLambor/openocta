@@ -1,0 +1,244 @@
+/* Cursor-inspired ops UI primitives (see docs/ui-style-guide.md) */
+
+:root {
+  --ops-radius-sm: 8px;
+  --ops-radius-md: 10px;
+  --ops-radius-lg: 12px;
+  --ops-space-xs: 8px;
+  --ops-space-sm: 12px;
+  --ops-space-md: 16px;
+  --ops-space-lg: 24px;
+  --ops-health-ok: #10b981;
+  --ops-health-warn: #f59e0b;
+  --ops-health-critical: #ef4444;
+}
+
+.ops-status {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 48px 24px;
+  min-height: 200px;
+  color: var(--text-secondary);
+}
+
+.ops-status--compact {
+  padding: 32px 16px;
+  min-height: 120px;
+}
+
+/* 大屏 / 资产页：左对齐、占满面板宽度（避免「手机居中」观感） */
+.ops-status--spread {
+  align-items: flex-start;
+  justify-content: flex-start;
+  text-align: left;
+  padding: 28px 32px;
+  min-height: 0;
+}
+
+.ops-status--spread .ops-status__icon {
+  margin-bottom: 12px;
+}
+
+.ops-status--spread .ops-status__desc,
+.ops-status--spread .ops-status__hint {
+  max-width: none;
+}
+
+.ops-status__icon {
+  width: 40px;
+  height: 40px;
+  margin-bottom: 16px;
+  opacity: 0.45;
+  color: var(--text-muted);
+}
+
+.ops-status__icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.ops-status__title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+
+.ops-status__desc {
+  font-size: 13px;
+  line-height: 1.5;
+  max-width: 420px;
+  margin: 0 0 8px;
+  color: var(--text-secondary);
+}
+
+.ops-status__hint {
+  font-size: 12px;
+  line-height: 1.45;
+  max-width: 480px;
+  margin: 0 0 16px;
+  color: var(--text-muted);
+}
+
+.ops-status__action {
+  margin-top: 4px;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--accent);
+  color: var(--accent-foreground, #fff);
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+
+.ops-status__action:hover:not(:disabled) {
+  opacity: 0.92;
+}
+
+.ops-status__action:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.ops-status__action--secondary {
+  background: transparent;
+  color: var(--text-primary);
+}
+
+.ops-status--error .ops-status__icon {
+  color: #ef4444;
+  opacity: 0.75;
+}
+
+.ops-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 14px;
+  margin-bottom: 16px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.ops-banner__icon {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  opacity: 0.7;
+}
+
+.ops-skeleton-line {
+  height: 10px;
+  margin-bottom: 10px;
+  border-radius: 4px;
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.04) 0%,
+    rgba(255, 255, 255, 0.08) 50%,
+    rgba(255, 255, 255, 0.04) 100%
+  );
+  background-size: 200% 100%;
+  animation: ops-skeleton-shimmer 1.2s ease-in-out infinite;
+}
+
+@keyframes ops-skeleton-shimmer {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
+}
+
+.ops-page {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 28px 32px 40px;
+  color: var(--text-primary);
+  max-width: min(1440px, 100%);
+  margin: 0 auto;
+}
+
+.content:has(.ops-page) {
+  padding: 0;
+  gap: 0;
+}
+
+.ops-page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+  gap: 16px;
+}
+
+.ops-page-header h1 {
+  font-size: 22px;
+  font-weight: 600;
+  margin: 0 0 6px;
+  letter-spacing: -0.02em;
+}
+
+.ops-page-header p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.ops-toolbar {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.ops-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.ops-btn:hover:not(:disabled) {
+  background: var(--bg-hover, rgba(255, 255, 255, 0.06));
+}
+
+.ops-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.ops-btn--primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-foreground, #fff);
+}
+
+.ops-btn--primary:hover:not(:disabled) {
+  opacity: 0.92;
+  background: var(--accent);
+}
+
+.ops-panel {
+  background: var(--bg-surface, rgba(255, 255, 255, 0.02));
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+}

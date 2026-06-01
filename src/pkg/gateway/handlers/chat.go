@@ -27,6 +27,7 @@ import (
 	"github.com/openocta/openocta/pkg/gateway/protocol"
 	"github.com/openocta/openocta/pkg/logging"
 	"github.com/openocta/openocta/pkg/session"
+	"github.com/openocta/openocta/pkg/ops"
 	"github.com/stellarlinkco/agentsdk-go/pkg/api"
 	"github.com/stellarlinkco/agentsdk-go/pkg/model"
 	sdkTool "github.com/stellarlinkco/agentsdk-go/pkg/tool"
@@ -385,22 +386,28 @@ func writeCronSessionResult(sessionKey, sessionID, summary, status string, runAt
 		chatLog.Warn("cron: failed to create runs dir dir=%s err=%v", runsDir, err)
 		return
 	}
-	resultPath := filepath.Join(runsDir, sessionID+".jsonl")
+	resultPath := filepath.Join(runsDir, jobID+".jsonl")
 
 	// 结果中的 sessionKey 带上 run 前缀，方便在 UI 中区分不同运行：
 	// agent:main:cron:<jobId>:run:<sessionId>
 	resultSessionKey := fmt.Sprintf("agent:main:cron:%s:run:%s", jobID, sessionID)
 
+	res := ops.ParseInspectionResult(sessionID, jobID, summary, status, runAtMs, durationMs)
+
 	doc := map[string]interface{}{
-		"ts":         nowMs,
-		"jobId":      jobID,
-		"action":     "finished",
-		"status":     status,
-		"summary":    summary,
-		"sessionId":  sessionID,
-		"sessionKey": resultSessionKey,
-		"runAtMs":    runAtMs,
-		"durationMs": durationMs,
+		"ts":          nowMs,
+		"jobId":       jobID,
+		"action":      "finished",
+		"status":      status,
+		"summary":     summary,
+		"sessionId":   sessionID,
+		"sessionKey":  resultSessionKey,
+		"runAtMs":     runAtMs,
+		"durationMs":  durationMs,
+		"domain":      res.Domain,
+		"clusterId":   res.ClusterID,
+		"component":   res.Component,
+		"result":      res,
 	}
 	data, err := json.Marshal(doc)
 	if err != nil {
@@ -1444,6 +1451,11 @@ func ChatSendHandler(opts HandlerOpts) error {
 				Env:                   os.Getenv,
 				TokenLimit:            tokenLimit,
 			}
+			ctx = context.WithValue(ctx, session.ContextKeySessionID, sessionID)
+			ctx = context.WithValue(ctx, session.ContextKeySessionKey, sessionKey)
+			ctx = context.WithValue(ctx, session.ContextKeyTranscriptPath, transcriptPath)
+			ctx = context.WithValue(ctx, session.ContextKeyPrompt, prompt)
+
 			rt, err := runtime.New(ctx, rtOpts)
 			if err != nil {
 				errMsg := fmt.Sprintf("无法创建运行时: %s", err.Error())

@@ -1,9 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { OpenClawApp } from "./app.ts";
+import { GatewayBrowserClient } from "./gateway.ts";
 import "../styles.css";
 
 // oxlint-disable-next-line typescript/unbound-method
 const originalConnect = OpenClawApp.prototype.connect;
+// oxlint-disable-next-line typescript/unbound-method
+const originalCheckRbacSession = OpenClawApp.prototype.checkRbacSession;
+// oxlint-disable-next-line typescript/unbound-method
+const originalStart = GatewayBrowserClient.prototype.start;
 
 function mountApp(pathname: string) {
   window.history.replaceState({}, "", pathname);
@@ -22,6 +27,18 @@ beforeEach(() => {
   OpenClawApp.prototype.connect = () => {
     // no-op: avoid real gateway WS connections in browser tests
   };
+  OpenClawApp.prototype.checkRbacSession = async function() {
+    this.rbacUser = {
+      userId: 1,
+      username: "admin",
+      roleName: "admin",
+      permissions: ["menu:chat", "menu:sessions", "menu:overview", "menu:cron", "menu:config"]
+    };
+    this.rbacChecked = true;
+  };
+  GatewayBrowserClient.prototype.start = function() {
+    // no-op: prevent WebSocket creation in tests
+  };
   window.__OPENCLAW_CONTROL_UI_BASE_PATH__ = undefined;
   localStorage.clear();
   document.body.innerHTML = "";
@@ -29,6 +46,8 @@ beforeEach(() => {
 
 afterEach(() => {
   OpenClawApp.prototype.connect = originalConnect;
+  OpenClawApp.prototype.checkRbacSession = originalCheckRbacSession;
+  GatewayBrowserClient.prototype.start = originalStart;
   window.__OPENCLAW_CONTROL_UI_BASE_PATH__ = undefined;
   localStorage.clear();
   document.body.innerHTML = "";
@@ -82,13 +101,13 @@ describe("control UI routing", () => {
     }
     content.scrollTop = 320;
 
-    const link = app.querySelector<HTMLAnchorElement>('a.nav-item[href="/channels"]');
+    const link = app.querySelector<HTMLButtonElement>('button[data-tour-tab="hadoop"]');
     expect(link).not.toBeNull();
     link?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 }));
 
     await app.updateComplete;
-    expect(app.tab).toBe("channels");
-    expect(window.location.pathname).toBe("/channels");
+    expect(app.tab).toBe("hadoop");
+    expect(window.location.pathname).toBe("/hadoop");
     expect(app.querySelector<HTMLElement>(".content")?.scrollTop).toBe(0);
   });
 
@@ -106,7 +125,7 @@ describe("control UI routing", () => {
       const app = mountApp(pathname);
       await app.updateComplete;
 
-      const activeTab = app.querySelector(".top-tab--active");
+      const activeTab = app.querySelector(".top-tab--active") || app.querySelector(".dropdown-item.active");
       expect(activeTab?.textContent).toContain(expected);
       expect(window.location.pathname).toBe(pathname);
     }
@@ -116,8 +135,8 @@ describe("control UI routing", () => {
     const app = mountApp("/message");
     await app.updateComplete;
 
-    const labels = Array.from(app.querySelectorAll(".top-tab .top-tab__label")).map((node) =>
-      node.textContent?.trim() ?? "",
+    const labels = Array.from(app.querySelectorAll(".dropdown-menu-content .dropdown-item")).map((node) =>
+      node.querySelector("span:not(.dropdown-icon)")?.textContent?.trim() ?? "",
     );
 
     expect(labels).toContain("模型");

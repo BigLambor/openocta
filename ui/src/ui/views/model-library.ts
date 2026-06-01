@@ -188,7 +188,7 @@ function renderModelCard(
             ? html`<img src="${logoUrl}" alt="${entry.displayName}" class="provider-logo" />`
             : icons.modelCube}
         </div>
-        <div class="emp-card__actions models-provider-actions">
+        <div class="models-provider-actions">
           ${hasModels
             ? entry.isDefault
               ? html`

@@ -34,9 +34,11 @@ import {
   normalizePath,
   pathForTab,
   tabFromPath,
+  titleForTab,
   type Tab,
 } from "./navigation.ts";
 import { saveSettings, type UiSettings } from "./storage.ts";
+import { applyOpsDeepLinkFromUrl } from "./ops/deeplink.ts";
 import { startThemeTransition, type ThemeTransitionContext } from "./theme-transition.ts";
 import { resolveTheme, type ResolvedTheme, type ThemeMode } from "./theme.ts";
 
@@ -194,6 +196,19 @@ export function setTab(host: SettingsHost, next: Tab) {
   } else {
     stopDebugPolling(host as unknown as Parameters<typeof stopDebugPolling>[0]);
   }
+  if (
+    nextTab === "hadoop" ||
+    nextTab === "fi" ||
+    nextTab === "gbase" ||
+    nextTab === "governance" ||
+    nextTab === "dataapps"
+  ) {
+    const link = applyOpsDeepLinkFromUrl(host as unknown as Parameters<typeof applyOpsDeepLinkFromUrl>[0]);
+    if (link.alertsTab) {
+      const app = host as unknown as { loadOpsDomainAlerts?: (d: string) => Promise<void> };
+      void app.loadOpsDomainAlerts?.(nextTab);
+    }
+  }
   void refreshActiveTab(host);
   syncUrlWithTab(host, nextTab, false);
 }
@@ -222,9 +237,25 @@ export async function refreshActiveTab(host: SettingsHost) {
     await loadConfig(host as any);
     await ensureSessionForKey(host as any, { key: domainSessionKey, label: domainLabel });
     await loadChatHistory(host as any);
+    const app = host as unknown as { loadOpsDomainClusters?: (d: string) => Promise<void> };
+    if (app.loadOpsDomainClusters) {
+      await app.loadOpsDomainClusters(host.tab);
+    }
   }
   if (host.tab === "overview") {
     await loadOverview(host);
+    const app = host as unknown as {
+      loadOpsDashboard?: () => Promise<void>;
+    };
+    if (app.loadOpsDashboard) {
+      await app.loadOpsDashboard();
+    }
+  }
+  if (host.tab === "assetManagement") {
+    const app = host as unknown as { loadOpsClusters?: () => Promise<void> };
+    if (app.loadOpsClusters) {
+      await app.loadOpsClusters();
+    }
   }
   if (host.tab === "channels") {
     await loadChannelsTab(host);
@@ -426,6 +457,11 @@ export function syncTabWithLocation(host: SettingsHost, replace: boolean) {
     resolved = "overview";
   }
   setTabFromRoute(host, resolved);
+  const link = applyOpsDeepLinkFromUrl(host as unknown as Parameters<typeof applyOpsDeepLinkFromUrl>[0]);
+  if (link.alertsTab) {
+    const app = host as unknown as { loadOpsDomainAlerts?: (d: string) => Promise<void> };
+    void app.loadOpsDomainAlerts?.(resolved);
+  }
   syncUrlWithTab(host, resolved, replace);
 }
 

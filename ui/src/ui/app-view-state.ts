@@ -539,4 +539,8 @@ export type AppViewState = {
   opsSelectedAlertGroupIds: Record<string, string | null>;
   opsSelectedInspectionIds: Record<string, string | null>;
   opsIsInspecting: Record<string, boolean>;
+  opsSelectedEntityIds: Record<string, string>;
+  opsEntitySelectorOpen: Record<string, boolean>;
+  
+  runScheduledTask(taskId: string): Promise<void>;
 };

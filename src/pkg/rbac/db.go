@@ -141,6 +141,7 @@ func seedDefaultData() error {
 		{"menu:config", "主导航: 系统设置", "menu"},
 		{"ops:inspect", "操作: 执行深度巡检", "ops"},
 		{"ops:diagnose", "操作: 发起智能诊断", "ops"},
+		{"ops:ack", "操作: 确认处理告警组", "ops"},
 		{"ops:wework_conf", "操作: 企业微信通道配置", "ops"},
 	}
 
@@ -152,9 +153,13 @@ func seedDefaultData() error {
 	for _, p := range permissions {
 		_, _ = db.Exec(`INSERT OR IGNORE INTO role_permissions (role_id, permission_code) VALUES (?, ?)`, 1, p.code)
 	}
+	// Ensure newly added ops permissions are granted on existing databases
+	for _, code := range []string{"ops:ack"} {
+		_, _ = db.Exec(`INSERT OR IGNORE INTO role_permissions (role_id, permission_code) VALUES (1, ?)`, code)
+	}
 
 	// Bind permissions to GBase Operator (role_id = 4 gets overview, gbase, diagnose, inspect)
-	gbasePerms := []string{"menu:overview", "menu:gbase", "ops:diagnose", "ops:inspect"}
+	gbasePerms := []string{"menu:overview", "menu:gbase", "ops:diagnose", "ops:inspect", "ops:ack"}
 	for _, p := range gbasePerms {
 		_, _ = db.Exec(`INSERT OR IGNORE INTO role_permissions (role_id, permission_code) VALUES (?, ?)`, 4, p)
 	}

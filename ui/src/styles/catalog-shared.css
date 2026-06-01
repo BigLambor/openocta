@@ -317,13 +317,18 @@
   gap: 8px;
 }
 .content--catalog .models-provider-actions {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  gap: 8px;
   display: flex;
 }
 .content--catalog .models-provider-actions .btn {
   display: none;
 }
 .content--catalog .emp-card-wrap:hover {
-  .emp-card__actions .btn {
+  .emp-card__actions .btn,
+  .models-provider-actions .btn {
     display: inline-flex;
   }
 }

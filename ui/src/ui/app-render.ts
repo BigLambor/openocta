@@ -348,6 +348,7 @@ import {
 import { renderChannels } from "./views/channels.ts";
 import { renderChat } from "./views/chat.ts";
 import { renderConfig } from "./views/config.ts";
+import { renderAssetManagement } from "./views/asset-management.ts";
 import { renderEnvVars } from "./views/env-vars.ts";
 import { renderCronConfig, renderCronHistory } from "./views/cron.ts";
 import { renderDebug } from "./views/debug.ts";
@@ -361,6 +362,13 @@ import { renderLogs } from "./views/logs.ts";
 import { renderNodes } from "./views/nodes.ts";
 import { renderOverview } from "./views/overview.ts";
 import { renderTechOpsDomain } from "./views/tech-ops-domain.ts";
+import {
+  buildEntityGroupsFromClusters,
+  buildOpsContextLine,
+  getDefaultEntityIdFromClusters,
+  type OpsDomainKey,
+} from "./ops/entity-config.ts";
+import { canAckAlerts, canRunInspection } from "./ops/rbac.ts";
 import { renderSessions } from "./views/sessions.ts";
 import { renderSkillLibrary } from "./views/skill-library.ts";
 import { renderToolLibrary } from "./views/tool-library.ts";
@@ -676,6 +684,8 @@ export function renderApp(state: AppViewState) {
     state.tab === "gbase" ||
     state.tab === "governance" ||
     state.tab === "dataapps";
+  const isOpsShellPage =
+    isOpsDomainPage || state.tab === "overview" || state.tab === "assetManagement";
   const isCollapsibleNavPage = isMessagePage || isScheduledTasks || isConfigArea;
   const isSideNavCollapsed = isCollapsibleNavPage && state.settings.navCollapsed;
   const renderNavCollapseFooter = html`
@@ -722,6 +732,7 @@ export function renderApp(state: AppViewState) {
     state.productTourActive ? "shell--product-tour" : "",
     state.isWindowsDesktop ? "shell--windows-desktop" : "",
     state.isWindowMaximised ? "shell--window-maximised" : "",
+    isOpsShellPage ? "shell--no-nav" : "",
   ]
     .filter(Boolean)
     .join(" ");
@@ -772,17 +783,21 @@ export function renderApp(state: AppViewState) {
         </div>
         <nav class="top-tabs" aria-label="Primary navigation">
           ${[
+            { tab: "message", label: "AI 运维助手" },
             { tab: "overview", label: "运维大屏" },
-            { tab: "hadoop", label: "Hadoop生态" },
+            { tab: "hadoop", label: "BCH生态" },
             { tab: "fi", label: "FI商业生态" },
             { tab: "gbase", label: "GBase数据库" },
             { tab: "governance", label: "开发治理平台" },
             { tab: "dataapps", label: "数据App运维" },
-            { tab: "config", label: "系统设置" },
           ].filter((item) => {
             if (!state.rbacUser) return false;
-            if (state.rbacUser.roleName === "admin") return true;
-            return state.rbacUser.permissions.includes(`menu:${item.tab}`);
+            const restrictedTabs = ["overview", "hadoop", "fi", "gbase", "governance", "dataapps", "config"];
+            if (restrictedTabs.includes(item.tab)) {
+              if (state.rbacUser.roleName === "admin") return true;
+              return state.rbacUser.permissions.includes(`menu:${item.tab}`);
+            }
+            return true;
           }).map((item) => {
             const tab = (item as any).tab;
             const active =
@@ -831,37 +846,63 @@ export function renderApp(state: AppViewState) {
             `;
           })}
         </nav>
-        <div class="topbar-status" style="display: flex; align-items: center; gap: 8px;">
-          ${state.rbacUser ? html`
-            <div class="pill topbar__no-drag" style="display: flex; align-items: center; gap: 8px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); padding: 4px 10px; border-radius: 6px;">
-              <span style="font-size: 12px; color: var(--color-text-muted); font-weight: 500;">
-                ${state.rbacUser.username} (${state.rbacUser.roleName})
-              </span>
-              <button
-                type="button"
-                class="topbar-link"
-                style="padding: 2px 6px; font-size: 11px; background: rgba(239, 68, 68, 0.15); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.2); border-radius: 4px; cursor: pointer; transition: all 0.2s;"
-                @click=${() => (state as any).handleRbacLogout()}
-              >
-                退出
-              </button>
-            </div>
-          ` : nothing}
-          <div class="pill pill--link topbar__no-drag">
+        <div class="topbar-status">
+          <div class="agent-core-dropdown topbar__no-drag">
             <button
               type="button"
-              title="打开 GitHub 仓库"
-              class="topbar-link topbar__no-drag"
-              @click=${() =>
-                void openExternalUrl("https://github.com/openocta/openocta.git", {
-                  gatewayHost: state.settings.gatewayUrl,
-                  gatewayToken: state.settings.token,
-                })}
+              class="topbar-link topbar__no-drag dropdown-trigger dropdown-trigger--round"
+              title="系统管理"
             >
-              <span class="topbar-link__icon" aria-hidden="true">${icons.github}</span>
-              <span class="topbar-link__label">GitHub</span>
+              <span class="topbar-link__icon" aria-hidden="true">${icons.settings}</span>
             </button>
+            <div class="dropdown-menu-content">
+               ${[
+                 { tab: "assetManagement", label: "集群资产管理" },
+                 { tab: "scheduledTasks", label: "定时任务" },
+                 { tab: "employeeMarket", label: "员工市场" },
+                 { tab: "skillLibrary", label: "技能库" },
+                 { tab: "toolLibrary", label: "工具库" },
+                 { tab: "modelLibrary", label: "模型" },
+                 { tab: "tutorials", label: "教程" },
+                 { tab: "config", label: "系统配置" },
+               ].map(item => {
+                 const active =
+                   state.tab === item.tab ||
+                   (item.tab === "scheduledTasks" && isScheduledTasks);
+                 const iconName = iconForTab(item.tab as Tab, active);
+                 return html`
+                   <button class="dropdown-item ${active ? 'active' : ''}" @click=${() => state.setTab(item.tab as Tab)}>
+                     <span class="dropdown-icon">${icons[iconName]}</span>
+                     <span>${item.label}</span>
+                   </button>
+                 `;
+               })}
+            </div>
           </div>
+          ${state.rbacUser ? html`
+            <div class="agent-core-dropdown agent-core-dropdown--spaced topbar__no-drag">
+              <button
+                type="button"
+                class="dropdown-trigger dropdown-trigger--avatar"
+                title=${state.rbacUser.username}
+              >
+                ${state.rbacUser.username.charAt(0).toUpperCase()}
+              </button>
+              <div class="dropdown-menu-content dropdown-menu-content--wide">
+                <div class="dropdown-menu__header">
+                  <div class="dropdown-menu__username">${state.rbacUser.username}</div>
+                  <div class="dropdown-menu__role">${state.rbacUser.roleName}</div>
+                </div>
+                <button
+                  type="button"
+                  class="dropdown-item dropdown-item--danger"
+                  @click=${() => (state as any).handleRbacLogout()}
+                >
+                  <span>退出登录</span>
+                </button>
+              </div>
+            </div>
+          ` : nothing}
         </div>
         ${
           state.isWindowsDesktop
@@ -1314,7 +1355,7 @@ export function renderApp(state: AppViewState) {
         }
       </aside>`}
       <main class="content ${isChat ? "content--chat" : ""} ${isCatalogArea ? "content--catalog" : ""} ${isAgentSwarmPage ? "content--agent-swarm" : ""} ${state.tab === "tutorials" ? "content--tutorials" : ""} ${state.tab === "documentation" ? "content--documentation" : ""} ${state.tab === "llmTrace" && state.llmTraceViewingSessionId != null ? "content--llm-trace-detail" : ""}">
-        ${isCatalogArea || isMessagePage || isAgentSwarmPage
+        ${isCatalogArea || isMessagePage || isAgentSwarmPage || isOpsShellPage
           ? nothing
           : html`
               <section class="content-header">
@@ -1351,36 +1392,18 @@ export function renderApp(state: AppViewState) {
           state.tab === "overview"
             ? renderOverview({
                 connected: state.connected,
-                hello: state.hello,
-                settings: state.settings,
-                password: state.password,
-                lastError: state.lastError,
-                presenceCount,
-                sessionsCount,
-                cronEnabled: state.cronStatus?.enabled ?? null,
-                cronNext,
-                lastChannelsRefresh: state.channelsLastSuccess,
-                onSettingsChange: (next) => state.applySettings(next),
-                onPasswordChange: (next) => (state.password = next),
-                onSessionKeyChange: (next) => {
-                  state.sessionKey = next;
-                  state.chatMessage = "";
-                  state.chatAttachments = [];
-                  state.chatModelRef = null;
-                  state.chatStream = null;
-                  state.chatStreamStartedAt = null;
-                  state.chatRunId = null;
-                  state.chatQueue = [];
-                  state.resetToolStream();
-                  state.applySettings({
-                    ...state.settings,
-                    sessionKey: next,
-                    lastActiveSessionKey: next,
-                  });
-                  void state.loadAssistantIdentity();
-                },
-                onConnect: () => state.connect(),
-                onRefresh: () => state.loadOverview(),
+                loading: state.opsDashboardLoading,
+                dashboardSummary: state.opsDashboardSummary,
+                dashboardError: state.opsDashboardError,
+                globalInspecting: state.opsGlobalInspecting,
+                dashboardToast: state.opsDashboardToast,
+                onOpenAssets: () => state.setTab("assetManagement"),
+                onOpenConfig: () => state.setTab("config"),
+                onNavigateDomain: (tab) => state.setTab(tab),
+                onOpenScheduledTasks: () => state.setTab("scheduledTasks"),
+                onRunGlobalInspection: () => state.runGlobalInspectionFromDashboard(),
+                onOpenPendingAlerts: () => state.openPendingAlertsFromDashboard(),
+                canInspect: canRunInspection(state.rbacUser),
               })
             : nothing
         }
@@ -3038,6 +3061,16 @@ export function renderApp(state: AppViewState) {
                 const activeSubTab = state.opsActiveSubTabs[state.tab] || "agent";
                 if (
                   activeSubTab === "inspections" &&
+                  state.opsInspectionImStatus == null &&
+                  !(state as any)._loadingOpsInspectionIm
+                ) {
+                  (state as any)._loadingOpsInspectionIm = true;
+                  state.loadOpsInspectionImStatus().finally(() => {
+                    (state as any)._loadingOpsInspectionIm = false;
+                  });
+                }
+                if (
+                  activeSubTab === "inspections" &&
                   state.cronRunsJobId !== jobId &&
                   !(state as any)._loadingCronRunsForJobId
                 ) {
@@ -3046,7 +3079,6 @@ export function renderApp(state: AppViewState) {
                     (state as any)._loadingCronRunsForJobId = null;
                   });
                 }
-
                 const domainRuns = state.cronRunsJobId === jobId ? state.cronRuns : [];
                 const inspections = domainRuns.map((entry, idx) => {
                   let timeStr = "";
@@ -3058,21 +3090,40 @@ export function renderApp(state: AppViewState) {
                     timeStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}:${String(d.getSeconds()).padStart(2, "0")}`;
                   }
 
-                  let score = 90;
-                  const summary = entry.summary || "";
-                  const scoreMatch = summary.match(/(?:健康得分|健康度|Score)\s*[：:]\s*(\d+)/i);
-                  if (scoreMatch && scoreMatch[1]) {
-                    score = parseInt(scoreMatch[1], 10);
+                  let score: number | null = null;
+                  let scoreStatus = "unknown";
+                  let reportMarkdown = "";
+
+                  if (entry.result) {
+                    score = entry.result.score !== undefined && entry.result.score !== null ? entry.result.score : null;
+                    scoreStatus = entry.result.scoreStatus || "unknown";
+                    reportMarkdown = entry.result.reportMarkdown || "";
+                  } else {
+                    const summary = entry.summary || "";
+                    const scoreMatch = summary.match(/(?:健康得分|健康度|Score)\s*[：:]\s*(\d+)/i);
+                    if (scoreMatch && scoreMatch[1]) {
+                      score = parseInt(scoreMatch[1], 10);
+                      if (score >= 90) scoreStatus = "ok";
+                      else if (score >= 75) scoreStatus = "warning";
+                      else scoreStatus = "critical";
+                    } else {
+                      if (entry.error) {
+                        scoreStatus = "degraded";
+                      }
+                    }
+                    reportMarkdown = summary;
                   }
 
-                  let status: "healthy" | "warning" | "critical" = "healthy";
-                  if (score < 75) {
-                    status = "critical";
-                  } else if (score < 90) {
+                  let status: "healthy" | "warning" | "critical" | "unknown" = "unknown";
+                  if (scoreStatus === "ok") {
+                    status = "healthy";
+                  } else if (scoreStatus === "warning") {
                     status = "warning";
+                  } else if (scoreStatus === "critical" || scoreStatus === "degraded") {
+                    status = "critical";
                   }
 
-                  let cleanSummary = summary
+                  let cleanSummary = reportMarkdown
                     .replace(/[#*`\-]/g, "")
                     .replace(/\s+/g, " ")
                     .trim();
@@ -3089,14 +3140,42 @@ export function renderApp(state: AppViewState) {
                     score: score,
                     status: status,
                     reportSummary: cleanSummary,
-                    reportMarkdown: summary || (entry.error ? `### 巡检失败\n- **原因**：${entry.error}` : "暂无报告内容"),
+                    reportMarkdown: reportMarkdown || (entry.error ? `### 巡检失败\n- **原因**：${entry.error}` : "暂无报告内容"),
+                    result: entry.result,
                   };
                 });
 
                 const selectedInspectionId = state.opsSelectedInspectionIds[state.tab] || (inspections[0]?.id ?? null);
 
+                const opsDomain = state.tab as OpsDomainKey;
+                if (
+                  activeSubTab === "alerts" &&
+                  !state.opsAlertsLoading?.[opsDomain] &&
+                  state.opsAlertsByDomain?.[opsDomain] === undefined &&
+                  !(state as any)._loadingOpsAlertsForDomain
+                ) {
+                  (state as any)._loadingOpsAlertsForDomain = opsDomain;
+                  state.loadOpsDomainAlerts(opsDomain).finally(() => {
+                    (state as any)._loadingOpsAlertsForDomain = null;
+                  });
+                }
+                const domainClusters = state.opsDomainClusters?.[opsDomain] ?? [];
+                const entityGroups = buildEntityGroupsFromClusters(domainClusters);
+                const selectedEntityId =
+                  state.opsSelectedEntityIds?.[opsDomain] ??
+                  getDefaultEntityIdFromClusters(domainClusters);
+                const opsContextLine = buildOpsContextLine(
+                  titleForTab(state.tab),
+                  selectedEntityId,
+                  domainClusters,
+                );
+                const domainChatProps = {
+                  ...chatProps,
+                  contextBanner: opsContextLine,
+                };
+
                 return renderTechOpsDomain({
-                  domainKey: state.tab as any,
+                  domainKey: opsDomain,
                   domainName: titleForTab(state.tab),
                   activeSubTab,
                   onSubTabChange: (nextTab) => {
@@ -3105,9 +3184,28 @@ export function renderApp(state: AppViewState) {
                       [state.tab]: nextTab,
                     };
                   },
-                  chatProps,
-                  alertsLoading: false,
-                  alertGroups: getMockAlertGroups(state.tab),
+                  selectedEntityId,
+                  isEntitySelectorOpen: state.opsEntitySelectorOpen?.[opsDomain] || false,
+                  entityGroups,
+                  entityGroupsLoading: state.opsDomainClustersLoading?.[opsDomain] ?? false,
+                  domainClusters,
+                  onOpenAssets: () => state.setTab("assetManagement"),
+                  onSelectEntity: (id: string) => {
+                    state.opsSelectedEntityIds = { ...(state.opsSelectedEntityIds || {}), [opsDomain]: id };
+                    state.opsEntitySelectorOpen = { ...(state.opsEntitySelectorOpen || {}), [opsDomain]: false };
+                  },
+                  onToggleEntitySelector: () => {
+                    state.opsEntitySelectorOpen = {
+                      ...(state.opsEntitySelectorOpen || {}),
+                      [opsDomain]: !state.opsEntitySelectorOpen?.[opsDomain],
+                    };
+                  },
+                  chatProps: domainChatProps,
+                  alertsLoading: state.opsAlertsLoading?.[opsDomain] ?? false,
+                  alertsApiAvailable: true,
+                  alertsError: state.opsAlertsError?.[opsDomain] ?? null,
+                  alertStats: state.opsAlertsStats?.[opsDomain],
+                  alertGroups: state.opsAlertsByDomain?.[opsDomain] ?? [],
                   selectedAlertGroupId: state.opsSelectedAlertGroupIds[state.tab] || null,
                   onSelectAlertGroup: (id) => {
                     state.opsSelectedAlertGroupIds = {
@@ -3124,41 +3222,17 @@ export function renderApp(state: AppViewState) {
                       [state.tab]: id,
                     };
                   },
+                  inspectionImStatus: state.opsInspectionImStatus,
+                  onOpenChannels: () => state.setTab("channels"),
+                  canInspect: canRunInspection(state.rbacUser),
+                  canAckAlerts: canAckAlerts(state.rbacUser),
+                  onAckAlert: (groupId) => state.ackOpsAlertGroup(opsDomain, groupId),
                   onRunInspection: () => {
-                    state.opsIsInspecting = {
-                      ...state.opsIsInspecting,
-                      [state.tab]: true,
-                    };
-                    state.client?.request("cron.run", { id: jobId, mode: "force" })
-                      .then(() => {
-                        let pollCount = 0;
-                        const interval = setInterval(() => {
-                          pollCount++;
-                          loadCronRuns(state as any, jobId).then(() => {
-                            const latestRun = state.cronRuns[0];
-                            if ((latestRun && latestRun.status === "ok") || pollCount >= 15) {
-                              clearInterval(interval);
-                              state.opsIsInspecting = {
-                                ...state.opsIsInspecting,
-                                [state.tab]: false,
-                              };
-                              if (state.cronRuns[0]?.sessionId) {
-                                state.opsSelectedInspectionIds = {
-                                  ...state.opsSelectedInspectionIds,
-                                  [state.tab]: state.cronRuns[0].sessionId,
-                                };
-                              }
-                            }
-                          });
-                        }, 2000);
-                      })
-                      .catch((err) => {
+                    void import("./controllers/ops-inspection-run.ts").then(({ runDomainInspectionWithPoll }) =>
+                      runDomainInspectionWithPoll(state as any, jobId).catch((err) => {
                         console.error("Failed to run inspection:", err);
-                        state.opsIsInspecting = {
-                          ...state.opsIsInspecting,
-                          [state.tab]: false,
-                        };
-                      });
+                      }),
+                    );
                   },
                   isInspecting: state.opsIsInspecting[state.tab] || false,
                 });
@@ -3742,11 +3816,49 @@ export function renderApp(state: AppViewState) {
                   }
                 },
               })
-            : nothing
-        }
-
-        ${
-          state.tab === "envVars"
+            : state.tab === "assetManagement"
+            ? renderAssetManagement({
+                clusters: state.opsClusters,
+                loading: state.opsClustersLoading,
+                error: state.opsClustersError,
+                cmdbSyncing: state.opsCmdbSyncing,
+                cmdbSyncHint: state.opsCmdbSyncMessage,
+                canManage:
+                  state.rbacUser?.roleName === "admin" ||
+                  (state.rbacUser?.permissions?.includes("menu:config") ?? false),
+                onRefresh: () => (state as any).loadOpsClusters(),
+                onSyncCmdb:
+                  state.rbacUser?.roleName === "admin" ||
+                  (state.rbacUser?.permissions?.includes("menu:config") ?? false)
+                    ? () => (state as any).syncOpsClustersFromCMDB()
+                    : undefined,
+                onOpenSettings: () => state.setTab("config"),
+                onAddCluster: async (payload) => {
+                  const { createOpsCluster } = await import("./controllers/ops-clusters.ts");
+                  await createOpsCluster(state as any, {
+                    name: payload.name,
+                    domain: payload.domain,
+                    region: payload.region,
+                    nodeCount: payload.nodeCount,
+                    components: payload.components
+                      .split(",")
+                      .map((s) => s.trim())
+                      .filter(Boolean),
+                    owner: payload.owner,
+                    status: payload.status,
+                    monitorLabels: payload.monitorLabels,
+                    vmUrlRef: payload.vmUrlRef,
+                    metricsBaseUrl: payload.metricsBaseUrl,
+                    jmxUrl: payload.jmxUrl,
+                    fiManagerUrl: payload.fiManagerUrl,
+                    gbaseDsnRef: payload.gbaseDsnRef,
+                    credentialsRef: payload.credentialsRef,
+                  });
+                  await (state as any).loadOpsClusters();
+                  await (state as any).loadOpsDashboard();
+                },
+              })
+            : state.tab === "envVars"
             ? renderEnvVars({
                 vars:
                   (state.configForm?.env as { vars?: Record<string, string> } | undefined)?.vars ??
@@ -4212,222 +4324,3 @@ export function renderApp(state: AppViewState) {
   `;
 }
 
-function getMockAlertGroups(tab: string) {
-  if (tab === "hadoop") {
-    return [
-      {
-        id: "alert-group-yarn-oom",
-        title: "YARN ResourceManager 物理内存超限 (OOM) 告警组",
-        severity: "critical" as const,
-        timestamp: "2026-06-01 14:10:05",
-        originalCount: 15,
-        reducedTo: 1,
-        rootCause: "节点 10.200.4.12 上提交的 Spark 任务（ID: app_20260601_002）发生严重的内存倾斜与笛卡尔积关联，触发物理内存超限杀死 Container 事件。",
-        impact: "阻碍了 YARN 核心调度队列，导致同一时间段排队的 12 个生产 App 调度延迟长达 8 分钟。",
-        status: "active" as const
-      },
-      {
-        id: "alert-group-hdfs-replica",
-        title: "HDFS 数据块副本数不足警告",
-        severity: "warning" as const,
-        timestamp: "2026-06-01 12:45:00",
-        originalCount: 32,
-        reducedTo: 1,
-        rootCause: "DataNode（10.200.4.15）网络卡口闪断，导致与 NameNode 失去心跳，触发数据块复制保护机制。",
-        impact: "无数据丢失风险。集群内部分副本数由 3 降为 2，现正自动通过其他活动 DataNode 进行异步复制拉起。",
-        status: "resolved" as const
-      }
-    ];
-  }
-  if (tab === "fi") {
-    return [
-      {
-        id: "alert-group-fi-manager",
-        title: "FusionInsight Manager 互信失效及组件同步告警",
-        severity: "critical" as const,
-        timestamp: "2026-06-01 13:50:22",
-        originalCount: 8,
-        reducedTo: 1,
-        rootCause: "节点间 SSSD 服务异常终止，导致 LDAP 与 Linux 互信认证链断开，引发各主机健康度告警风暴。",
-        impact: "FusionInsight 租户服务提交任务被拒，影响大金融报表 App 的准时跑批，直接导致部分接口超时。",
-        status: "active" as const
-      }
-    ];
-  }
-  if (tab === "gbase") {
-    return [
-      {
-        id: "alert-group-gbase-lock",
-        title: "GBase 数据库活跃死锁与锁等待超时告警",
-        severity: "critical" as const,
-        timestamp: "2026-06-01 14:15:30",
-        originalCount: 22,
-        reducedTo: 1,
-        rootCause: "由于开发平台更新了主表主键，导致数仓跑批 SQL 触发了全表扫描与行级行排他锁冲突，与日常 BI 查询产生死锁环路。",
-        impact: "造成大批量数据库连接池占满，连接数飙升至 500+，BI 报表页面刷新出现超时错误。",
-        status: "active" as const
-      }
-    ];
-  }
-  if (tab === "governance") {
-    return [
-      {
-        id: "alert-group-gov-quality",
-        title: "开发治理平台数据质量规则校验拦截",
-        severity: "warning" as const,
-        timestamp: "2026-06-01 11:20:00",
-        originalCount: 5,
-        reducedTo: 1,
-        rootCause: "ods_user_behavior 数据表的手机号字段空值率从倾向的 0.1% 暴增至 85.6%，触发质量校验熔断。",
-        impact: "已自动拦截下游跑批任务，防止脏数据污染数据仓库核心层。",
-        status: "resolved" as const
-      }
-    ];
-  }
-  return [
-    {
-      id: "alert-group-dataapps-delay",
-      title: "核心大屏数据 App 接口响应超时告警",
-      severity: "critical" as const,
-      timestamp: "2026-06-01 14:02:15",
-      originalCount: 14,
-      reducedTo: 1,
-      rootCause: "底层数据库查询遭遇死锁与长事务，导致接口超时时间（5s）内未能正确回传 JSON。",
-      impact: "决策层驾驶舱大屏数据出现短暂空白或加载转圈，部分指标数值停留在 1 小时前。",
-      status: "active" as const
-    }
-  ];
-}
-
-function getMockInspections(tab: string) {
-  if (tab === "hadoop") {
-    return [
-      {
-        id: "ins-hadoop-1",
-        time: "2026-06-01 10:00:00",
-        score: 95,
-        status: "healthy" as const,
-        reportSummary: "开源 Hadoop 生态集群当前健康度得分 95分。1000个节点均处于活动状态，HDFS 存储使用率 68.2%。各调度队列资源分配合理。",
-        reportMarkdown: `### OpenOcta 深度巡检报告 - Hadoop生态
-- **巡检时间**：2026-06-01 10:00
-- **健康得分**：95 / 100
-- **活动节点数**：1000 / 1000
-
-#### 指标详情
-1. **NameNode JVM 堆内存**：48 GB / 128 GB (正常)
-2. **YARN 活跃 Container**：45,210 / 60,000 (正常)
-3. **倾斜数据块比例**：0.05% (正常)
-
-#### 建议
-目前系统运行状态非常平稳，无须人工干预。建议继续监控凌晨跑批期的存储 I/O 深度。`
-      },
-      {
-        id: "ins-hadoop-2",
-        time: "2026-05-31 22:00:00",
-        score: 82,
-        status: "warning" as const,
-        reportSummary: "健康度 82分。YARN 队列发生局部阻塞，部分物理节点 I/O 深度持续偏高。伴有 42 个坏块警告。",
-        reportMarkdown: `### OpenOcta 深度巡检报告 - Hadoop生态
-- **巡检时间**：2026-05-31 22:00
-- **健康得分**：82 / 100
-
-#### 异常诊断
-- **YARN 队列阻塞**：default 队列使用率达到 102%，有 4 个大任务处于 ACCEPTED 状态排队。
-- **坏块警告**：发现 42 个处于 under-replicated 状态的数据块。
-
-#### AI 修复与优化建议
-1. 建议对 default 队列执行资源限额调整，防止个别离线查询占满全部 Container。
-2. 触发 NameNode 执行块重新备份修复命令：
-   hdfs dfsadmin -metasave
-3. 检查物理节点 node1024.ops.co 的磁盘健康状况，其 I/O 队列等待时间较长。`
-      }
-    ];
-  }
-  if (tab === "fi") {
-    return [
-      {
-        id: "ins-fi-1",
-        time: "2026-06-01 09:30:00",
-        score: 91,
-        status: "healthy" as const,
-        reportSummary: "FusionInsight 商业集群巡检健康得分 91分。Manager 管理服务及主备互信校验通过，组件均绿灯运行。",
-        reportMarkdown: `### 深度巡检报告 - FusionInsight 商业生态
-- **巡检时间**：2026-06-01 09:30
-- **健康得分**：91 / 100
-
-#### 组件状态汇总
-- **HBase (FI)**：RegionServer 负载均衡度良好。
-- **Hive (FI)**：Metastore 响应耗时 24ms。
-
-#### AI 优化建议
-HBase 写入热点目前属于常态，但建议对特定热点表 t_finance_detail 重新划分布防 Split，以实现更均匀的 Region 负载分布。`
-      }
-    ];
-  }
-  if (tab === "gbase") {
-    return [
-      {
-        id: "ins-gbase-1",
-        time: "2026-06-01 10:15:00",
-        score: 74,
-        status: "critical" as const,
-        reportSummary: "GBase 数据库健康得分 74分。发现锁冲突严重的慢 SQL（执行时间超过 10s），临时空间使用率达到 88%。",
-        reportMarkdown: `### 深度巡检报告 - GBase 数据库
-- **巡检时间**：2026-06-01 10:15
-- **健康得分**：74 / 100
-
-#### 异常详情
-1. **长慢 SQL**：发现 12 个长达 15s 以上的 SQL 正在全表扫描 t_user_order 表。
-2. **死锁等待**：锁超时数在最近 10 分钟内发生 42 次。
-3. **表空间压力**：GBase 临时分区分区使用率 88%，即将写满。
-
-#### AI 处理建议
-1. 立即强制中断死锁源头 Session 进程，释放行级排他锁。
-2. 建议为 t_user_order 的查询过滤字段 create_time 与 status 补充联合索引，消除全表扫描。
-3. 扩展 GBase 临时分区或执行临时文件自动清理。`
-      }
-    ];
-  }
-  if (tab === "governance") {
-    return [
-      {
-        id: "ins-gov-1",
-        time: "2026-06-01 09:00:00",
-        score: 96,
-        status: "healthy" as const,
-        reportSummary: "治理平台健康得分 96分。数据元数据解析正常率 100%，血缘依赖层级无死循环闭环，数据质量监控完整度良好。",
-        reportMarkdown: `### 深度巡检报告 - 开发治理平台
-- **巡检时间**：2026-06-01 09:00
-- **健康得分**：96 / 100
-
-#### 指标扫描
-- **血缘正常率**：100% 解析通过。
-- **未映射字段比例**：0.8% (正常)
-- **调度延迟指标**：平均等待时延 450ms (优)。
-
-#### 优化建议
-继续保持当前的元数据拉取策略，无须特殊调整。`
-      }
-    ];
-  }
-  return [
-    {
-      id: "ins-apps-1",
-      time: "2026-06-01 10:30:00",
-      score: 88,
-      status: "warning" as const,
-      reportSummary: "数据 App 运维健康度 88分。30多个 App 中有 2 个 App (财务分析、BI大屏) 响应耗时超标，部分调度上游依赖略有延时。",
-      reportMarkdown: `### 深度巡检报告 - 30+ 数据 App 运维
-- **巡检时间**：2026-06-01 10:30
-- **健康得分**：88 / 100
-
-#### 延时应用
-- **财务分析 App**：API 接口耗时从 450ms 增加到 3200ms。
-- **BI大屏展现 App**：上游跑批任务推迟了 15 分钟，导致界面数据展示出现暂时延迟。
-
-#### AI 处置建议
-1. 财务分析 App 数据加载缓慢系底层 SQL 未走缓存所致，建议更新 API 服务端的 Redis 缓存时间为 5 分钟。
-2. 数据调度侧大屏依赖的跑批任务发生了队列拥堵，建议提高此跑批任务的 YARN 资源调度级别 (Priority=9)。`
-    }
-  ];
-}

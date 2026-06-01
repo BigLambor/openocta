@@ -4,11 +4,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
-	"regexp"
 	"strings"
 
 	"github.com/openocta/openocta/pkg/cron"
+	"github.com/openocta/openocta/pkg/ops"
 )
 
 // cronJobIDFromSessionKey extracts job ID from cron session key "agent:<agentId>:cron:<jobId>".
@@ -53,48 +54,63 @@ func DeliverCronResultIfNeeded(ctx *Context, sessionKey, summary, status string)
 	// Fallback/Automatic routing for inspection jobs
 	isInspectionJob := strings.HasPrefix(jobID, "job-inspect-")
 	var isCritical bool
-	var score int = 100
+	var scoreText string = "未知"
 	if isInspectionJob {
-		// Parse score
-		scoreMatch := regexp.MustCompile(`(?i)(?:健康得分|健康度|Score)\s*[：:]\s*(\d+)`).FindStringSubmatch(summary)
-		if len(scoreMatch) > 1 {
-			_, _ = fmt.Sscanf(scoreMatch[1], "%d", &score)
+		res := ops.ParseInspectionResult("", jobID, summary, status, 0, 0)
+		if res.Score != nil {
+			scoreVal := *res.Score
+			scoreText = fmt.Sprintf("%d", scoreVal)
+			if scoreVal < 85 {
+				isCritical = true
+			}
+		} else {
+			if res.ScoreStatus == "degraded" || status != "ok" || len(res.Errors) > 0 {
+				isCritical = true
+			}
 		}
-		if score < 85 || strings.Contains(strings.ToUpper(summary), "CRITICAL") || strings.Contains(strings.ToUpper(summary), "ERROR") || status != "ok" {
+		if len(res.Errors) > 0 {
 			isCritical = true
 		}
-	}
 
-	if isCritical && (job.Delivery == nil || job.Delivery.Mode == "none" || job.Delivery.Mode == "") {
-		// Try to find an enabled channel to send the alert
-		var targetChannel string
-		if ctx.Config != nil && ctx.Config.Channels != nil {
-			if f := ctx.Config.Channels.GetChannelConfig("feishu"); f != nil {
-				if enabled, _ := f["enabled"].(bool); enabled {
-					targetChannel = "feishu"
+		if isCritical && (job.Delivery == nil || job.Delivery.Mode == "none" || job.Delivery.Mode == "") {
+			// Try to find an enabled channel to send the alert
+			var targetChannel string
+			if ctx.Config != nil && ctx.Config.Channels != nil {
+				if f := ctx.Config.Channels.GetChannelConfig("feishu"); f != nil {
+					if enabled, _ := f["enabled"].(bool); enabled {
+						targetChannel = "feishu"
+					}
 				}
-			}
-			if targetChannel == "" {
-				if d := ctx.Config.Channels.GetChannelConfig("dingtalk"); d != nil {
-					if enabled, _ := d["enabled"].(bool); enabled {
-						targetChannel = "dingtalk"
+				if targetChannel == "" {
+					if d := ctx.Config.Channels.GetChannelConfig("dingtalk"); d != nil {
+						if enabled, _ := d["enabled"].(bool); enabled {
+							targetChannel = "dingtalk"
+						}
 					}
 				}
 			}
-		}
-		if targetChannel != "" && ctx.InvokeMethod != nil {
-			header := "⚠️ 深度巡检告警: " + job.Name
-			alertMessage := fmt.Sprintf("### ⚠️ %s 巡检异常报警\n- **健康得分**：%d 分\n- **异常诊断**：检测到潜在的核心指标异常，请立即登录系统处理！\n\n%s", job.Name, score, summary)
-			if len(alertMessage) > 1500 {
-				alertMessage = alertMessage[:1497] + "..."
+			if targetChannel != "" && ctx.InvokeMethod != nil {
+				header := "深度巡检告警 · " + job.Name
+				var link string
+				if domain := ops.DomainFromInspectJobID(jobID); domain != "" {
+					link = ops.BuildUIDeepLink(domain + "?opsSubTab=inspections")
+				}
+				var alertMessage string
+				if res.Score != nil {
+					alertMessage = ops.FormatInspectionAlertCard(job.Name, *res.Score, summary, link)
+				} else {
+					alertMessage = fmt.Sprintf("巡检任务【%s】执行异常，未生成健康度得分。\n错误详情：%s\n查看报告：%s", job.Name, strings.Join(res.Errors, ", "), link)
+				}
+				params := map[string]interface{}{
+					"channel": targetChannel,
+					"to":      "last",
+					"message": alertMessage,
+					"header":  header,
+				}
+				_, _, _ = ctx.InvokeMethod("send", params)
+			} else if isCritical {
+				slog.Warn("inspection alert skipped: no IM channel enabled", "jobId", jobID, "score", scoreText)
 			}
-			params := map[string]interface{}{
-				"channel": targetChannel,
-				"to":      "last", // fallback to last active group/user chat
-				"message": alertMessage,
-				"header":  header,
-			}
-			_, _, _ = ctx.InvokeMethod("send", params)
 		}
 	}
 

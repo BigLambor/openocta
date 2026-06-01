@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/openocta/openocta/pkg/cron"
+	"github.com/openocta/openocta/pkg/ops"
 	"github.com/openocta/openocta/pkg/gateway/protocol"
 )
 
@@ -356,12 +357,12 @@ func CronRunHandler(opts HandlerOpts) error {
 		return nil
 	}
 	svc, ok := ctx.CronService.(interface {
-		Run(string, string) error
+		Run(string, string, string, string, string) error
 	})
 	if !ok {
 		opts.Respond(false, nil, &protocol.ErrorShape{
 			Code:    protocol.ErrCodeInternal,
-			Message: "cron service does not support run",
+			Message: "cron service does not support run with context",
 		}, nil)
 		return nil
 	}
@@ -377,7 +378,10 @@ func CronRunHandler(opts HandlerOpts) error {
 	if v, ok := opts.Params["mode"].(string); ok && (v == "due" || v == "force") {
 		mode = v
 	}
-	err := svc.Run(jobID, mode)
+	domain, _ := opts.Params["domain"].(string)
+	clusterID, _ := opts.Params["clusterId"].(string)
+	component, _ := opts.Params["component"].(string)
+	err := svc.Run(jobID, mode, domain, clusterID, component)
 	if err != nil {
 		opts.Respond(false, nil, &protocol.ErrorShape{
 			Code:    protocol.ErrCodeInternal,
@@ -402,6 +406,10 @@ type cronRunLogEntry struct {
 	RunAtMs     *int64 `json:"runAtMs,omitempty"`
 	DurationMs  *int64 `json:"durationMs,omitempty"`
 	NextRunAtMs *int64 `json:"nextRunAtMs,omitempty"`
+	Domain      string               `json:"domain,omitempty"`
+	ClusterID   string               `json:"clusterId,omitempty"`
+	Component   string               `json:"component,omitempty"`
+	Result      *ops.InspectionResult `json:"result,omitempty"`
 }
 
 // resolveCronRunLogPath returns path to job run log file (same layout as TS run-log).
@@ -485,6 +493,23 @@ func readCronRunLogEntries(logPath string, jobID string, limit int) ([]cronRunLo
 		if v, ok := raw["nextRunAtMs"].(float64); ok {
 			t := int64(v)
 			e.NextRunAtMs = &t
+		}
+		if v, ok := raw["domain"].(string); ok {
+			e.Domain = v
+		}
+		if v, ok := raw["clusterId"].(string); ok {
+			e.ClusterID = v
+		}
+		if v, ok := raw["component"].(string); ok {
+			e.Component = v
+		}
+		if rMap, ok := raw["result"].(map[string]interface{}); ok {
+			var rObj ops.InspectionResult
+			if rBytes, err := json.Marshal(rMap); err == nil {
+				if json.Unmarshal(rBytes, &rObj) == nil {
+					e.Result = &rObj
+				}
+			}
 		}
 		entries = append(entries, e)
 	}
