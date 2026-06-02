@@ -124,7 +124,7 @@ export function renderTechOpsDomain(props: TechOpsDomainProps) {
         <div class="ops-sidebar">
           <div class="ops-sidebar__header">
             <div class="ops-sidebar__domain-card ops-sidebar__domain-title">
-              <span class="ops-sidebar__domain-icon">${icons[props.domainKey === "hadoop" ? "network" : props.domainKey === "fi" ? "building" : props.domainKey === "gbase" ? "database" : props.domainKey === "governance" ? "layout" : "folder"]}</span>
+              <span class="ops-sidebar__domain-icon">${icons[props.domainKey === "hadoop" ? "network" : props.domainKey === "fi" ? "building" : props.domainKey === "gbase" ? "database" : props.domainKey === "governance" ? "layout" : props.domainKey === "dataapps" ? "activity" : "folder"]}</span>
               <span class="ops-sidebar__domain-name">${props.domainName}</span>
             </div>
           </div>

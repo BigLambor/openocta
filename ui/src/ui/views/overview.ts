@@ -213,7 +213,10 @@ export function renderOverview(props: OverviewProps) {
                   (d) => html`
                     <div class="domain-card domain-card--muted">
                       <div class="domain-card-header">
-                        <div class="domain-name">${iconForDomain(d.icon)} ${d.name}</div>
+                        <div class="domain-name">
+                          <span class="domain-icon-wrapper">${iconForDomain(d.icon)}</span>
+                          <span>${d.name}</span>
+                        </div>
                         <span class="domain-score domain-score--muted">—</span>
                       </div>
                       <p class="domain-card-hint">待接入监控指标</p>
@@ -259,7 +262,10 @@ export function renderOverview(props: OverviewProps) {
                     return html`
                       <div class="domain-card ${score == null ? "domain-card--muted" : ""}">
                         <div class="domain-card-header">
-                          <div class="domain-name">${iconForDomain(d.icon)} ${d.name}</div>
+                          <div class="domain-name">
+                            <span class="domain-icon-wrapper">${iconForDomain(d.icon)}</span>
+                            <span>${d.name}</span>
+                          </div>
                           <span class="domain-score ${scoreClass}">
                             ${score != null ? `${score}分` : "—"}
                           </span>

@@ -773,7 +773,7 @@ export function renderApp(state: AppViewState) {
         <div class="topbar-left">
           <div class="brand" style="display: flex; align-items: center; gap: 8px;">
             <img src=${basePath ? `${basePath}/logo_h.png` : "/logo_h.png"} alt="ApexOps" style="height: 24px; width: auto; flex-shrink: 0;" />
-            <span style="font-weight: 700; font-size: 16px; letter-spacing: 0.2px; color: var(--text-primary);">ApexOps</span>
+            <span style="font-weight: 700; font-size: 16px; letter-spacing: 0.2px; color: var(--accent);">ApexOps</span>
           </div>
           <span class="topbar-version">${state.configSchemaVersion ?? "---"}</span>
         </div>

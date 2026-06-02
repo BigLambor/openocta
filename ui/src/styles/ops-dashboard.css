@@ -132,27 +132,9 @@
 
 .ops-dashboard .domain-grid {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 16px;
   width: 100%;
-}
-
-@media (max-width: 1280px) {
-  .ops-dashboard .domain-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-}
-
-@media (max-width: 900px) {
-  .ops-dashboard .domain-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
-@media (max-width: 520px) {
-  .ops-dashboard .domain-grid {
-    grid-template-columns: 1fr;
-  }
 }
 
 .ops-dashboard .domain-card {
@@ -186,10 +168,29 @@
 .ops-dashboard .domain-name {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 14px;
+  gap: 10px;
+  font-size: 13px;
   font-weight: 600;
   min-width: 0;
+  white-space: nowrap;
+}
+
+.ops-dashboard .domain-icon-wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: var(--accent-subtle, rgba(0, 112, 192, 0.08));
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.ops-dashboard .domain-icon-wrapper svg {
+  width: 14px;
+  height: 14px;
+  display: block;
 }
 
 .ops-dashboard .domain-score {
