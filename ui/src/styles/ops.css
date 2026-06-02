@@ -24,11 +24,13 @@
 }
 
 .ops-sidebar__header {
-  padding: 24px 16px 16px 16px;
+  padding: 12px 16px;
   display: flex;
   align-items: center;
   gap: 12px;
   border-bottom: 1px solid var(--border);
+  min-height: 57px;
+  box-sizing: border-box;
 }
 
 .ops-sidebar__icon {
@@ -68,12 +70,11 @@
 }
 
 .ops-sidebar__group-label {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  padding: 0 8px 8px 8px;
+  color: var(--text-secondary);
+  letter-spacing: 0.02em;
+  padding: 4px 8px 8px 8px;
 }
 
 .ops-sidebar__menu-item {
@@ -697,7 +698,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 12px;
+  padding: 6px 12px;
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);

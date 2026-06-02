@@ -76,12 +76,46 @@ export type TechOpsDomainProps = {
 
 
 
+const DOMAIN_SCENARIOS: Record<string, Array<{ id: "agent" | "alerts" | "inspections"; label: string; icon: string }>> = {
+  hadoop: [
+    { id: "agent", label: "大数据专家 Agent", icon: "messageSquare" },
+    { id: "alerts", label: "大数据组件告警降噪", icon: "zap" },
+    { id: "inspections", label: "大数据集群深度巡检", icon: "historyClock" },
+  ],
+  fi: [
+    { id: "agent", label: "FI 智能助手 Agent", icon: "messageSquare" },
+    { id: "alerts", label: "FI 告警影响评估", icon: "zap" },
+    { id: "inspections", label: "FI 服务健康巡检", icon: "historyClock" },
+  ],
+  gbase: [
+    { id: "agent", label: "SQL 优化专家 Agent", icon: "messageSquare" },
+    { id: "alerts", label: "数据库告警关联分析", icon: "zap" },
+    { id: "inspections", label: "数据库实例健康巡检", icon: "historyClock" },
+  ],
+  governance: [
+    { id: "agent", label: "治理平台智能助手", icon: "messageSquare" },
+    { id: "alerts", label: "流水线与部署告警降噪", icon: "zap" },
+    { id: "inspections", label: "开发治理合规度巡检", icon: "historyClock" },
+  ],
+  dataapps: [
+    { id: "agent", label: "数据任务诊断 Agent", icon: "messageSquare" },
+    { id: "alerts", label: "数据流告警评估", icon: "zap" },
+    { id: "inspections", label: "数据应用健康度巡检", icon: "historyClock" },
+  ],
+  default: [
+    { id: "agent", label: "智能诊断 Agent", icon: "messageSquare" },
+    { id: "alerts", label: "告警降噪与影响评估", icon: "zap" },
+    { id: "inspections", label: "深度健康巡检", icon: "historyClock" },
+  ],
+};
+
 export function renderTechOpsDomain(props: TechOpsDomainProps) {
   const entityCtx = formatEntityContextFromClusters(
     props.domainClusters,
     props.selectedEntityId,
   );
   const entityGroups = props.entityGroups;
+  const scenarios = DOMAIN_SCENARIOS[props.domainKey] || DOMAIN_SCENARIOS.default;
 
   return html`
     <div class="ops-domain-container">
@@ -96,24 +130,18 @@ export function renderTechOpsDomain(props: TechOpsDomainProps) {
           </div>
           <div class="ops-sidebar__menu">
             <div class="ops-sidebar__group-label">业务场景</div>
-            <button 
-              class="ops-sidebar__menu-item ${props.activeSubTab === "agent" ? "active" : ""}" 
-              @click=${() => props.onSubTabChange("agent")}
-            >
-              ${icons.messageSquare} <span>智能诊断 Agent</span>
-            </button>
-            <button 
-              class="ops-sidebar__menu-item ${props.activeSubTab === "alerts" ? "active" : ""}" 
-              @click=${() => props.onSubTabChange("alerts")}
-            >
-              ${icons.zap} <span>告警降噪与影响评估</span>
-            </button>
-            <button 
-              class="ops-sidebar__menu-item ${props.activeSubTab === "inspections" ? "active" : ""}" 
-              @click=${() => props.onSubTabChange("inspections")}
-            >
-              ${icons.historyClock} <span>深度健康巡检</span>
-            </button>
+            ${scenarios.map((sc) => {
+              const active = props.activeSubTab === sc.id;
+              const iconSvg = (icons as any)[sc.icon] || icons.globe;
+              return html`
+                <button 
+                  class="ops-sidebar__menu-item ${active ? "active" : ""}" 
+                  @click=${() => props.onSubTabChange(sc.id)}
+                >
+                  ${iconSvg} <span>${sc.label}</span>
+                </button>
+              `;
+            })}
           </div>
         </div>
 
