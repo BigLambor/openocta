@@ -15,6 +15,16 @@ type EmployeesListResult = {
     skillIds?: string[];
     skillNames?: string[];
     mcpServerKeys?: string[];
+    domainKeys?: string[];
+    capabilityKeys?: string[];
+    roleType?: string;
+    responsibilities?: string[];
+    inputSources?: string[];
+    outputTypes?: string[];
+    actionScopes?: string[];
+    permissionKeys?: string[];
+    runbookRefs?: string[];
+    knowledgeRefs?: string[];
   }>;
 };
 
@@ -78,6 +88,16 @@ export async function createDigitalEmployee(state: AppViewState) {
       description: state.digitalEmployeeCreateDescription ?? "",
       prompt: state.digitalEmployeeCreatePrompt ?? "",
       enabled: true,
+      domainKeys: state.digitalEmployeeCreateDomainKeys ?? [],
+      capabilityKeys: state.digitalEmployeeCreateCapabilityKeys ?? [],
+      roleType: state.digitalEmployeeCreateRoleType ?? "",
+      responsibilities: state.digitalEmployeeCreateResponsibilities ?? [],
+      inputSources: state.digitalEmployeeCreateInputSources ?? [],
+      outputTypes: state.digitalEmployeeCreateOutputTypes ?? [],
+      actionScopes: state.digitalEmployeeCreateActionScopes ?? [],
+      permissionKeys: state.digitalEmployeeCreatePermissionKeys ?? [],
+      runbookRefs: state.digitalEmployeeCreateRunbookRefs ?? [],
+      knowledgeRefs: state.digitalEmployeeCreateKnowledgeRefs ?? [],
     };
     if (mcpServers) payload.mcpServers = mcpServers;
     const res = await state.client.request<{ id: string }>("employees.create", payload);
@@ -106,6 +126,16 @@ export async function createDigitalEmployee(state: AppViewState) {
     state.digitalEmployeeSkillUploadName = "";
     state.digitalEmployeeSkillUploadFiles = [];
     state.digitalEmployeeSkillUploadError = null;
+    state.digitalEmployeeCreateDomainKeys = [];
+    state.digitalEmployeeCreateCapabilityKeys = [];
+    state.digitalEmployeeCreateRoleType = "";
+    state.digitalEmployeeCreateResponsibilities = [];
+    state.digitalEmployeeCreateInputSources = [];
+    state.digitalEmployeeCreateOutputTypes = [];
+    state.digitalEmployeeCreateActionScopes = [];
+    state.digitalEmployeeCreatePermissionKeys = [];
+    state.digitalEmployeeCreateRunbookRefs = [];
+    state.digitalEmployeeCreateKnowledgeRefs = [];
     await loadDigitalEmployees(state);
   } catch (err) {
     state.digitalEmployeeCreateError = String(err);
@@ -162,6 +192,16 @@ type EmployeeManifest = {
   enabled?: boolean;
   skillIds?: string[];
   mcpServers?: Record<string, unknown>;
+  domainKeys?: string[];
+  capabilityKeys?: string[];
+  roleType?: string;
+  responsibilities?: string[];
+  inputSources?: string[];
+  outputTypes?: string[];
+  actionScopes?: string[];
+  permissionKeys?: string[];
+  runbookRefs?: string[];
+  knowledgeRefs?: string[];
 };
 
 export async function getDigitalEmployee(
@@ -228,6 +268,24 @@ export async function copyDigitalEmployee(state: AppViewState, id: string) {
     if (Array.isArray(manifest.skillIds) && manifest.skillIds.length > 0) {
       payload.skillIds = manifest.skillIds;
     }
+    for (const key of [
+      "domainKeys",
+      "capabilityKeys",
+      "responsibilities",
+      "inputSources",
+      "outputTypes",
+      "actionScopes",
+      "permissionKeys",
+      "runbookRefs",
+      "knowledgeRefs",
+    ] as const) {
+      if (Array.isArray(manifest[key]) && manifest[key]!.length > 0) {
+        payload[key] = manifest[key];
+      }
+    }
+    if (manifest.roleType) {
+      payload.roleType = manifest.roleType;
+    }
     await state.client.request<{ id: string }>("employees.create", payload);
     await loadDigitalEmployees(state);
   } catch (err) {
@@ -271,6 +329,16 @@ export async function updateDigitalEmployee(state: AppViewState) {
       prompt: state.digitalEmployeeEditPrompt ?? "",
       enabled: state.digitalEmployeeEditEnabled !== false,
       mcpServers: mcpServers ?? {},
+      domainKeys: state.digitalEmployeeEditDomainKeys ?? [],
+      capabilityKeys: state.digitalEmployeeEditCapabilityKeys ?? [],
+      roleType: state.digitalEmployeeEditRoleType ?? "",
+      responsibilities: state.digitalEmployeeEditResponsibilities ?? [],
+      inputSources: state.digitalEmployeeEditInputSources ?? [],
+      outputTypes: state.digitalEmployeeEditOutputTypes ?? [],
+      actionScopes: state.digitalEmployeeEditActionScopes ?? [],
+      permissionKeys: state.digitalEmployeeEditPermissionKeys ?? [],
+      runbookRefs: state.digitalEmployeeEditRunbookRefs ?? [],
+      knowledgeRefs: state.digitalEmployeeEditKnowledgeRefs ?? [],
     };
     await state.client.request("employees.create", payload);
 
@@ -304,6 +372,16 @@ export async function updateDigitalEmployee(state: AppViewState) {
     state.digitalEmployeeEditSkillNames = [];
     state.digitalEmployeeEditSkillFilesToUpload = [];
     state.digitalEmployeeEditSkillsToDelete = [];
+    state.digitalEmployeeEditDomainKeys = [];
+    state.digitalEmployeeEditCapabilityKeys = [];
+    state.digitalEmployeeEditRoleType = "";
+    state.digitalEmployeeEditResponsibilities = [];
+    state.digitalEmployeeEditInputSources = [];
+    state.digitalEmployeeEditOutputTypes = [];
+    state.digitalEmployeeEditActionScopes = [];
+    state.digitalEmployeeEditPermissionKeys = [];
+    state.digitalEmployeeEditRunbookRefs = [];
+    state.digitalEmployeeEditKnowledgeRefs = [];
     await loadDigitalEmployees(state);
   } catch (err) {
     state.digitalEmployeeEditError = String(err);
@@ -397,4 +475,3 @@ export async function uploadEmployeeSkill(
     return { ok: false, error: msg };
   }
 }
-

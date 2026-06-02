@@ -9,12 +9,15 @@ import {
 } from "../ops/entity-config.ts";
 import type { OpsClusterRecord } from "../controllers/ops-clusters.ts";
 import { renderChat, type ChatProps } from "./chat.ts";
+import type { TechOpsCapabilityTab } from "../ops/navigation.ts";
+
+export type { TechOpsCapabilityTab } from "../ops/navigation.ts";
 
 export type TechOpsDomainProps = {
   domainKey: "hadoop" | "fi" | "gbase" | "governance" | "dataapps";
   domainName: string;
-  activeSubTab: "agent" | "alerts" | "inspections";
-  onSubTabChange: (tab: "agent" | "alerts" | "inspections") => void;
+  activeSubTab: TechOpsCapabilityTab;
+  onSubTabChange: (tab: TechOpsCapabilityTab) => void;
   selectedEntityId: string;
   isEntitySelectorOpen: boolean;
   onSelectEntity: (id: string) => void;
@@ -54,7 +57,7 @@ export type TechOpsDomainProps = {
     id: string;
     time: string;
     score: number;
-    status: "healthy" | "warning" | "critical";
+    status: "healthy" | "warning" | "critical" | "unknown";
     reportSummary: string;
     reportMarkdown: string;
   }>;
@@ -74,38 +77,35 @@ export type TechOpsDomainProps = {
   onAckAlert?: (groupId: string) => void;
 };
 
+type CapabilityNavItem = {
+  id: TechOpsCapabilityTab;
+  label: string;
+  icon: string;
+};
 
-
-const DOMAIN_SCENARIOS: Record<string, Array<{ id: "agent" | "alerts" | "inspections"; label: string; icon: string }>> = {
+const DOMAIN_CAPABILITIES: Record<string, CapabilityNavItem[]> = {
   hadoop: [
-    { id: "agent", label: "大数据专家 Agent", icon: "messageSquare" },
-    { id: "alerts", label: "大数据组件告警降噪", icon: "zap" },
-    { id: "inspections", label: "大数据集群深度巡检", icon: "historyClock" },
-  ],
-  fi: [
-    { id: "agent", label: "FI 智能助手 Agent", icon: "messageSquare" },
-    { id: "alerts", label: "FI 告警影响评估", icon: "zap" },
-    { id: "inspections", label: "FI 服务健康巡检", icon: "historyClock" },
-  ],
-  gbase: [
-    { id: "agent", label: "SQL 优化专家 Agent", icon: "messageSquare" },
-    { id: "alerts", label: "数据库告警关联分析", icon: "zap" },
-    { id: "inspections", label: "数据库实例健康巡检", icon: "historyClock" },
-  ],
-  governance: [
-    { id: "agent", label: "治理平台智能助手", icon: "messageSquare" },
-    { id: "alerts", label: "流水线与部署告警降噪", icon: "zap" },
-    { id: "inspections", label: "开发治理合规度巡检", icon: "historyClock" },
-  ],
-  dataapps: [
-    { id: "agent", label: "数据任务诊断 Agent", icon: "messageSquare" },
-    { id: "alerts", label: "数据流告警评估", icon: "zap" },
-    { id: "inspections", label: "数据应用健康度巡检", icon: "historyClock" },
+    { id: "overview", label: "概览", icon: "overviewGrid" },
+    { id: "assetTopology", label: "资产与拓扑", icon: "server" },
+    { id: "observability", label: "可观测与告警", icon: "zap" },
+    { id: "inspection", label: "健康度与巡检", icon: "historyClock" },
+    { id: "jobGovernance", label: "作业治理", icon: "activity" },
+    { id: "diagnosis", label: "故障诊断与应急", icon: "messageSquare" },
+    { id: "governance", label: "治理与优化", icon: "layout" },
+    { id: "capacity", label: "容量性能与成本", icon: "usageBars" },
+    { id: "change", label: "变更配置与合规", icon: "settings" },
+    { id: "employees", label: "数字员工", icon: "users" },
   ],
   default: [
-    { id: "agent", label: "智能诊断 Agent", icon: "messageSquare" },
-    { id: "alerts", label: "告警降噪与影响评估", icon: "zap" },
-    { id: "inspections", label: "深度健康巡检", icon: "historyClock" },
+    { id: "overview", label: "概览", icon: "overviewGrid" },
+    { id: "assetTopology", label: "资产与拓扑", icon: "server" },
+    { id: "observability", label: "可观测与告警", icon: "zap" },
+    { id: "inspection", label: "健康度与巡检", icon: "historyClock" },
+    { id: "diagnosis", label: "故障诊断与应急", icon: "messageSquare" },
+    { id: "governance", label: "治理与优化", icon: "layout" },
+    { id: "capacity", label: "容量性能与成本", icon: "usageBars" },
+    { id: "change", label: "变更配置与合规", icon: "settings" },
+    { id: "employees", label: "数字员工", icon: "users" },
   ],
 };
 
@@ -115,12 +115,12 @@ export function renderTechOpsDomain(props: TechOpsDomainProps) {
     props.selectedEntityId,
   );
   const entityGroups = props.entityGroups;
-  const scenarios = DOMAIN_SCENARIOS[props.domainKey] || DOMAIN_SCENARIOS.default;
+  const capabilities = DOMAIN_CAPABILITIES[props.domainKey] || DOMAIN_CAPABILITIES.default;
+  const activeCapability = capabilities.find((item) => item.id === props.activeSubTab) ?? capabilities[0];
 
   return html`
     <div class="ops-domain-container">
       <div class="ops-layout-wrapper">
-        <!-- 侧边栏：场景列表 -->
         <div class="ops-sidebar">
           <div class="ops-sidebar__header">
             <div class="ops-sidebar__domain-card ops-sidebar__domain-title">
@@ -129,27 +129,28 @@ export function renderTechOpsDomain(props: TechOpsDomainProps) {
             </div>
           </div>
           <div class="ops-sidebar__menu">
-            <div class="ops-sidebar__group-label">业务场景</div>
-            ${scenarios.map((sc) => {
-              const active = props.activeSubTab === sc.id;
-              const iconSvg = (icons as any)[sc.icon] || icons.globe;
+            <div class="ops-sidebar__group-label">运维能力域</div>
+            ${capabilities.map((capability) => {
+              const active = props.activeSubTab === capability.id;
+              const iconSvg = (icons as any)[capability.icon] || icons.globe;
               return html`
                 <button 
                   class="ops-sidebar__menu-item ${active ? "active" : ""}" 
-                  @click=${() => props.onSubTabChange(sc.id)}
+                  @click=${() => props.onSubTabChange(capability.id)}
                 >
-                  ${iconSvg} <span>${sc.label}</span>
+                  ${iconSvg} <span>${capability.label}</span>
                 </button>
               `;
             })}
           </div>
         </div>
 
-        <!-- 页面主要内容区分发 -->
         <div class="ops-main-content">
           <div class="ops-main-header">
             <div class="ops-main-header__left">
               <span class="ops-main-header__breadcrumb-domain">${props.domainName}</span>
+              <span class="ops-main-header__breadcrumb-separator">/</span>
+              <span class="ops-main-header__breadcrumb-domain">${activeCapability?.label ?? "能力域"}</span>
               <span class="ops-main-header__breadcrumb-separator">/</span>
               <div class="ops-entity-selector">
                 <button
@@ -222,20 +223,140 @@ export function renderTechOpsDomain(props: TechOpsDomainProps) {
           </div>
           
           <div style="flex: 1; overflow: hidden; position: relative;">
-          ${props.activeSubTab === "agent"
+          ${props.activeSubTab === "diagnosis"
             ? html`
                 <div class="ops-agent-view">
                   ${renderChat(props.chatProps)}
                 </div>
               `
-            : props.activeSubTab === "alerts"
+            : props.activeSubTab === "observability"
             ? renderAlertsSubTab(props)
-            : renderInspectionsSubTab(props)}
+            : props.activeSubTab === "inspection"
+            ? renderInspectionsSubTab(props)
+            : renderCapabilityPlaceholder(props)}
           </div>
         </div>
       </div>
     </div>
   `;
+}
+
+function renderCapabilityPlaceholder(props: TechOpsDomainProps) {
+  const content = getCapabilityPlaceholder(props.domainKey, props.activeSubTab);
+  return html`
+    <div class="ops-alerts-grid" style="padding: 24px;">
+      <div class="ops-card detail-column">
+        <div class="detail-section__header">${content.title}</div>
+        <p class="muted" style="margin-top: 10px;">${content.description}</p>
+        <div class="ops-summary-cards" style="margin-top: 16px;">
+          ${content.scenarios.map(
+            (scenario) => html`
+              <div class="ops-card stat-card">
+                <div class="stat-label">${scenario.title}</div>
+                <div class="muted" style="margin-top: 6px; line-height: 1.6;">${scenario.desc}</div>
+              </div>
+            `,
+          )}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function getCapabilityPlaceholder(domainKey: string, tab: TechOpsCapabilityTab) {
+  const bch = domainKey === "hadoop";
+  const common: Record<TechOpsCapabilityTab, { title: string; description: string; scenarios: Array<{ title: string; desc: string }> }> = {
+    overview: {
+      title: "技术域概览",
+      description: "聚合该技术域的健康度、风险、告警、巡检、容量和数字员工工作状态。",
+      scenarios: [
+        { title: "健康度矩阵", desc: "按集群、组件、作业或实例展示健康评分与风险等级。" },
+        { title: "待处理风险", desc: "汇总告警、巡检、容量和变更风险，形成统一待办。" },
+        { title: "员工工作状态", desc: "展示本域数字员工正在处理的任务、产出和异常。" },
+      ],
+    },
+    assetTopology: {
+      title: "资产与拓扑",
+      description: "管理对象、关系、归属、配置和依赖，是观测、诊断、治理的基础。",
+      scenarios: bch
+        ? [
+            { title: "集群资产", desc: "纳管 BCH 集群、区域、责任人、版本和状态。" },
+            { title: "组件拓扑", desc: "维护 HDFS、YARN、Hive、Spark、Flink 等组件关系。" },
+            { title: "队列与租户", desc: "沉淀 YARN 队列、租户、资源配额和责任归属。" },
+          ]
+        : [
+            { title: "对象资产", desc: "纳管该技术域的核心实例、组件、服务和责任人。" },
+            { title: "依赖拓扑", desc: "维护上下游依赖，为告警关联和影响分析提供基础。" },
+          ],
+    },
+    observability: {
+      title: "可观测与告警",
+      description: "该能力域已接入当前告警降噪与影响评估页面。",
+      scenarios: [],
+    },
+    inspection: {
+      title: "健康度与巡检",
+      description: "该能力域已接入当前深度巡检与报告页面。",
+      scenarios: [],
+    },
+    jobGovernance: {
+      title: "作业治理",
+      description: "面向大数据作业稳定性、性能、SLA 和资源使用的治理能力。该能力域主要适用于 BCH 生态。",
+      scenarios: [
+        { title: "Flink 作业健康度", desc: "评估 checkpoint、延迟、反压、失败率和资源水位。" },
+        { title: "Spark 作业诊断", desc: "分析失败原因、资源倾斜、长尾 task 和执行效率。" },
+        { title: "作业 SLA 风险", desc: "识别即将超时、频繁失败或资源异常的关键作业。" },
+      ],
+    },
+    diagnosis: {
+      title: "故障诊断与应急",
+      description: "该能力域承载当前专家对话，并逐步升级为诊断任务、根因分析和应急处置闭环。",
+      scenarios: [],
+    },
+    governance: {
+      title: "治理与优化",
+      description: "面向长期问题治理，而不是单次告警或单次故障处理。",
+      scenarios: [
+        { title: "重复告警治理", desc: "识别长期重复、低价值、无责任归属的告警。" },
+        { title: "稳定性治理", desc: "跟踪高频失败对象、弱依赖和反复出现的风险。" },
+        { title: "配置治理", desc: "发现配置漂移、基线偏差和不合理参数。" },
+      ],
+    },
+    capacity: {
+      title: "容量性能与成本",
+      description: "面向资源水位、容量预测、性能瓶颈和成本归因。",
+      scenarios: [
+        { title: "容量预测", desc: "基于增长趋势预测存储、计算、连接数或任务量风险。" },
+        { title: "性能瓶颈", desc: "识别热点、队列拥塞、慢 SQL、长尾任务或资源争用。" },
+        { title: "成本归因", desc: "按集群、租户、作业或应用归因资源消耗。" },
+      ],
+    },
+    change: {
+      title: "变更配置与合规",
+      description: "覆盖变更前评估、变更中护航、变更后验证和配置合规。",
+      scenarios: [
+        { title: "变更前风险评估", desc: "检查影响范围、依赖、历史风险和回滚条件。" },
+        { title: "变更中观测", desc: "自动关注关键指标、告警和用户影响。" },
+        { title: "变更后验证", desc: "验证服务恢复、容量稳定、关键链路正常。" },
+      ],
+    },
+    employees: {
+      title: "数字员工",
+      description: "按该技术域展示值班、巡检、诊断、治理、容量和变更护航数字员工。",
+      scenarios: bch
+        ? [
+            { title: "BCH 值班运维数字员工", desc: "负责告警接收、聚合、初判和升级。" },
+            { title: "BCH 深度巡检数字员工", desc: "负责周期巡检、健康评分和风险清单。" },
+            { title: "BCH 作业诊断数字员工", desc: "负责 Spark、Flink 和离线任务诊断。" },
+          ]
+        : [
+            { title: "值班运维数字员工", desc: "负责该技术域告警和事件的初步处理。" },
+            { title: "巡检数字员工", desc: "负责该技术域健康检查与风险发现。" },
+            { title: "诊断数字员工", desc: "负责故障定位、根因分析和处置建议。" },
+          ],
+    },
+  };
+  return common[tab] ?? common.overview;
 }
 
 // 告警降噪评估子 Tab

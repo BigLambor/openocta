@@ -345,6 +345,16 @@ export type AppViewState = {
   digitalEmployeeSkillUploadFiles: File[];
   digitalEmployeeSkillUploadError: string | null;
   digitalEmployeeSkillUploadBusy: boolean;
+  digitalEmployeeCreateDomainKeys: string[];
+  digitalEmployeeCreateCapabilityKeys: string[];
+  digitalEmployeeCreateRoleType: string;
+  digitalEmployeeCreateResponsibilities: string[];
+  digitalEmployeeCreateInputSources: string[];
+  digitalEmployeeCreateOutputTypes: string[];
+  digitalEmployeeCreateActionScopes: string[];
+  digitalEmployeeCreatePermissionKeys: string[];
+  digitalEmployeeCreateRunbookRefs: string[];
+  digitalEmployeeCreateKnowledgeRefs: string[];
   digitalEmployeeEditModalOpen: boolean;
   digitalEmployeeEditId: string;
   digitalEmployeeEditName: string;
@@ -359,6 +369,27 @@ export type AppViewState = {
   digitalEmployeeEditEnabled: boolean;
   digitalEmployeeEditError: string | null;
   digitalEmployeeEditBusy: boolean;
+  digitalEmployeeEditDomainKeys: string[];
+  digitalEmployeeEditCapabilityKeys: string[];
+  digitalEmployeeEditRoleType: string;
+  digitalEmployeeEditResponsibilities: string[];
+  digitalEmployeeEditInputSources: string[];
+  digitalEmployeeEditOutputTypes: string[];
+  digitalEmployeeEditActionScopes: string[];
+  digitalEmployeeEditPermissionKeys: string[];
+  digitalEmployeeEditRunbookRefs: string[];
+  digitalEmployeeEditKnowledgeRefs: string[];
+  // Employee tasks & effectiveness
+  employeeTasks: import("./controllers/employee-tasks.ts").EmployeeTask[];
+  employeeTasksLoading: boolean;
+  employeeTasksError: string | null;
+  employeeTaskActive: import("./controllers/employee-tasks.ts").EmployeeTask | null;
+  employeeTaskFilterEmployee: string;
+  employeeTaskFilterStatus: string;
+  employeeTaskFilterQuery: string;
+  employeeEffectiveness: import("./controllers/employee-tasks.ts").EmployeeEffectiveness | null;
+  employeeEffectivenessLoading: boolean;
+  employeeEffectivenessError: string | null;
   // Remote catalogs (employee market / skill library / tool library / tutorials)
   employeeMarketLoadedOnce: boolean;
   employeeMarketLoading: boolean;
@@ -535,7 +566,7 @@ export type AppViewState = {
   handleWindowClose: () => void;
   handleTopbarDoubleClick: (event: MouseEvent) => void;
   // Tech Ops Domains
-  opsActiveSubTabs: Record<string, "agent" | "alerts" | "inspections">;
+  opsActiveSubTabs: Record<string, import("./ops/navigation.ts").TechOpsCapabilityTab>;
   opsSelectedAlertGroupIds: Record<string, string | null>;
   opsSelectedInspectionIds: Record<string, string | null>;
   opsIsInspecting: Record<string, boolean>;

@@ -281,8 +281,8 @@ describe("Ops remediation E2E smoke tests", () => {
 
     // 8. Test Manual Inspection
     const subtabs = Array.from(app.querySelectorAll(".ops-sidebar__menu-item")) as HTMLButtonElement[];
-    // Click subtab index 2 -> "深度健康巡检"
-    subtabs[2].click();
+    // Click subtab index 3 -> "深度健康巡检"
+    subtabs[3].click();
     await app.updateComplete;
 
     const inspectButton = Array.from(app.querySelectorAll("button")).find(
@@ -302,7 +302,7 @@ describe("Ops remediation E2E smoke tests", () => {
     expect(markdownArea?.textContent).toContain("Everything runs great");
 
     // 9. Test Alert Ack
-    subtabs[1].click(); // "告警降噪与影响评估"
+    subtabs[2].click(); // "告警降噪与影响评估"
     await app.loadOpsDomainAlerts("hadoop");
     await app.updateComplete;
 

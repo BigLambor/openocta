@@ -63,7 +63,7 @@ describe("chat focus mode", () => {
     expect(shell?.classList.contains("shell--chat-focus")).toBe(true);
 
     const overviewTab = Array.from(app.querySelectorAll<HTMLButtonElement>("button.top-tab")).find((button) =>
-      button.textContent?.includes("大屏"),
+      button.textContent?.includes("驾驶"),
     );
     expect(overviewTab).not.toBeUndefined();
     overviewTab?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 }));

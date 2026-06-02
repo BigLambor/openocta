@@ -70,6 +70,7 @@ func EmployeesCreateHandler(opts HandlerOpts) error {
 	prompt, _ := opts.Params["prompt"].(string)
 	typeVal, _ := opts.Params["type"].(string)
 	fromVal, _ := opts.Params["from"].(string)
+	roleType, _ := opts.Params["roleType"].(string)
 	enabledVal, hasEnabled := opts.Params["enabled"].(bool)
 	enabled := true
 	if hasEnabled {
@@ -83,6 +84,15 @@ func EmployeesCreateHandler(opts HandlerOpts) error {
 			}
 		}
 	}
+	domainKeys, hasDomainKeys := stringSliceParam(opts.Params, "domainKeys")
+	capabilityKeys, hasCapabilityKeys := stringSliceParam(opts.Params, "capabilityKeys")
+	responsibilities, hasResponsibilities := stringSliceParam(opts.Params, "responsibilities")
+	inputSources, hasInputSources := stringSliceParam(opts.Params, "inputSources")
+	outputTypes, hasOutputTypes := stringSliceParam(opts.Params, "outputTypes")
+	actionScopes, hasActionScopes := stringSliceParam(opts.Params, "actionScopes")
+	permissionKeys, hasPermissionKeys := stringSliceParam(opts.Params, "permissionKeys")
+	runbookRefs, hasRunbookRefs := stringSliceParam(opts.Params, "runbookRefs")
+	knowledgeRefs, hasKnowledgeRefs := stringSliceParam(opts.Params, "knowledgeRefs")
 	var mcpServers map[string]config.McpServerEntry
 	if rawMcp, ok := opts.Params["mcpServers"]; ok && rawMcp != nil {
 		if data, err := json.Marshal(rawMcp); err == nil {
@@ -110,7 +120,17 @@ func EmployeesCreateHandler(opts HandlerOpts) error {
 	}
 
 	// 仅更新 enabled 时（如禁用/启用），合并已有 manifest
-	updateEnabledOnly := hasEnabled && name == "" && desc == "" && prompt == "" && len(skillIDs) == 0 && mcpServers == nil
+	profilePatchPresent := roleType != "" ||
+		hasDomainKeys ||
+		hasCapabilityKeys ||
+		hasResponsibilities ||
+		hasInputSources ||
+		hasOutputTypes ||
+		hasActionScopes ||
+		hasPermissionKeys ||
+		hasRunbookRefs ||
+		hasKnowledgeRefs
+	updateEnabledOnly := hasEnabled && name == "" && desc == "" && prompt == "" && len(skillIDs) == 0 && mcpServers == nil && !profilePatchPresent
 	var m *employees.Manifest
 	if updateEnabledOnly {
 		existing, err := employees.LoadManifest(id, env)
@@ -138,22 +158,45 @@ func EmployeesCreateHandler(opts HandlerOpts) error {
 			if fromVal != "" {
 				m.From = strings.TrimSpace(fromVal)
 			}
+			applyEmployeeProfilePatch(
+				m,
+				roleType,
+				domainKeys, hasDomainKeys,
+				capabilityKeys, hasCapabilityKeys,
+				responsibilities, hasResponsibilities,
+				inputSources, hasInputSources,
+				outputTypes, hasOutputTypes,
+				actionScopes, hasActionScopes,
+				permissionKeys, hasPermissionKeys,
+				runbookRefs, hasRunbookRefs,
+				knowledgeRefs, hasKnowledgeRefs,
+			)
 		}
 	}
 	if m == nil {
 		typeTrimmed := strings.TrimSpace(typeVal)
 		fromTrimmed := strings.TrimSpace(fromVal)
 		m = &employees.Manifest{
-			ID:          id,
-			Name:        name,
-			Description: desc,
-			Prompt:      prompt,
-			Enabled:     enabled,
-			Builtin:     false,
-			SkillIDs:    skillIDs,
-			McpServers:  mcpServers,
-			Type:        typeTrimmed, // 空表示「其它」
-			From:        fromTrimmed,
+			ID:               id,
+			Name:             name,
+			Description:      desc,
+			Prompt:           prompt,
+			Enabled:          enabled,
+			Builtin:          false,
+			SkillIDs:         skillIDs,
+			McpServers:       mcpServers,
+			Type:             typeTrimmed, // 空表示「其它」
+			From:             fromTrimmed,
+			DomainKeys:       domainKeys,
+			CapabilityKeys:   capabilityKeys,
+			RoleType:         strings.TrimSpace(roleType),
+			Responsibilities: responsibilities,
+			InputSources:     inputSources,
+			OutputTypes:      outputTypes,
+			ActionScopes:     actionScopes,
+			PermissionKeys:   permissionKeys,
+			RunbookRefs:      runbookRefs,
+			KnowledgeRefs:    knowledgeRefs,
 		}
 	}
 	if err := employees.SaveManifest(m, env); err != nil {
@@ -165,6 +208,85 @@ func EmployeesCreateHandler(opts HandlerOpts) error {
 	}
 	opts.Respond(true, map[string]interface{}{"id": m.ID}, nil, nil)
 	return nil
+}
+
+func stringSliceParam(params map[string]interface{}, key string) ([]string, bool) {
+	raw, ok := params[key]
+	if !ok || raw == nil {
+		return nil, false
+	}
+	out := []string{}
+	switch v := raw.(type) {
+	case []interface{}:
+		for _, item := range v {
+			if s, ok := item.(string); ok {
+				if s = strings.TrimSpace(s); s != "" {
+					out = append(out, s)
+				}
+			}
+		}
+	case []string:
+		for _, s := range v {
+			if s = strings.TrimSpace(s); s != "" {
+				out = append(out, s)
+			}
+		}
+	case string:
+		for _, s := range strings.Split(v, ",") {
+			if s = strings.TrimSpace(s); s != "" {
+				out = append(out, s)
+			}
+		}
+	}
+	return out, true
+}
+
+func applyEmployeeProfilePatch(
+	m *employees.Manifest,
+	roleType string,
+	domainKeys []string, hasDomainKeys bool,
+	capabilityKeys []string, hasCapabilityKeys bool,
+	responsibilities []string, hasResponsibilities bool,
+	inputSources []string, hasInputSources bool,
+	outputTypes []string, hasOutputTypes bool,
+	actionScopes []string, hasActionScopes bool,
+	permissionKeys []string, hasPermissionKeys bool,
+	runbookRefs []string, hasRunbookRefs bool,
+	knowledgeRefs []string, hasKnowledgeRefs bool,
+) {
+	if m == nil {
+		return
+	}
+	if strings.TrimSpace(roleType) != "" {
+		m.RoleType = strings.TrimSpace(roleType)
+	}
+	if hasDomainKeys {
+		m.DomainKeys = domainKeys
+	}
+	if hasCapabilityKeys {
+		m.CapabilityKeys = capabilityKeys
+	}
+	if hasResponsibilities {
+		m.Responsibilities = responsibilities
+	}
+	if hasInputSources {
+		m.InputSources = inputSources
+	}
+	if hasOutputTypes {
+		m.OutputTypes = outputTypes
+	}
+	if hasActionScopes {
+		m.ActionScopes = actionScopes
+	}
+	if hasPermissionKeys {
+		m.PermissionKeys = permissionKeys
+	}
+	if hasRunbookRefs {
+		m.RunbookRefs = runbookRefs
+	}
+	if hasKnowledgeRefs {
+		m.KnowledgeRefs = knowledgeRefs
+	}
 }
 
 // EmployeesDeleteHandler 处理 "employees.delete"：删除用户自建数字员工及其关联会话。

@@ -678,6 +678,148 @@ func updateSessionAfterRun(ctx *Context, sessionKey string, sessionID string, se
 	if err != nil {
 		chatLog.Warn("update session after run failed sessionKey=%s err=%v", sessionKey, err)
 	}
+
+	// 自动将数字员工的运行记录保存为 SRE EmployeeTask
+	employeeID := parseEmployeeIDFromSessionKey(sessionKey)
+	if employeeID != "" {
+		if emp, err := employees.LoadManifest(employeeID, env); err == nil && emp != nil {
+			tPath := resolveSessionTranscriptPath(sessionID, target.storePath, sessionFile, target.agentID, env)
+			var inputMsg, outputMsg, conclusion string
+			status := "success"
+			var startedAt int64 = time.Now().UnixMilli()
+			var finishedAt int64 = time.Now().UnixMilli()
+
+			if msgs, rErr := session.ReadTranscriptMessages(tPath, 0); rErr == nil && len(msgs) > 0 {
+				// 寻找首条用户输入
+				for _, m := range msgs {
+					if strings.EqualFold(m.Role, "user") {
+						var parts []string
+						for _, b := range m.Content {
+							if b.Text != "" {
+								parts = append(parts, b.Text)
+							}
+						}
+						inputMsg = strings.Join(parts, "\n")
+						if m.Timestamp > 0 {
+							startedAt = m.Timestamp
+						}
+						break
+					}
+				}
+				// 寻找最后一条助手输出作为结果
+				for i := len(msgs) - 1; i >= 0; i-- {
+					m := msgs[i]
+					if strings.EqualFold(m.Role, "assistant") {
+						var parts []string
+						for _, b := range m.Content {
+							if b.Text != "" {
+								parts = append(parts, b.Text)
+							}
+						}
+						outputMsg = strings.Join(parts, "\n")
+						if m.Timestamp > 0 {
+							finishedAt = m.Timestamp
+						}
+						break
+					}
+				}
+			}
+
+			// 解析运维上下文
+			var domainKey, clusterID, component string
+			parsedRes := ops.ParseInspectionResult(sessionID, "", outputMsg, "ok", startedAt, finishedAt-startedAt)
+			domainKey = parsedRes.Domain
+			clusterID = parsedRes.ClusterID
+			component = parsedRes.Component
+
+			if domainKey == "" {
+				if len(emp.DomainKeys) > 0 {
+					domainKey = emp.DomainKeys[0]
+				} else {
+					domainKey = "hadoop"
+				}
+			}
+
+			// 匹配能力域
+			var capKey string
+			if len(emp.CapabilityKeys) > 0 {
+				capKey = emp.CapabilityKeys[0]
+			} else {
+				switch strings.ToLower(emp.RoleType) {
+				case "oncall":
+					capKey = "observability-alert"
+				case "inspector":
+					capKey = "health-inspection"
+				case "diagnoser":
+					capKey = "diagnosis-incident"
+				case "governor":
+					capKey = "governance-optimization"
+				case "capacity", "cost":
+					capKey = "capacity-performance-cost"
+				case "escort", "change":
+					capKey = "change-config-compliance"
+				default:
+					capKey = "observability-alert"
+				}
+			}
+
+			// 匹配对象引用
+			var objectRef string
+			if clusterID != "" {
+				objectRef = clusterID
+				if component != "" {
+					objectRef += " / " + component
+				}
+			} else if component != "" {
+				objectRef = component
+			}
+
+			triggerType := "manual"
+			operator := "system"
+			if isCronSessionKey(sessionKey) {
+				triggerType = "cron"
+				operator = "cron"
+			}
+
+			if strings.Contains(strings.ToLower(outputMsg), "[错误]") || strings.Contains(strings.ToLower(outputMsg), "failed") {
+				status = "failed"
+			}
+
+			conclusion = outputMsg
+			if len(conclusion) > 300 {
+				conclusion = conclusion[:297] + "..."
+			}
+
+			// 加载或创建 task
+			task, tErr := employees.LoadTask(sessionID, env)
+			if tErr != nil || task == nil {
+				task = &employees.EmployeeTask{
+					ID:            sessionID,
+					EmployeeID:    employeeID,
+					DomainKey:     domainKey,
+					CapabilityKey: capKey,
+					ScenarioKey:   "",
+					ObjectRef:     objectRef,
+					TriggerType:   triggerType,
+					Status:        status,
+					Input:         inputMsg,
+					Output:        outputMsg,
+					Conclusion:    conclusion,
+					StartedAt:     startedAt,
+					FinishedAt:    finishedAt,
+					Operator:      operator,
+					Evaluation:    "unrated",
+				}
+			} else {
+				task.Status = status
+				task.Output = outputMsg
+				task.Conclusion = conclusion
+				task.FinishedAt = finishedAt
+			}
+
+			_ = employees.SaveTask(task, env)
+		}
+	}
 }
 
 // appendErrorToTranscript appends an error message to the transcript as an assistant message.

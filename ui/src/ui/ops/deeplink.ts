@@ -1,11 +1,15 @@
 import type { Tab } from "../navigation.ts";
+import {
+  normalizeTechOpsCapabilityTab,
+  type TechOpsCapabilityTab,
+} from "./navigation.ts";
 
 const OPS_DOMAIN_TABS = new Set<Tab>(["hadoop", "fi", "gbase", "governance", "dataapps"]);
 
 /** Apply ?opsSubTab= & ?alertGroup= deep links on ops domain routes (P2-C1). */
 export function applyOpsDeepLinkFromUrl(host: {
   tab: Tab;
-  opsActiveSubTabs: Record<string, "agent" | "alerts" | "inspections">;
+  opsActiveSubTabs: Record<string, TechOpsCapabilityTab | string>;
   opsSelectedAlertGroupIds: Record<string, string | null>;
 }): { applied: boolean; alertsTab?: boolean } {
   if (typeof window === "undefined" || !OPS_DOMAIN_TABS.has(host.tab)) {
@@ -18,8 +22,11 @@ export function applyOpsDeepLinkFromUrl(host: {
     return { applied: false };
   }
 
-  if (sub === "agent" || sub === "alerts" || sub === "inspections") {
-    host.opsActiveSubTabs = { ...host.opsActiveSubTabs, [host.tab]: sub };
+  const normalized = normalizeTechOpsCapabilityTab(sub);
+  if (normalized) {
+    host.opsActiveSubTabs = { ...host.opsActiveSubTabs, [host.tab]: normalized };
+  } else if (group) {
+    host.opsActiveSubTabs = { ...host.opsActiveSubTabs, [host.tab]: "observability" };
   }
   if (group) {
     host.opsSelectedAlertGroupIds = {
@@ -33,6 +40,7 @@ export function applyOpsDeepLinkFromUrl(host: {
   const url = new URL(window.location.href);
   url.search = params.toString();
   window.history.replaceState({}, "", url.toString());
-  const alertsTab = sub === "alerts" || group != null;
+  const active = normalizeTechOpsCapabilityTab(host.opsActiveSubTabs[host.tab]);
+  const alertsTab = active === "observability" || group != null;
   return { applied: true, alertsTab };
 }

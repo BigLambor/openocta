@@ -354,6 +354,9 @@ import { renderCronConfig, renderCronHistory } from "./views/cron.ts";
 import { renderDebug } from "./views/debug.ts";
 import { installFromSite } from "./controllers/remote-market.ts";
 import { renderEmployeeMarket } from "./views/employee-market.ts";
+import { renderEmployeeCenter } from "./views/employee-center.ts";
+import { renderEmployeeOperations } from "./views/employee-operations.ts";
+import { loadEmployeeTasks, loadEmployeeEffectiveness, rateEmployeeTask, deleteEmployeeTask } from "./controllers/employee-tasks.ts";
 import "./components/category-tree-sidebar.ts";
 import { renderExecApprovalPrompt } from "./views/exec-approval.ts";
 import { renderGatewayUrlConfirmation } from "./views/gateway-url-confirmation.ts";
@@ -361,6 +364,8 @@ import { renderNativeDialogOverlay } from "./views/native-dialog-overlay.ts";
 import { renderLogs } from "./views/logs.ts";
 import { renderNodes } from "./views/nodes.ts";
 import { renderOverview } from "./views/overview.ts";
+import { renderOpsCapabilityCenter } from "./views/ops-capability-center.ts";
+import { renderTechOpsHub } from "./views/tech-ops-hub.ts";
 import { renderTechOpsDomain } from "./views/tech-ops-domain.ts";
 import {
   buildEntityGroupsFromClusters,
@@ -368,6 +373,7 @@ import {
   getDefaultEntityIdFromClusters,
   type OpsDomainKey,
 } from "./ops/entity-config.ts";
+import { openTechDomain } from "./ops/navigation.ts";
 import { canAckAlerts, canRunInspection } from "./ops/rbac.ts";
 import { renderSessions } from "./views/sessions.ts";
 import { renderSkillLibrary } from "./views/skill-library.ts";
@@ -659,8 +665,14 @@ export function renderApp(state: AppViewState) {
     state.tab === "scheduledTasks" || state.tab === "cronHistory" || state.tab === "cron";
   const isMessagePage = state.tab === "message";
   const isAgentSwarmPage = state.tab === "agentSwarm";
-  const isCatalogArea =
+  const isDigitalEmployeeArea =
+    state.tab === "employeeCenter" ||
     state.tab === "employeeMarket" ||
+    state.tab === "digitalEmployee" ||
+    state.tab === "employeeTasks" ||
+    state.tab === "employeeEffectiveness" ||
+    state.tab === "agentSwarm";
+  const isCatalogArea =
     state.tab === "skillLibrary" ||
     state.tab === "toolLibrary" ||
     state.tab === "modelLibrary" ||
@@ -684,8 +696,18 @@ export function renderApp(state: AppViewState) {
     state.tab === "gbase" ||
     state.tab === "governance" ||
     state.tab === "dataapps";
+  const hasAnyOpsDomainPermission =
+    Boolean(state.rbacUser) &&
+    (state.rbacUser.roleName === "admin" ||
+      ["hadoop", "fi", "gbase", "governance", "dataapps"].some((tab) =>
+        state.rbacUser!.permissions.includes(`menu:${tab}`),
+      ));
   const isOpsShellPage =
-    isOpsDomainPage || state.tab === "overview" || state.tab === "assetManagement";
+    isOpsDomainPage ||
+    state.tab === "techDomains" ||
+    state.tab === "overview" ||
+    state.tab === "opsCapabilities" ||
+    state.tab === "assetManagement";
   const isCollapsibleNavPage = isMessagePage || isScheduledTasks || isConfigArea;
   const isSideNavCollapsed = isCollapsibleNavPage && state.settings.navCollapsed;
   const renderNavCollapseFooter = html`
@@ -780,17 +802,24 @@ export function renderApp(state: AppViewState) {
         <nav class="top-tabs" aria-label="Primary navigation">
           ${[
             { tab: "message", label: "AI 运维助手" },
-            { tab: "overview", label: "运维大屏" },
-            { tab: "hadoop", label: "BCH生态" },
-            { tab: "fi", label: "FI商业生态" },
-            { tab: "gbase", label: "GBase数据库" },
-            { tab: "governance", label: "开发治理平台" },
-            { tab: "dataapps", label: "数据App运维" },
+            { tab: "overview", label: "运维驾驶舱" },
+            { tab: "opsCapabilities", label: "运维能力中心" },
+            { tab: "techDomains", label: "技术域运维" },
+            { tab: "employeeCenter", label: "数字员工中心" },
           ].filter((item) => {
             if (!state.rbacUser) return false;
-            const restrictedTabs = ["overview", "hadoop", "fi", "gbase", "governance", "dataapps", "config"];
+            const restrictedTabs = ["overview", "techDomains", "employeeCenter", "config"];
             if (restrictedTabs.includes(item.tab)) {
               if (state.rbacUser.roleName === "admin") return true;
+              if (item.tab === "techDomains") {
+                return hasAnyOpsDomainPermission;
+              }
+              if (item.tab === "employeeCenter") {
+                return (
+                  state.rbacUser.permissions.includes("menu:employeeCenter") ||
+                  state.rbacUser.permissions.includes("menu:employeeMarket")
+                );
+              }
               return state.rbacUser.permissions.includes(`menu:${item.tab}`);
             }
             return true;
@@ -801,6 +830,10 @@ export function renderApp(state: AppViewState) {
                 ? isScheduledTasks
                 : tab === "config"
                   ? isConfigArea
+                  : tab === "techDomains"
+                    ? isOpsDomainPage || state.tab === "techDomains"
+                  : tab === "employeeCenter"
+                    ? isDigitalEmployeeArea
                   : Boolean(tab && state.tab === tab && !(item as any).href);
             const iconName = tab ? iconForTab(tab, active) : "globe";
             const iconEl = html`<span class="nav-item__icon" aria-hidden="true">${icons[iconName]}</span>`;
@@ -854,13 +887,14 @@ export function renderApp(state: AppViewState) {
             <div class="dropdown-menu-content">
                ${[
                  { tab: "assetManagement", label: "集群资产管理" },
+                 { tab: "channels", label: "通道配置" },
                  { tab: "scheduledTasks", label: "定时任务" },
-                 { tab: "employeeMarket", label: "员工市场" },
                  { tab: "skillLibrary", label: "技能库" },
                  { tab: "toolLibrary", label: "工具库" },
                  { tab: "modelLibrary", label: "模型" },
                  { tab: "tutorials", label: "教程" },
                  { tab: "config", label: "系统配置" },
+                 { tab: "sandbox", label: "安全策略" },
                ].map(item => {
                  const active =
                    state.tab === item.tab ||
@@ -940,7 +974,7 @@ export function renderApp(state: AppViewState) {
       ${state.tab === "tutorials" || isAgentSwarmPage
         ? nothing
         : html`<aside
-            class="nav ${isCatalogArea ? "nav--catalog" : ""} ${isMessagePage ? "nav--massage" : ""} ${isScheduledTasks || isConfigArea ? "nav--grouped" : ""} ${isSideNavCollapsed ? "nav--collapsed" : ""}"
+            class="nav ${isCatalogArea || isDigitalEmployeeArea ? "nav--catalog" : ""} ${isMessagePage ? "nav--massage" : ""} ${isScheduledTasks || isConfigArea ? "nav--grouped" : ""} ${isSideNavCollapsed ? "nav--collapsed" : ""}"
             @scroll=${() => {
               if (state.sessionOverflow) {
                 state.sessionOverflow = null;
@@ -1254,22 +1288,48 @@ export function renderApp(state: AppViewState) {
                     </div>
                     ${renderNavCollapseFooter}
                   `
-              : state.tab === "employeeMarket"
+              : state.tab === "employeeCenter" ||
+                  state.tab === "employeeMarket" ||
+                  state.tab === "digitalEmployee" ||
+                  state.tab === "employeeTasks" ||
+                  state.tab === "employeeEffectiveness"
                 ? html`
-                    <div class="nav-group">
-                      <div class="nav-group__items">
-                        <category-tree-sidebar
-                          scope="employee"
-                          .items=${state.employeeMarketItems}
-                          .selectedCategory=${state.employeeMarketCategory || "__all__"}
-                          .keyword=${state.employeeMarketQuery}
-                          .gatewayHost=${state.settings?.gatewayUrl?.trim()}
-                          .token=${state.settings?.token?.trim()}
-                          .reloadVersion=${state.employeeMarketReloadVersion}
-                          ?disabled=${state.employeeMarketLoading}
-                          @category-select=${(e: CustomEvent) => { state.employeeMarketCategory = e.detail.name; state.employeeMarketCategoryDescendants = e.detail.descendantNames ?? []; }}
-                        ></category-tree-sidebar>
+                    <div class="nav-group-list">
+                      <div class="nav-group">
+                        <button class="nav-label nav-label--static" type="button">
+                          <span class="nav-label__text">数字员工中心</span>
+                        </button>
+                        <div class="nav-group__items">
+                          ${renderTab(state, "employeeCenter")}
+                          ${renderTab(state, "employeeMarket")}
+                          ${renderTab(state, "digitalEmployee")}
+                          ${renderTab(state, "agentSwarm")}
+                          ${renderTab(state, "employeeTasks")}
+                          ${renderTab(state, "employeeEffectiveness")}
+                        </div>
                       </div>
+                      ${state.tab === "employeeMarket"
+                        ? html`
+                            <div class="nav-group">
+                              <button class="nav-label nav-label--static" type="button">
+                                <span class="nav-label__text">员工分类</span>
+                              </button>
+                              <div class="nav-group__items">
+                                <category-tree-sidebar
+                                  scope="employee"
+                                  .items=${state.employeeMarketItems}
+                                  .selectedCategory=${state.employeeMarketCategory || "__all__"}
+                                  .keyword=${state.employeeMarketQuery}
+                                  .gatewayHost=${state.settings?.gatewayUrl?.trim()}
+                                  .token=${state.settings?.token?.trim()}
+                                  .reloadVersion=${state.employeeMarketReloadVersion}
+                                  ?disabled=${state.employeeMarketLoading}
+                                  @category-select=${(e: CustomEvent) => { state.employeeMarketCategory = e.detail.name; state.employeeMarketCategoryDescendants = e.detail.descendantNames ?? []; }}
+                                ></category-tree-sidebar>
+                              </div>
+                            </div>
+                          `
+                        : nothing}
                     </div>
                   `
                 : state.tab === "skillLibrary"
@@ -1401,6 +1461,12 @@ export function renderApp(state: AppViewState) {
                 onOpenPendingAlerts: () => state.openPendingAlertsFromDashboard(),
                 canInspect: canRunInspection(state.rbacUser),
               })
+            : nothing
+        }
+
+        ${
+          state.tab === "opsCapabilities"
+            ? renderOpsCapabilityCenter()
             : nothing
         }
 
@@ -1901,6 +1967,85 @@ export function renderApp(state: AppViewState) {
         }
 
         ${
+          state.tab === "employeeCenter"
+            ? (() => {
+                if (!state.digitalEmployeesLoading && (state.digitalEmployees?.length ?? 0) === 0) {
+                  queueMicrotask(() => void loadDigitalEmployees(state));
+                }
+                return renderEmployeeCenter({
+                  employees: state.digitalEmployees,
+                  loading: state.digitalEmployeesLoading,
+                  onOpenMarket: () => state.setTab("employeeMarket"),
+                  onOpenEmployees: () => state.setTab("digitalEmployee"),
+                  onOpenSwarm: () => state.setTab("agentSwarm"),
+                  onOpenTasks: () => state.setTab("employeeTasks"),
+                  onOpenEffectiveness: () => state.setTab("employeeEffectiveness"),
+                  onCreateEmployee: () => {
+                    state.digitalEmployeeCreateModalOpen = true;
+                    state.digitalEmployeeAdvancedOpen = false;
+                    state.digitalEmployeeCreateMcpMode = "builder";
+                    state.digitalEmployeeCreateMcpJson = "";
+                    state.digitalEmployeeCreateMcpItems = [];
+                    state.digitalEmployeeSkillUploadName = "";
+                    state.digitalEmployeeSkillUploadFiles = [];
+                    state.digitalEmployeeSkillUploadError = null;
+                  },
+                });
+              })()
+            : nothing
+        }
+
+        ${
+          state.tab === "employeeTasks" || state.tab === "employeeEffectiveness"
+            ? (() => {
+                if (!state.digitalEmployeesLoading && (state.digitalEmployees?.length ?? 0) === 0) {
+                  queueMicrotask(() => void loadDigitalEmployees(state));
+                }
+                return renderEmployeeOperations({
+                  employees: state.digitalEmployees,
+                  mode: state.tab === "employeeTasks" ? "tasks" : "effectiveness",
+                  onOpenEmployees: () => state.setTab("digitalEmployee"),
+                  tasks: state.employeeTasks ?? [],
+                  tasksLoading: state.employeeTasksLoading,
+                  tasksError: state.employeeTasksError,
+                  activeTask: state.employeeTaskActive,
+                  filterEmployee: state.employeeTaskFilterEmployee,
+                  filterStatus: state.employeeTaskFilterStatus,
+                  filterQuery: state.employeeTaskFilterQuery,
+                  effectiveness: state.employeeEffectiveness,
+                  effectivenessLoading: state.employeeEffectivenessLoading,
+                  effectivenessError: state.employeeEffectivenessError,
+                  onFilterEmployeeChange: (val) => {
+                    state.employeeTaskFilterEmployee = val;
+                    void loadEmployeeTasks(state);
+                  },
+                  onFilterStatusChange: (val) => {
+                    state.employeeTaskFilterStatus = val;
+                    void loadEmployeeTasks(state);
+                  },
+                  onFilterQueryChange: (val) => {
+                    state.employeeTaskFilterQuery = val;
+                    void loadEmployeeTasks(state);
+                  },
+                  onSetActiveTask: (task) => {
+                    state.employeeTaskActive = task;
+                  },
+                  onRateTask: (id, evaluation) => {
+                    void rateEmployeeTask(state, id, evaluation);
+                  },
+                  onDeleteTask: (id) => {
+                    void deleteEmployeeTask(state, id);
+                  },
+                  onOpenChat: (sessionKey) => {
+                    state.setSessionKey(sessionKey);
+                    state.setTab("message");
+                  },
+                });
+              })()
+            : nothing
+        }
+
+        ${
           state.tab === "employeeMarket"
             ? (() => {
                 const onRefresh = async () => {
@@ -2108,6 +2253,16 @@ export function renderApp(state: AppViewState) {
                   state.digitalEmployeeEditSkillsToDelete = [];
                   state.digitalEmployeeEditEnabled = manifest.enabled !== false;
                   state.digitalEmployeeEditError = null;
+                  state.digitalEmployeeEditDomainKeys = manifest.domainKeys ?? [];
+                  state.digitalEmployeeEditCapabilityKeys = manifest.capabilityKeys ?? [];
+                  state.digitalEmployeeEditRoleType = manifest.roleType ?? "";
+                  state.digitalEmployeeEditResponsibilities = manifest.responsibilities ?? [];
+                  state.digitalEmployeeEditInputSources = manifest.inputSources ?? [];
+                  state.digitalEmployeeEditOutputTypes = manifest.outputTypes ?? [];
+                  state.digitalEmployeeEditActionScopes = manifest.actionScopes ?? [];
+                  state.digitalEmployeeEditPermissionKeys = manifest.permissionKeys ?? [];
+                  state.digitalEmployeeEditRunbookRefs = manifest.runbookRefs ?? [];
+                  state.digitalEmployeeEditKnowledgeRefs = manifest.knowledgeRefs ?? [];
                 },
                 installedIds: new Set(
                   state.employeeMarketItems
@@ -2122,20 +2277,32 @@ export function renderApp(state: AppViewState) {
             : nothing
         }
 
-        ${state.tab === "employeeMarket" && state.digitalEmployeeCreateModalOpen
+        ${(state.tab === "employeeCenter" || state.tab === "employeeMarket") && state.digitalEmployeeCreateModalOpen
           ? (() => {
               const onRefreshEmp = async () => {
-                state.employeeMarketLoading = true;
-                state.employeeMarketError = null;
+                if (state.tab === "employeeMarket") {
+                  state.employeeMarketLoading = true;
+                  state.employeeMarketError = null;
+                }
                 try {
-                  state.employeeMarketItems = await fetchEmployees(
-                    { q: state.employeeMarketQuery },
-                    { gatewayHost: state.settings?.gatewayUrl?.trim(), token: state.settings?.token?.trim() },
-                  );
+                  await loadDigitalEmployees(state);
+                  if (state.tab === "employeeMarket") {
+                    state.employeeMarketItems = await fetchEmployees(
+                      { q: state.employeeMarketQuery },
+                      { gatewayHost: state.settings?.gatewayUrl?.trim(), token: state.settings?.token?.trim() },
+                    );
+                  }
                 } catch (err) {
-                  state.employeeMarketError = (err as any)?.message ? String((err as any).message) : String(err);
+                  const msg = (err as any)?.message ? String((err as any).message) : String(err);
+                  if (state.tab === "employeeMarket") {
+                    state.employeeMarketError = msg;
+                  } else {
+                    state.digitalEmployeesError = msg;
+                  }
                 } finally {
-                  state.employeeMarketLoading = false;
+                  if (state.tab === "employeeMarket") {
+                    state.employeeMarketLoading = false;
+                  }
                 }
               };
               return renderDigitalEmployeeCreateModal({
@@ -2152,6 +2319,26 @@ export function renderApp(state: AppViewState) {
                 skillUploadName: state.digitalEmployeeSkillUploadName,
                 skillUploadFiles: state.digitalEmployeeSkillUploadFiles ?? [],
                 skillUploadError: state.digitalEmployeeSkillUploadError,
+                createDomainKeys: state.digitalEmployeeCreateDomainKeys ?? [],
+                createCapabilityKeys: state.digitalEmployeeCreateCapabilityKeys ?? [],
+                createRoleType: state.digitalEmployeeCreateRoleType ?? "",
+                createResponsibilities: state.digitalEmployeeCreateResponsibilities ?? [],
+                createInputSources: state.digitalEmployeeCreateInputSources ?? [],
+                createOutputTypes: state.digitalEmployeeCreateOutputTypes ?? [],
+                createActionScopes: state.digitalEmployeeCreateActionScopes ?? [],
+                createPermissionKeys: state.digitalEmployeeCreatePermissionKeys ?? [],
+                createRunbookRefs: state.digitalEmployeeCreateRunbookRefs ?? [],
+                createKnowledgeRefs: state.digitalEmployeeCreateKnowledgeRefs ?? [],
+                onCreateDomainKeysChange: (v) => (state.digitalEmployeeCreateDomainKeys = v),
+                onCreateCapabilityKeysChange: (v) => (state.digitalEmployeeCreateCapabilityKeys = v),
+                onCreateRoleTypeChange: (v) => (state.digitalEmployeeCreateRoleType = v),
+                onCreateResponsibilitiesChange: (v) => (state.digitalEmployeeCreateResponsibilities = v),
+                onCreateInputSourcesChange: (v) => (state.digitalEmployeeCreateInputSources = v),
+                onCreateOutputTypesChange: (v) => (state.digitalEmployeeCreateOutputTypes = v),
+                onCreateActionScopesChange: (v) => (state.digitalEmployeeCreateActionScopes = v),
+                onCreatePermissionKeysChange: (v) => (state.digitalEmployeeCreatePermissionKeys = v),
+                onCreateRunbookRefsChange: (v) => (state.digitalEmployeeCreateRunbookRefs = v),
+                onCreateKnowledgeRefsChange: (v) => (state.digitalEmployeeCreateKnowledgeRefs = v),
                 onMcpJsonChange: (v) => (state.digitalEmployeeCreateMcpJson = v),
                 onMcpModeChange: (m) => (state.digitalEmployeeCreateMcpMode = m),
                 onMcpAddItem: () => {
@@ -2216,6 +2403,16 @@ export function renderApp(state: AppViewState) {
                   state.digitalEmployeeSkillUploadName = "";
                   state.digitalEmployeeSkillUploadFiles = [];
                   state.digitalEmployeeSkillUploadError = null;
+                  state.digitalEmployeeCreateDomainKeys = [];
+                  state.digitalEmployeeCreateCapabilityKeys = [];
+                  state.digitalEmployeeCreateRoleType = "";
+                  state.digitalEmployeeCreateResponsibilities = [];
+                  state.digitalEmployeeCreateInputSources = [];
+                  state.digitalEmployeeCreateOutputTypes = [];
+                  state.digitalEmployeeCreateActionScopes = [];
+                  state.digitalEmployeeCreatePermissionKeys = [];
+                  state.digitalEmployeeCreateRunbookRefs = [];
+                  state.digitalEmployeeCreateKnowledgeRefs = [];
                 },
                 onCreateNameChange: (v) => (state.digitalEmployeeCreateName = v),
                 onCreateDescriptionChange: (v) => (state.digitalEmployeeCreateDescription = v),
@@ -3051,12 +3248,34 @@ export function renderApp(state: AppViewState) {
         }
 
         ${
+          state.tab === "techDomains"
+            ? renderTechOpsHub({
+                loading: state.opsDashboardLoading,
+                dashboardSummary: state.opsDashboardSummary,
+                dashboardError: state.opsDashboardError,
+                globalInspecting: state.opsGlobalInspecting,
+                dashboardToast: state.opsDashboardToast,
+                onOpenDomain: (tab) => {
+                  void openTechDomain(state as any, tab, {
+                    capabilityTab: "overview",
+                    prefetch: { clusters: true, alerts: true },
+                  });
+                },
+                onOpenAssets: () => state.setTab("assetManagement"),
+                onRunGlobalInspection: () => state.runGlobalInspectionFromDashboard(),
+                onOpenPendingAlerts: () => state.openPendingAlertsFromDashboard(),
+                canInspect: canRunInspection(state.rbacUser),
+              })
+            : nothing
+        }
+
+        ${
           isOpsDomainPage
             ? (() => {
                 const jobId = `job-inspect-${state.tab}`;
-                const activeSubTab = state.opsActiveSubTabs[state.tab] || "agent";
+                const activeSubTab = state.opsActiveSubTabs[state.tab] || "overview";
                 if (
-                  activeSubTab === "inspections" &&
+                  activeSubTab === "inspection" &&
                   state.opsInspectionImStatus == null &&
                   !(state as any)._loadingOpsInspectionIm
                 ) {
@@ -3066,7 +3285,7 @@ export function renderApp(state: AppViewState) {
                   });
                 }
                 if (
-                  activeSubTab === "inspections" &&
+                  activeSubTab === "inspection" &&
                   state.cronRunsJobId !== jobId &&
                   !(state as any)._loadingCronRunsForJobId
                 ) {
@@ -3145,7 +3364,7 @@ export function renderApp(state: AppViewState) {
 
                 const opsDomain = state.tab as OpsDomainKey;
                 if (
-                  activeSubTab === "alerts" &&
+                  activeSubTab === "observability" &&
                   !state.opsAlertsLoading?.[opsDomain] &&
                   state.opsAlertsByDomain?.[opsDomain] === undefined &&
                   !(state as any)._loadingOpsAlertsForDomain
@@ -3472,6 +3691,26 @@ export function renderApp(state: AppViewState) {
                 skillUploadName: state.digitalEmployeeSkillUploadName,
                 skillUploadFiles: state.digitalEmployeeSkillUploadFiles ?? [],
                 skillUploadError: state.digitalEmployeeSkillUploadError,
+                createDomainKeys: state.digitalEmployeeCreateDomainKeys ?? [],
+                createCapabilityKeys: state.digitalEmployeeCreateCapabilityKeys ?? [],
+                createRoleType: state.digitalEmployeeCreateRoleType ?? "",
+                createResponsibilities: state.digitalEmployeeCreateResponsibilities ?? [],
+                createInputSources: state.digitalEmployeeCreateInputSources ?? [],
+                createOutputTypes: state.digitalEmployeeCreateOutputTypes ?? [],
+                createActionScopes: state.digitalEmployeeCreateActionScopes ?? [],
+                createPermissionKeys: state.digitalEmployeeCreatePermissionKeys ?? [],
+                createRunbookRefs: state.digitalEmployeeCreateRunbookRefs ?? [],
+                createKnowledgeRefs: state.digitalEmployeeCreateKnowledgeRefs ?? [],
+                onCreateDomainKeysChange: (v) => (state.digitalEmployeeCreateDomainKeys = v),
+                onCreateCapabilityKeysChange: (v) => (state.digitalEmployeeCreateCapabilityKeys = v),
+                onCreateRoleTypeChange: (v) => (state.digitalEmployeeCreateRoleType = v),
+                onCreateResponsibilitiesChange: (v) => (state.digitalEmployeeCreateResponsibilities = v),
+                onCreateInputSourcesChange: (v) => (state.digitalEmployeeCreateInputSources = v),
+                onCreateOutputTypesChange: (v) => (state.digitalEmployeeCreateOutputTypes = v),
+                onCreateActionScopesChange: (v) => (state.digitalEmployeeCreateActionScopes = v),
+                onCreatePermissionKeysChange: (v) => (state.digitalEmployeeCreatePermissionKeys = v),
+                onCreateRunbookRefsChange: (v) => (state.digitalEmployeeCreateRunbookRefs = v),
+                onCreateKnowledgeRefsChange: (v) => (state.digitalEmployeeCreateKnowledgeRefs = v),
                 onCreateOpen: () => {
                   state.digitalEmployeeCreateModalOpen = true;
                   state.digitalEmployeeAdvancedOpen = false;
@@ -3481,6 +3720,16 @@ export function renderApp(state: AppViewState) {
                   state.digitalEmployeeSkillUploadName = "";
                   state.digitalEmployeeSkillUploadFiles = [];
                   state.digitalEmployeeSkillUploadError = null;
+                  state.digitalEmployeeCreateDomainKeys = [];
+                  state.digitalEmployeeCreateCapabilityKeys = [];
+                  state.digitalEmployeeCreateRoleType = "";
+                  state.digitalEmployeeCreateResponsibilities = [];
+                  state.digitalEmployeeCreateInputSources = [];
+                  state.digitalEmployeeCreateOutputTypes = [];
+                  state.digitalEmployeeCreateActionScopes = [];
+                  state.digitalEmployeeCreatePermissionKeys = [];
+                  state.digitalEmployeeCreateRunbookRefs = [];
+                  state.digitalEmployeeCreateKnowledgeRefs = [];
                 },
                 onCreateClose: () => {
                   if (state.digitalEmployeeCreateBusy) return;
@@ -3493,6 +3742,16 @@ export function renderApp(state: AppViewState) {
                   state.digitalEmployeeSkillUploadName = "";
                   state.digitalEmployeeSkillUploadFiles = [];
                   state.digitalEmployeeSkillUploadError = null;
+                  state.digitalEmployeeCreateDomainKeys = [];
+                  state.digitalEmployeeCreateCapabilityKeys = [];
+                  state.digitalEmployeeCreateRoleType = "";
+                  state.digitalEmployeeCreateResponsibilities = [];
+                  state.digitalEmployeeCreateInputSources = [];
+                  state.digitalEmployeeCreateOutputTypes = [];
+                  state.digitalEmployeeCreateActionScopes = [];
+                  state.digitalEmployeeCreatePermissionKeys = [];
+                  state.digitalEmployeeCreateRunbookRefs = [];
+                  state.digitalEmployeeCreateKnowledgeRefs = [];
                 },
                 onCreateNameChange: (value) => {
                   state.digitalEmployeeCreateName = value;
@@ -3649,6 +3908,16 @@ export function renderApp(state: AppViewState) {
                   state.digitalEmployeeEditSkillsToDelete = [];
                   state.digitalEmployeeEditEnabled = manifest.enabled !== false;
                   state.digitalEmployeeEditError = null;
+                  state.digitalEmployeeEditDomainKeys = manifest.domainKeys ?? [];
+                  state.digitalEmployeeEditCapabilityKeys = manifest.capabilityKeys ?? [];
+                  state.digitalEmployeeEditRoleType = manifest.roleType ?? "";
+                  state.digitalEmployeeEditResponsibilities = manifest.responsibilities ?? [];
+                  state.digitalEmployeeEditInputSources = manifest.inputSources ?? [];
+                  state.digitalEmployeeEditOutputTypes = manifest.outputTypes ?? [];
+                  state.digitalEmployeeEditActionScopes = manifest.actionScopes ?? [];
+                  state.digitalEmployeeEditPermissionKeys = manifest.permissionKeys ?? [];
+                  state.digitalEmployeeEditRunbookRefs = manifest.runbookRefs ?? [];
+                  state.digitalEmployeeEditKnowledgeRefs = manifest.knowledgeRefs ?? [];
                 },
                 editModalOpen: state.digitalEmployeeEditModalOpen,
                 editId: state.digitalEmployeeEditId,
@@ -3710,6 +3979,26 @@ export function renderApp(state: AppViewState) {
                     it.id === id ? { ...it, rawJson: json, rawError: null } : it,
                   );
                 },
+                editDomainKeys: state.digitalEmployeeEditDomainKeys ?? [],
+                editCapabilityKeys: state.digitalEmployeeEditCapabilityKeys ?? [],
+                editRoleType: state.digitalEmployeeEditRoleType ?? "",
+                editResponsibilities: state.digitalEmployeeEditResponsibilities ?? [],
+                editInputSources: state.digitalEmployeeEditInputSources ?? [],
+                editOutputTypes: state.digitalEmployeeEditOutputTypes ?? [],
+                editActionScopes: state.digitalEmployeeEditActionScopes ?? [],
+                editPermissionKeys: state.digitalEmployeeEditPermissionKeys ?? [],
+                editRunbookRefs: state.digitalEmployeeEditRunbookRefs ?? [],
+                editKnowledgeRefs: state.digitalEmployeeEditKnowledgeRefs ?? [],
+                onEditDomainKeysChange: (v) => (state.digitalEmployeeEditDomainKeys = v),
+                onEditCapabilityKeysChange: (v) => (state.digitalEmployeeEditCapabilityKeys = v),
+                onEditRoleTypeChange: (v) => (state.digitalEmployeeEditRoleType = v),
+                onEditResponsibilitiesChange: (v) => (state.digitalEmployeeEditResponsibilities = v),
+                onEditInputSourcesChange: (v) => (state.digitalEmployeeEditInputSources = v),
+                onEditOutputTypesChange: (v) => (state.digitalEmployeeEditOutputTypes = v),
+                onEditActionScopesChange: (v) => (state.digitalEmployeeEditActionScopes = v),
+                onEditPermissionKeysChange: (v) => (state.digitalEmployeeEditPermissionKeys = v),
+                onEditRunbookRefsChange: (v) => (state.digitalEmployeeEditRunbookRefs = v),
+                onEditKnowledgeRefsChange: (v) => (state.digitalEmployeeEditKnowledgeRefs = v),
                 editSkillNames: state.digitalEmployeeEditSkillNames ?? [],
                 editSkillFilesToUpload: state.digitalEmployeeEditSkillFilesToUpload ?? [],
                 editSkillsToDelete: state.digitalEmployeeEditSkillsToDelete ?? [],
@@ -3721,6 +4010,16 @@ export function renderApp(state: AppViewState) {
                   state.digitalEmployeeEditError = null;
                   state.digitalEmployeeEditMcpMode = "raw";
                   state.digitalEmployeeEditMcpItems = [];
+                  state.digitalEmployeeEditDomainKeys = [];
+                  state.digitalEmployeeEditCapabilityKeys = [];
+                  state.digitalEmployeeEditRoleType = "";
+                  state.digitalEmployeeEditResponsibilities = [];
+                  state.digitalEmployeeEditInputSources = [];
+                  state.digitalEmployeeEditOutputTypes = [];
+                  state.digitalEmployeeEditActionScopes = [];
+                  state.digitalEmployeeEditPermissionKeys = [];
+                  state.digitalEmployeeEditRunbookRefs = [];
+                  state.digitalEmployeeEditKnowledgeRefs = [];
                 },
                 onEditDescriptionChange: (v) => {
                   state.digitalEmployeeEditDescription = v;
@@ -4188,6 +4487,26 @@ export function renderApp(state: AppViewState) {
                   it.id === id ? { ...it, rawJson: json, rawError: null } : it,
                 );
               },
+              editDomainKeys: state.digitalEmployeeEditDomainKeys ?? [],
+              editCapabilityKeys: state.digitalEmployeeEditCapabilityKeys ?? [],
+              editRoleType: state.digitalEmployeeEditRoleType ?? "",
+              editResponsibilities: state.digitalEmployeeEditResponsibilities ?? [],
+              editInputSources: state.digitalEmployeeEditInputSources ?? [],
+              editOutputTypes: state.digitalEmployeeEditOutputTypes ?? [],
+              editActionScopes: state.digitalEmployeeEditActionScopes ?? [],
+              editPermissionKeys: state.digitalEmployeeEditPermissionKeys ?? [],
+              editRunbookRefs: state.digitalEmployeeEditRunbookRefs ?? [],
+              editKnowledgeRefs: state.digitalEmployeeEditKnowledgeRefs ?? [],
+              onEditDomainKeysChange: (v) => (state.digitalEmployeeEditDomainKeys = v),
+              onEditCapabilityKeysChange: (v) => (state.digitalEmployeeEditCapabilityKeys = v),
+              onEditRoleTypeChange: (v) => (state.digitalEmployeeEditRoleType = v),
+              onEditResponsibilitiesChange: (v) => (state.digitalEmployeeEditResponsibilities = v),
+              onEditInputSourcesChange: (v) => (state.digitalEmployeeEditInputSources = v),
+              onEditOutputTypesChange: (v) => (state.digitalEmployeeEditOutputTypes = v),
+              onEditActionScopesChange: (v) => (state.digitalEmployeeEditActionScopes = v),
+              onEditPermissionKeysChange: (v) => (state.digitalEmployeeEditPermissionKeys = v),
+              onEditRunbookRefsChange: (v) => (state.digitalEmployeeEditRunbookRefs = v),
+              onEditKnowledgeRefsChange: (v) => (state.digitalEmployeeEditKnowledgeRefs = v),
               editSkillNames: state.digitalEmployeeEditSkillNames ?? [],
               editSkillFilesToUpload: state.digitalEmployeeEditSkillFilesToUpload ?? [],
               editSkillsToDelete: state.digitalEmployeeEditSkillsToDelete ?? [],
@@ -4199,6 +4518,16 @@ export function renderApp(state: AppViewState) {
                 state.digitalEmployeeEditError = null;
                 state.digitalEmployeeEditMcpMode = "raw";
                 state.digitalEmployeeEditMcpItems = [];
+                state.digitalEmployeeEditDomainKeys = [];
+                state.digitalEmployeeEditCapabilityKeys = [];
+                state.digitalEmployeeEditRoleType = "";
+                state.digitalEmployeeEditResponsibilities = [];
+                state.digitalEmployeeEditInputSources = [];
+                state.digitalEmployeeEditOutputTypes = [];
+                state.digitalEmployeeEditActionScopes = [];
+                state.digitalEmployeeEditPermissionKeys = [];
+                state.digitalEmployeeEditRunbookRefs = [];
+                state.digitalEmployeeEditKnowledgeRefs = [];
               },
               onEditDescriptionChange: (v) => {
                 state.digitalEmployeeEditDescription = v;
@@ -4319,4 +4648,3 @@ export function renderApp(state: AppViewState) {
     ${renderSessionOverflowFlyout(state, basePath)}
   `;
 }
-

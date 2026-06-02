@@ -101,19 +101,19 @@ describe("control UI routing", () => {
     }
     content.scrollTop = 320;
 
-    const link = app.querySelector<HTMLButtonElement>('button[data-tour-tab="hadoop"]');
+    const link = app.querySelector<HTMLButtonElement>('button[data-tour-tab="techDomains"]');
     expect(link).not.toBeNull();
     link?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 }));
 
     await app.updateComplete;
-    expect(app.tab).toBe("hadoop");
-    expect(window.location.pathname).toBe("/hadoop");
+    expect(app.tab).toBe("techDomains");
+    expect(window.location.pathname).toBe("/tech-domains");
     expect(app.querySelector<HTMLElement>(".content")?.scrollTop).toBe(0);
   });
 
   it("highlights the active top tab for catalog routes", async () => {
     const cases = [
-      ["/employee-market", "员工市场"],
+      ["/employee-market", "数字员工中心"],
       ["/skill-library", "技能库"],
       ["/tool-library", "工具库"],
       ["/model-library", "模型"],

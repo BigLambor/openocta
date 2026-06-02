@@ -16,7 +16,10 @@ export type Tab =
   | "message"
   | "scheduledTasks"
   | "cronHistory"
+  | "employeeCenter"
   | "employeeMarket"
+  | "employeeTasks"
+  | "employeeEffectiveness"
   | "skillLibrary"
   | "toolLibrary"
   | "modelLibrary"
@@ -26,6 +29,8 @@ export type Tab =
   | "community"
   | "agents"
   | "overview"
+  | "techDomains"
+  | "opsCapabilities"
   | "channels"
   | "instances"
   | "sessions"
@@ -56,7 +61,10 @@ const TAB_PATHS: Record<Tab, string> = {
   message: "/message",
   scheduledTasks: "/scheduled-tasks",
   cronHistory: "/cron-history",
+  employeeCenter: "/employee-center",
   employeeMarket: "/employee-market",
+  employeeTasks: "/employee-tasks",
+  employeeEffectiveness: "/employee-effectiveness",
   skillLibrary: "/skill-library",
   toolLibrary: "/tool-library",
   modelLibrary: "/model-library",
@@ -66,6 +74,8 @@ const TAB_PATHS: Record<Tab, string> = {
   community: "/community",
   agents: "/agents",
   overview: "/overview",
+  techDomains: "/tech-domains",
+  opsCapabilities: "/ops-capabilities",
   channels: "/channels",
   instances: "/instances",
   sessions: "/sessions",
@@ -203,6 +213,12 @@ export function iconForTab(tab: Tab, active = false): IconName {
       return "historyClock";
     case "employeeMarket":
       return "users";
+    case "employeeCenter":
+      return "users";
+    case "employeeTasks":
+      return "historyClock";
+    case "employeeEffectiveness":
+      return "usageBars";
     case "skillLibrary":
       return "zap";
     case "toolLibrary":
@@ -229,6 +245,10 @@ export function iconForTab(tab: Tab, active = false): IconName {
       return "server";
     case "overview":
       return "overviewGrid";
+    case "techDomains":
+      return "network";
+    case "opsCapabilities":
+      return "layout";
     case "channels":
       return "link";
     case "instances":
@@ -280,8 +300,14 @@ export function titleForTab(tab: Tab) {
       return "定时任务";
     case "cronHistory":
       return "运行历史";
+    case "employeeCenter":
+      return "数字员工中心";
     case "employeeMarket":
       return "员工市场";
+    case "employeeTasks":
+      return "任务记录";
+    case "employeeEffectiveness":
+      return "效能评估";
     case "skillLibrary":
       return "技能库";
     case "toolLibrary":
@@ -301,7 +327,11 @@ export function titleForTab(tab: Tab) {
     case "chat":
       return t("navTitleChat");
     case "overview":
-      return t("navTitleOverview");
+      return "运维驾驶舱";
+    case "techDomains":
+      return "技术域运维";
+    case "opsCapabilities":
+      return "运维能力中心";
     case "channels":
       return t("navTitleChannels");
     case "instances":
@@ -333,7 +363,11 @@ export function titleForTab(tab: Tab) {
     case "governance":
       return "开发治理平台";
     case "dataapps":
-      return "数据App运维";
+      return "数据 App 运维";
+    case "digitalEmployee":
+      return "我的员工";
+    case "agentSwarm":
+      return "员工编排";
     default:
       return t("navTitleControl");
   }
@@ -420,8 +454,14 @@ export function subtitleForTab(tab: Tab) {
       return "";
     case "cronHistory":
       return "";
+    case "employeeCenter":
+      return "统一管理数字员工资产、岗位、任务、编排、权限和效能";
     case "employeeMarket":
-      return "";
+      return "发现、安装和上架面向运维岗位的数字员工";
+    case "employeeTasks":
+      return "沉淀数字员工处理告警、巡检、诊断、治理、容量和变更的任务记录";
+    case "employeeEffectiveness":
+      return "量化数字员工的任务量、闭环率、采纳率、降噪率、人时节省和成本";
     case "skillLibrary":
       return "";
     case "toolLibrary":
@@ -439,7 +479,11 @@ export function subtitleForTab(tab: Tab) {
     case "agents":
       return t("subtitleAgents");
     case "overview":
-      return t("subtitleOverview");
+      return "跨技术域聚合健康度、告警、巡检、容量、任务和数字员工工作状态";
+    case "techDomains":
+      return "从技术域视角进入 BCH、FI、GBase、开发治理与数据 App 运维";
+    case "opsCapabilities":
+      return "跨技术域沉淀资产、观测、告警、巡检、诊断、治理、容量和自动化能力";
     case "channels":
       return t("subtitleChannels");
     case "instances":
@@ -463,9 +507,9 @@ export function subtitleForTab(tab: Tab) {
     case "chat":
       return t("subtitleChat");
     case "digitalEmployee":
-      return t("subtitleDigitalEmployee");
+      return "管理已安装和自建数字员工，配置岗位、Prompt、技能和工具";
     case "agentSwarm":
-      return t("subtitleAgentSwarm");
+      return "编排多个数字员工协同处理复杂运维任务";
     case "config":
       return t("subtitleConfig");
     case "envVars":
@@ -477,7 +521,7 @@ export function subtitleForTab(tab: Tab) {
     case "logs":
       return t("subtitleLogs");
     case "hadoop":
-      return "开源 Hadoop 生态智能运维";
+      return "面向 BCH / Hadoop 生态的集群、组件、作业和容量治理";
     case "fi":
       return "FusionInsight 商业闭源生态智能运维";
     case "gbase":
@@ -485,7 +529,7 @@ export function subtitleForTab(tab: Tab) {
     case "governance":
       return "开发治理平台与元数据运维";
     case "dataapps":
-      return "30+数据应用与链路健康运维";
+      return "数据应用、任务链路、调度与服务健康运维";
     default:
       return "";
   }

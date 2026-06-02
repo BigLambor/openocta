@@ -10,19 +10,30 @@ describe("applyOpsDeepLinkFromUrl", () => {
     window.history.replaceState({}, "", "/overview");
   });
 
-  it("applies sub-tab and alert group on ops domain tabs", () => {
+  it("maps legacy alerts sub-tab to observability", () => {
     const host = {
       tab: "hadoop" as const,
-      opsActiveSubTabs: {} as Record<string, "agent" | "alerts" | "inspections">,
+      opsActiveSubTabs: {} as Record<string, string>,
       opsSelectedAlertGroupIds: {} as Record<string, string | null>,
     };
     const result = applyOpsDeepLinkFromUrl(host);
     expect(result.applied).toBe(true);
     expect(result.alertsTab).toBe(true);
-    expect(host.opsActiveSubTabs.hadoop).toBe("alerts");
+    expect(host.opsActiveSubTabs.hadoop).toBe("observability");
     expect(host.opsSelectedAlertGroupIds.hadoop).toBe("g-1");
     expect(window.location.search).not.toContain("opsSubTab");
     expect(window.location.search).not.toContain("alertGroup");
+  });
+
+  it("accepts new capability sub-tab ids", () => {
+    window.history.replaceState({}, "", "/hadoop?opsSubTab=inspection");
+    const host = {
+      tab: "hadoop" as const,
+      opsActiveSubTabs: {},
+      opsSelectedAlertGroupIds: {},
+    };
+    applyOpsDeepLinkFromUrl(host);
+    expect(host.opsActiveSubTabs.hadoop).toBe("inspection");
   });
 
   it("no-ops on non-domain tabs", () => {

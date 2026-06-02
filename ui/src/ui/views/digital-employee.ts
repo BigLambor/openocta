@@ -13,6 +13,16 @@ export type DigitalEmployee = {
   skillIds?: string[];
   skillNames?: string[];
   mcpServerKeys?: string[];
+  domainKeys?: string[];
+  capabilityKeys?: string[];
+  roleType?: string;
+  responsibilities?: string[];
+  inputSources?: string[];
+  outputTypes?: string[];
+  actionScopes?: string[];
+  permissionKeys?: string[];
+  runbookRefs?: string[];
+  knowledgeRefs?: string[];
 };
 
 export type DigitalEmployeeViewMode = "list" | "card";
@@ -97,6 +107,48 @@ export type DigitalEmployeeProps = {
   onEditSkillDelete: (skillName: string) => void;
   onEditSkillUndoDelete: (skillName: string) => void;
   onEditSubmit: () => void;
+  // SRE profile edit fields
+  editDomainKeys: string[];
+  editCapabilityKeys: string[];
+  editRoleType: string;
+  editResponsibilities: string[];
+  editInputSources: string[];
+  editOutputTypes: string[];
+  editActionScopes: string[];
+  editPermissionKeys: string[];
+  editRunbookRefs: string[];
+  editKnowledgeRefs: string[];
+  onEditDomainKeysChange: (value: string[]) => void;
+  onEditCapabilityKeysChange: (value: string[]) => void;
+  onEditRoleTypeChange: (value: string) => void;
+  onEditResponsibilitiesChange: (value: string[]) => void;
+  onEditInputSourcesChange: (value: string[]) => void;
+  onEditOutputTypesChange: (value: string[]) => void;
+  onEditActionScopesChange: (value: string[]) => void;
+  onEditPermissionKeysChange: (value: string[]) => void;
+  onEditRunbookRefsChange: (value: string[]) => void;
+  onEditKnowledgeRefsChange: (value: string[]) => void;
+  // SRE profile create fields
+  createDomainKeys: string[];
+  createCapabilityKeys: string[];
+  createRoleType: string;
+  createResponsibilities: string[];
+  createInputSources: string[];
+  createOutputTypes: string[];
+  createActionScopes: string[];
+  createPermissionKeys: string[];
+  createRunbookRefs: string[];
+  createKnowledgeRefs: string[];
+  onCreateDomainKeysChange: (value: string[]) => void;
+  onCreateCapabilityKeysChange: (value: string[]) => void;
+  onCreateRoleTypeChange: (value: string) => void;
+  onCreateResponsibilitiesChange: (value: string[]) => void;
+  onCreateInputSourcesChange: (value: string[]) => void;
+  onCreateOutputTypesChange: (value: string[]) => void;
+  onCreateActionScopesChange: (value: string[]) => void;
+  onCreatePermissionKeysChange: (value: string[]) => void;
+  onCreateRunbookRefsChange: (value: string[]) => void;
+  onCreateKnowledgeRefsChange: (value: string[]) => void;
 };
 
 export type EmployeeMcpItem = {
@@ -142,6 +194,27 @@ export type DigitalEmployeeEditModalProps = {
   onEditSkillDelete: (skillName: string) => void;
   onEditSkillUndoDelete: (skillName: string) => void;
   onEditSubmit: () => void;
+  // SRE profile edit fields
+  editDomainKeys: string[];
+  editCapabilityKeys: string[];
+  editRoleType: string;
+  editResponsibilities: string[];
+  editInputSources: string[];
+  editOutputTypes: string[];
+  editActionScopes: string[];
+  editPermissionKeys: string[];
+  editRunbookRefs: string[];
+  editKnowledgeRefs: string[];
+  onEditDomainKeysChange: (value: string[]) => void;
+  onEditCapabilityKeysChange: (value: string[]) => void;
+  onEditRoleTypeChange: (value: string) => void;
+  onEditResponsibilitiesChange: (value: string[]) => void;
+  onEditInputSourcesChange: (value: string[]) => void;
+  onEditOutputTypesChange: (value: string[]) => void;
+  onEditActionScopesChange: (value: string[]) => void;
+  onEditPermissionKeysChange: (value: string[]) => void;
+  onEditRunbookRefsChange: (value: string[]) => void;
+  onEditKnowledgeRefsChange: (value: string[]) => void;
 };
 
 export function renderDigitalEmployeeEditModal(props: DigitalEmployeeEditModalProps) {
@@ -323,6 +396,127 @@ export function renderDigitalEmployeeEditModal(props: DigitalEmployeeEditModalPr
               : nothing
           }
         </div>
+        <details class="field" style="margin-top: 12px;">
+          <summary style="font-weight: bold; cursor: pointer; color: var(--text-primary); margin-bottom: 6px;">
+            SRE 岗位与档案配置 (SRE Role & Profile)
+          </summary>
+          <div style="display: grid; gap: 8px; padding: 8px; border: 1px solid var(--border-color); border-radius: 6px; margin-top: 4px; background: rgba(0,0,0,0.02);">
+            <div class="field">
+              <span>服务技术域 (domainKeys，逗号分隔)</span>
+              <span class="input"><input
+                type="text"
+                .value=${(props.editDomainKeys ?? []).join(", ")}
+                @input=${(e: Event) =>
+                  props.onEditDomainKeysChange(
+                    (e.target as HTMLInputElement).value.split(",").map(s => s.trim()).filter(Boolean)
+                  )}
+                placeholder="例如 hadoop, gbase, fi"
+              /></span>
+            </div>
+            <div class="field">
+              <span>归属能力域 (capabilityKeys，逗号分隔)</span>
+              <span class="input"><input
+                type="text"
+                .value=${(props.editCapabilityKeys ?? []).join(", ")}
+                @input=${(e: Event) =>
+                  props.onEditCapabilityKeysChange(
+                    (e.target as HTMLInputElement).value.split(",").map(s => s.trim()).filter(Boolean)
+                  )}
+                placeholder="例如 health-inspection, diagnosis-incident"
+              /></span>
+            </div>
+            <div class="field">
+              <span>岗位类型 (roleType)</span>
+              <span class="input"><input
+                type="text"
+                .value=${props.editRoleType ?? ""}
+                @input=${(e: Event) =>
+                  props.onEditRoleTypeChange((e.target as HTMLInputElement).value)}
+                placeholder="例如 inspector, diagnoser"
+              /></span>
+            </div>
+            <div class="field">
+              <span>岗位职责 (responsibilities，换行/逗号分隔)</span>
+              <span class="textarea"><textarea
+                rows="2"
+                .value=${(props.editResponsibilities ?? []).join("\n")}
+                @input=${(e: Event) =>
+                  props.onEditResponsibilitiesChange(
+                    (e.target as HTMLTextAreaElement).value.split(/\r?\n|,/).map(s => s.trim()).filter(Boolean)
+                  )}
+              ></textarea></span>
+            </div>
+            <div class="field">
+              <span>输入来源 (inputSources，逗号分隔)</span>
+              <span class="input"><input
+                type="text"
+                .value=${(props.editInputSources ?? []).join(", ")}
+                @input=${(e: Event) =>
+                  props.onEditInputSourcesChange(
+                    (e.target as HTMLInputElement).value.split(",").map(s => s.trim()).filter(Boolean)
+                  )}
+                placeholder="例如 alerts, metrics"
+              /></span>
+            </div>
+            <div class="field">
+              <span>输出成果 (outputTypes，逗号分隔)</span>
+              <span class="input"><input
+                type="text"
+                .value=${(props.editOutputTypes ?? []).join(", ")}
+                @input=${(e: Event) =>
+                  props.onEditOutputTypesChange(
+                    (e.target as HTMLInputElement).value.split(",").map(s => s.trim()).filter(Boolean)
+                  )}
+                placeholder="例如 inspection_report, diagnosis_report"
+              /></span>
+            </div>
+            <div class="field">
+              <span>允许执行动作范围 (actionScopes，逗号分隔)</span>
+              <span class="input"><input
+                type="text"
+                .value=${(props.editActionScopes ?? []).join(", ")}
+                @input=${(e: Event) =>
+                  props.onEditActionScopesChange(
+                    (e.target as HTMLInputElement).value.split(",").map(s => s.trim()).filter(Boolean)
+                  )}
+                placeholder="例如 read_only, run_script"
+              /></span>
+            </div>
+            <div class="field">
+              <span>权限点 (permissionKeys，逗号分隔)</span>
+              <span class="input"><input
+                type="text"
+                .value=${(props.editPermissionKeys ?? []).join(", ")}
+                @input=${(e: Event) =>
+                  props.onEditPermissionKeysChange(
+                    (e.target as HTMLInputElement).value.split(",").map(s => s.trim()).filter(Boolean)
+                  )}
+              /></span>
+            </div>
+            <div class="field">
+              <span>关联 Runbook (runbookRefs，逗号分隔)</span>
+              <span class="input"><input
+                type="text"
+                .value=${(props.editRunbookRefs ?? []).join(", ")}
+                @input=${(e: Event) =>
+                  props.onEditRunbookRefsChange(
+                    (e.target as HTMLInputElement).value.split(",").map(s => s.trim()).filter(Boolean)
+                  )}
+              /></span>
+            </div>
+            <div class="field">
+              <span>关联知识库 (knowledgeRefs，逗号分隔)</span>
+              <span class="input"><input
+                type="text"
+                .value=${(props.editKnowledgeRefs ?? []).join(", ")}
+                @input=${(e: Event) =>
+                  props.onEditKnowledgeRefsChange(
+                    (e.target as HTMLInputElement).value.split(",").map(s => s.trim()).filter(Boolean)
+                  )}
+              /></span>
+            </div>
+          </div>
+        </details>
         ${
           props.editError
             ? html`
@@ -391,6 +585,27 @@ export type DigitalEmployeeCreateModalProps = {
   onSkillUploadNameChange: (value: string) => void;
   onSkillUploadFilesChange: (files: File[]) => void;
   onCreateSubmit: () => void;
+  // SRE profile create fields
+  createDomainKeys: string[];
+  createCapabilityKeys: string[];
+  createRoleType: string;
+  createResponsibilities: string[];
+  createInputSources: string[];
+  createOutputTypes: string[];
+  createActionScopes: string[];
+  createPermissionKeys: string[];
+  createRunbookRefs: string[];
+  createKnowledgeRefs: string[];
+  onCreateDomainKeysChange: (value: string[]) => void;
+  onCreateCapabilityKeysChange: (value: string[]) => void;
+  onCreateRoleTypeChange: (value: string) => void;
+  onCreateResponsibilitiesChange: (value: string[]) => void;
+  onCreateInputSourcesChange: (value: string[]) => void;
+  onCreateOutputTypesChange: (value: string[]) => void;
+  onCreateActionScopesChange: (value: string[]) => void;
+  onCreatePermissionKeysChange: (value: string[]) => void;
+  onCreateRunbookRefsChange: (value: string[]) => void;
+  onCreateKnowledgeRefsChange: (value: string[]) => void;
 };
 
 export function renderDigitalEmployeeCreateModal(props: DigitalEmployeeCreateModalProps) {
@@ -510,6 +725,127 @@ export function renderDigitalEmployeeCreateModal(props: DigitalEmployeeCreateMod
                         </div>
                       `}
                 </div>
+                <details class="field" style="margin-top: 12px;">
+                  <summary style="font-weight: bold; cursor: pointer; color: var(--text-primary); margin-bottom: 6px;">
+                    SRE 岗位与档案配置 (SRE Role & Profile)
+                  </summary>
+                  <div style="display: grid; gap: 8px; padding: 8px; border: 1px solid var(--border-color); border-radius: 6px; margin-top: 4px; background: rgba(0,0,0,0.02);">
+                    <div class="field">
+                      <span>服务技术域 (domainKeys，逗号分隔)</span>
+                      <span class="input"><input
+                        type="text"
+                        .value=${(props.createDomainKeys ?? []).join(", ")}
+                        @input=${(e: Event) =>
+                          props.onCreateDomainKeysChange(
+                            (e.target as HTMLInputElement).value.split(",").map(s => s.trim()).filter(Boolean)
+                          )}
+                        placeholder="例如 hadoop, gbase, fi"
+                      /></span>
+                    </div>
+                    <div class="field">
+                      <span>归属能力域 (capabilityKeys，逗号分隔)</span>
+                      <span class="input"><input
+                        type="text"
+                        .value=${(props.createCapabilityKeys ?? []).join(", ")}
+                        @input=${(e: Event) =>
+                          props.onCreateCapabilityKeysChange(
+                            (e.target as HTMLInputElement).value.split(",").map(s => s.trim()).filter(Boolean)
+                          )}
+                        placeholder="例如 health-inspection, diagnosis-incident"
+                      /></span>
+                    </div>
+                    <div class="field">
+                      <span>岗位类型 (roleType)</span>
+                      <span class="input"><input
+                        type="text"
+                        .value=${props.createRoleType ?? ""}
+                        @input=${(e: Event) =>
+                          props.onCreateRoleTypeChange((e.target as HTMLInputElement).value)}
+                        placeholder="例如 inspector, diagnoser"
+                      /></span>
+                    </div>
+                    <div class="field">
+                      <span>岗位职责 (responsibilities，换行/逗号分隔)</span>
+                      <span class="textarea"><textarea
+                        rows="2"
+                        .value=${(props.createResponsibilities ?? []).join("\n")}
+                        @input=${(e: Event) =>
+                          props.onCreateResponsibilitiesChange(
+                            (e.target as HTMLTextAreaElement).value.split(/\r?\n|,/).map(s => s.trim()).filter(Boolean)
+                          )}
+                      ></textarea></span>
+                    </div>
+                    <div class="field">
+                      <span>输入来源 (inputSources，逗号分隔)</span>
+                      <span class="input"><input
+                        type="text"
+                        .value=${(props.createInputSources ?? []).join(", ")}
+                        @input=${(e: Event) =>
+                          props.onCreateInputSourcesChange(
+                            (e.target as HTMLInputElement).value.split(",").map(s => s.trim()).filter(Boolean)
+                          )}
+                        placeholder="例如 alerts, metrics"
+                      /></span>
+                    </div>
+                    <div class="field">
+                      <span>输出成果 (outputTypes，逗号分隔)</span>
+                      <span class="input"><input
+                        type="text"
+                        .value=${(props.createOutputTypes ?? []).join(", ")}
+                        @input=${(e: Event) =>
+                          props.onCreateOutputTypesChange(
+                            (e.target as HTMLInputElement).value.split(",").map(s => s.trim()).filter(Boolean)
+                          )}
+                        placeholder="例如 inspection_report, diagnosis_report"
+                      /></span>
+                    </div>
+                    <div class="field">
+                      <span>允许执行动作范围 (actionScopes，逗号分隔)</span>
+                      <span class="input"><input
+                        type="text"
+                        .value=${(props.createActionScopes ?? []).join(", ")}
+                        @input=${(e: Event) =>
+                          props.onCreateActionScopesChange(
+                            (e.target as HTMLInputElement).value.split(",").map(s => s.trim()).filter(Boolean)
+                          )}
+                        placeholder="例如 read_only, run_script"
+                      /></span>
+                    </div>
+                    <div class="field">
+                      <span>权限点 (permissionKeys，逗号分隔)</span>
+                      <span class="input"><input
+                        type="text"
+                        .value=${(props.createPermissionKeys ?? []).join(", ")}
+                        @input=${(e: Event) =>
+                          props.onCreatePermissionKeysChange(
+                            (e.target as HTMLInputElement).value.split(",").map(s => s.trim()).filter(Boolean)
+                          )}
+                      /></span>
+                    </div>
+                    <div class="field">
+                      <span>关联 Runbook (runbookRefs，逗号分隔)</span>
+                      <span class="input"><input
+                        type="text"
+                        .value=${(props.createRunbookRefs ?? []).join(", ")}
+                        @input=${(e: Event) =>
+                          props.onCreateRunbookRefsChange(
+                            (e.target as HTMLInputElement).value.split(",").map(s => s.trim()).filter(Boolean)
+                          )}
+                      /></span>
+                    </div>
+                    <div class="field">
+                      <span>关联知识库 (knowledgeRefs，逗号分隔)</span>
+                      <span class="input"><input
+                        type="text"
+                        .value=${(props.createKnowledgeRefs ?? []).join(", ")}
+                        @input=${(e: Event) =>
+                          props.onCreateKnowledgeRefsChange(
+                            (e.target as HTMLInputElement).value.split(",").map(s => s.trim()).filter(Boolean)
+                          )}
+                      /></span>
+                    </div>
+                  </div>
+                </details>
                 <div class="field" style="margin-top: 8px;">
                   <span>技能名称（可选）</span>
                   <span class="input"><input
@@ -886,6 +1222,7 @@ function renderEmployeeListRow(emp: DigitalEmployee, props: DigitalEmployeeProps
           ${emp.builtin ? html`<span class="chip" style="margin-left: 8px;">内置</span>` : nothing}
         </div>
         <div class="list-sub">${desc}</div>
+        ${renderEmployeeProfileHints(emp)}
         <div class="list-sub muted" style="margin-top: 4px;">
           ${created ? html`<span>创建时间：${created}</span>` : nothing}
           <span style="margin-left: 12px;">状态：${enabled ? "启用" : "禁用"}</span>
@@ -936,6 +1273,7 @@ function renderEmployeeCard(emp: DigitalEmployee, props: DigitalEmployeeProps) {
       <div class="skills-server-card__sub muted" style="font-size: 12px;">
         <div>${desc}</div>
         ${created ? html`<div style="margin-top: 6px;">创建时间：${created}</div>` : nothing}
+        ${renderEmployeeProfileHints(emp)}
         ${renderSkillMcpHint(emp)}
       </div>
       <div class="skills-server-card__footer" @click=${(e: Event) => e.stopPropagation()}>
@@ -950,6 +1288,81 @@ function renderEmployeeCard(emp: DigitalEmployee, props: DigitalEmployeeProps) {
       </div>
     </div>
   `;
+}
+
+function renderEmployeeProfileHints(emp: DigitalEmployee) {
+  const roleLabel = roleTypeLabel(emp.roleType);
+  const domainLabels = labelList(emp.domainKeys, domainLabel);
+  const capabilityLabels = labelList(emp.capabilityKeys, capabilityLabel);
+  if (!roleLabel && domainLabels.length === 0 && capabilityLabels.length === 0) {
+    return nothing;
+  }
+  return html`
+    <div class="row" style="gap: 6px; flex-wrap: wrap; margin-top: 6px;">
+      ${roleLabel ? html`<span class="chip">${roleLabel}</span>` : nothing}
+      ${domainLabels.slice(0, 3).map((label) => html`<span class="chip">${label}</span>`)}
+      ${capabilityLabels.slice(0, 3).map((label) => html`<span class="chip">${label}</span>`)}
+    </div>
+  `;
+}
+
+function labelList(values: string[] | undefined, formatter: (value: string) => string) {
+  return (values ?? []).map((v) => formatter(v)).filter(Boolean);
+}
+
+function roleTypeLabel(roleType?: string) {
+  switch ((roleType ?? "").trim()) {
+    case "oncall":
+      return "值班运维";
+    case "inspector":
+      return "巡检员工";
+    case "diagnoser":
+      return "诊断员工";
+    case "governor":
+      return "治理员工";
+    case "capacity":
+      return "容量成本";
+    case "change_guard":
+      return "变更护航";
+    default:
+      return roleType?.trim() ?? "";
+  }
+}
+
+function domainLabel(value: string) {
+  switch (value) {
+    case "hadoop":
+      return "BCH";
+    case "fi":
+      return "FI";
+    case "gbase":
+      return "GBase";
+    case "governance":
+      return "开发治理";
+    case "dataapps":
+      return "数据 App";
+    default:
+      return value;
+  }
+}
+
+function capabilityLabel(value: string) {
+  switch (value) {
+    case "observability":
+      return "可观测";
+    case "inspection":
+      return "巡检";
+    case "diagnosis":
+      return "诊断";
+    case "governance":
+      return "治理";
+    case "capacity":
+      return "容量";
+    case "change":
+      return "变更";
+    default:
+      return value;
+  }
 }
 
 function renderSkillMcpHint(emp: DigitalEmployee) {

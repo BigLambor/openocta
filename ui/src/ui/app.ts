@@ -342,12 +342,24 @@ export class OpenClawApp extends LitElement implements NativeDialogInvoker {
   @state() skillsViewMode: "list" | "card" = "card";
 
   // Tech Ops Domains
-  @state() opsActiveSubTabs: Record<string, "agent" | "alerts" | "inspections"> = {
-    hadoop: "agent",
-    fi: "agent",
-    gbase: "agent",
-    governance: "agent",
-    dataapps: "agent",
+  @state() opsActiveSubTabs: Record<
+    string,
+    | "overview"
+    | "assetTopology"
+    | "observability"
+    | "inspection"
+    | "jobGovernance"
+    | "diagnosis"
+    | "governance"
+    | "capacity"
+    | "change"
+    | "employees"
+  > = {
+    hadoop: "overview",
+    fi: "overview",
+    gbase: "overview",
+    governance: "overview",
+    dataapps: "overview",
   };
   @state() opsSelectedAlertGroupIds: Record<string, string | null> = {
     hadoop: null,
@@ -584,6 +596,16 @@ export class OpenClawApp extends LitElement implements NativeDialogInvoker {
     skillIds?: string[];
     skillNames?: string[];
     mcpServerKeys?: string[];
+    domainKeys?: string[];
+    capabilityKeys?: string[];
+    roleType?: string;
+    responsibilities?: string[];
+    inputSources?: string[];
+    outputTypes?: string[];
+    actionScopes?: string[];
+    permissionKeys?: string[];
+    runbookRefs?: string[];
+    knowledgeRefs?: string[];
   }[] = [];
   @state() digitalEmployeeCreateModalOpen = false;
   @state() digitalEmployeeCreateName = "";
@@ -613,6 +635,18 @@ export class OpenClawApp extends LitElement implements NativeDialogInvoker {
   @state() digitalEmployeeEditEnabled = true;
   @state() digitalEmployeeEditError: string | null = null;
   @state() digitalEmployeeEditBusy = false;
+
+  // Employee tasks & effectiveness
+  @state() employeeTasks: import("./controllers/employee-tasks.ts").EmployeeTask[] = [];
+  @state() employeeTasksLoading = false;
+  @state() employeeTasksError: string | null = null;
+  @state() employeeTaskActive: import("./controllers/employee-tasks.ts").EmployeeTask | null = null;
+  @state() employeeTaskFilterEmployee = "";
+  @state() employeeTaskFilterStatus = "";
+  @state() employeeTaskFilterQuery = "";
+  @state() employeeEffectiveness: import("./controllers/employee-tasks.ts").EmployeeEffectiveness | null = null;
+  @state() employeeEffectivenessLoading = false;
+  @state() employeeEffectivenessError: string | null = null;
 
   // Remote catalogs (employee market / skill library / tool library / tutorials)
   @state() employeeMarketLoadedOnce = false;
@@ -975,7 +1009,7 @@ export class OpenClawApp extends LitElement implements NativeDialogInvoker {
       summary?.domains[0]?.domain ??
       "hadoop";
     const tab = firstDomain as import("./navigation.ts").Tab;
-    this.opsActiveSubTabs = { ...this.opsActiveSubTabs, [tab]: "alerts" };
+    this.opsActiveSubTabs = { ...this.opsActiveSubTabs, [tab]: "observability" };
     void this.setTab(tab);
     void this.loadOpsDomainAlerts(tab);
     const pending = summary?.pendingAlerts ?? 0;

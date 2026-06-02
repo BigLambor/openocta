@@ -373,13 +373,23 @@ func installEmployee(zipData []byte, typeVal, fromVal string, env func(string) s
 	}
 
 	var cfg struct {
-		ID          string                           `json:"id"`
-		Name        string                           `json:"name"`
-		Description string                           `json:"description"`
-		Prompt      string                           `json:"prompt"`
-		Enabled     *bool                            `json:"enabled"`
-		SkillIDs    []string                         `json:"skillIds"`
-		McpServers  map[string]config.McpServerEntry `json:"mcpServers"`
+		ID               string                           `json:"id"`
+		Name             string                           `json:"name"`
+		Description      string                           `json:"description"`
+		Prompt           string                           `json:"prompt"`
+		Enabled          *bool                            `json:"enabled"`
+		SkillIDs         []string                         `json:"skillIds"`
+		McpServers       map[string]config.McpServerEntry `json:"mcpServers"`
+		DomainKeys       []string                         `json:"domainKeys"`
+		CapabilityKeys   []string                         `json:"capabilityKeys"`
+		RoleType         string                           `json:"roleType"`
+		Responsibilities []string                         `json:"responsibilities"`
+		InputSources     []string                         `json:"inputSources"`
+		OutputTypes      []string                         `json:"outputTypes"`
+		ActionScopes     []string                         `json:"actionScopes"`
+		PermissionKeys   []string                         `json:"permissionKeys"`
+		RunbookRefs      []string                         `json:"runbookRefs"`
+		KnowledgeRefs    []string                         `json:"knowledgeRefs"`
 	}
 	if err := json.Unmarshal(configData, &cfg); err != nil {
 		return "", fmt.Errorf("config.json 格式错误: %w", err)
@@ -394,16 +404,26 @@ func installEmployee(zipData []byte, typeVal, fromVal string, env func(string) s
 	}
 
 	m := &employees.Manifest{
-		ID:          cfg.ID,
-		Name:        cfg.Name,
-		Description: cfg.Description,
-		Prompt:      cfg.Prompt,
-		Enabled:     enabled,
-		Builtin:     false,
-		SkillIDs:    cfg.SkillIDs,
-		McpServers:  cfg.McpServers,
-		Type:        typeVal,
-		From:        fromVal,
+		ID:               cfg.ID,
+		Name:             cfg.Name,
+		Description:      cfg.Description,
+		Prompt:           cfg.Prompt,
+		Enabled:          enabled,
+		Builtin:          false,
+		SkillIDs:         cfg.SkillIDs,
+		McpServers:       cfg.McpServers,
+		Type:             typeVal,
+		From:             fromVal,
+		DomainKeys:       cfg.DomainKeys,
+		CapabilityKeys:   cfg.CapabilityKeys,
+		RoleType:         cfg.RoleType,
+		Responsibilities: cfg.Responsibilities,
+		InputSources:     cfg.InputSources,
+		OutputTypes:      cfg.OutputTypes,
+		ActionScopes:     cfg.ActionScopes,
+		PermissionKeys:   cfg.PermissionKeys,
+		RunbookRefs:      cfg.RunbookRefs,
+		KnowledgeRefs:    cfg.KnowledgeRefs,
 	}
 
 	root := employees.ResolveEmployeesDir(env)

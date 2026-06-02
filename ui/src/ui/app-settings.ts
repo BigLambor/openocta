@@ -23,6 +23,7 @@ import { loadNodes } from "./controllers/nodes.ts";
 import { loadPresence } from "./controllers/presence.ts";
 import { loadSessions } from "./controllers/sessions.ts";
 import { loadDigitalEmployees } from "./controllers/digital-employees.ts";
+import { loadEmployeeTasks, loadEmployeeEffectiveness } from "./controllers/employee-tasks.ts";
 import { loadTraceList } from "./controllers/llm-trace.ts";
 import { syncLlmTraceFromConfig } from "./app-llm-trace.ts";
 import { syncSecurityFromConfig } from "./app-security.ts";
@@ -39,6 +40,8 @@ import {
 } from "./navigation.ts";
 import { saveSettings, type UiSettings } from "./storage.ts";
 import { applyOpsDeepLinkFromUrl } from "./ops/deeplink.ts";
+import { isOpsDomainTab } from "./ops/entity-config.ts";
+import { ensureDefaultOpsCapabilityTab } from "./ops/navigation.ts";
 import { startThemeTransition, type ThemeTransitionContext } from "./theme-transition.ts";
 import { resolveTheme, type ResolvedTheme, type ThemeMode } from "./theme.ts";
 
@@ -176,7 +179,11 @@ export function setTab(host: SettingsHost, next: Tab) {
     host.tab = nextTab;
     scrollContentToTop(host);
   }
-  if (nextTab === "hadoop" || nextTab === "fi" || nextTab === "gbase" || nextTab === "governance" || nextTab === "dataapps") {
+  if (isOpsDomainTab(nextTab)) {
+    ensureDefaultOpsCapabilityTab(
+      host as unknown as Parameters<typeof ensureDefaultOpsCapabilityTab>[0],
+      nextTab,
+    );
     const domainSessionKey = `agent:main:ops:${nextTab}`;
     if (host.sessionKey !== domainSessionKey) {
       host.sessionKey = domainSessionKey;
@@ -196,13 +203,7 @@ export function setTab(host: SettingsHost, next: Tab) {
   } else {
     stopDebugPolling(host as unknown as Parameters<typeof stopDebugPolling>[0]);
   }
-  if (
-    nextTab === "hadoop" ||
-    nextTab === "fi" ||
-    nextTab === "gbase" ||
-    nextTab === "governance" ||
-    nextTab === "dataapps"
-  ) {
+  if (isOpsDomainTab(nextTab)) {
     const link = applyOpsDeepLinkFromUrl(host as unknown as Parameters<typeof applyOpsDeepLinkFromUrl>[0]);
     if (link.alertsTab) {
       const app = host as unknown as { loadOpsDomainAlerts?: (d: string) => Promise<void> };
@@ -228,7 +229,7 @@ export function setTheme(host: SettingsHost, next: ThemeMode, context?: ThemeTra
 }
 
 export async function refreshActiveTab(host: SettingsHost) {
-  if (host.tab === "hadoop" || host.tab === "fi" || host.tab === "gbase" || host.tab === "governance" || host.tab === "dataapps") {
+  if (isOpsDomainTab(host.tab)) {
     const domainSessionKey = `agent:main:ops:${host.tab}`;
     const domainLabel = `${titleForTab(host.tab)}智能诊断`;
     const { ensureSessionForKey } = await import("./controllers/sessions.ts");
@@ -237,12 +238,16 @@ export async function refreshActiveTab(host: SettingsHost) {
     await loadConfig(host as any);
     await ensureSessionForKey(host as any, { key: domainSessionKey, label: domainLabel });
     await loadChatHistory(host as any);
-    const app = host as unknown as { loadOpsDomainClusters?: (d: string) => Promise<void> };
-    if (app.loadOpsDomainClusters) {
-      await app.loadOpsDomainClusters(host.tab);
-    }
+    const app = host as unknown as {
+      loadOpsDomainClusters?: (d: string) => Promise<void>;
+      loadOpsDomainAlerts?: (d: string) => Promise<void>;
+    };
+    await Promise.allSettled([
+      app.loadOpsDomainClusters?.(host.tab) ?? Promise.resolve(),
+      app.loadOpsDomainAlerts?.(host.tab) ?? Promise.resolve(),
+    ]);
   }
-  if (host.tab === "overview") {
+  if (host.tab === "overview" || host.tab === "techDomains") {
     await loadOverview(host);
     const app = host as unknown as {
       loadOpsDashboard?: () => Promise<void>;
@@ -304,6 +309,14 @@ export async function refreshActiveTab(host: SettingsHost) {
   }
   if (host.tab === "digitalEmployee") {
     await loadDigitalEmployees(host as unknown as Parameters<typeof loadDigitalEmployees>[0]);
+  }
+  if (host.tab === "employeeTasks") {
+    await loadEmployeeTasks(host as any);
+    await loadDigitalEmployees(host as any);
+  }
+  if (host.tab === "employeeEffectiveness") {
+    await loadEmployeeEffectiveness(host as any);
+    await loadDigitalEmployees(host as any);
   }
   if (host.tab === "agentSwarm") {
     const { ensureSwarmWorkspace } = await import("./controllers/swarm.ts");
