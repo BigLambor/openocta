@@ -72,7 +72,7 @@ export async function fetchOpsAlertGroups(
 export async function patchOpsAlertGroup(
   host: OpsAlertHost,
   id: string,
-  patch: { status: string },
+  patch: { status: string; ackNote?: string; resolvedReason?: string },
 ): Promise<OpsAlertGroupRecord> {
   const res = await fetch(`${baseUrl(host)}/api/ops/alerts/groups/${encodeURIComponent(id)}`, {
     method: "PATCH",

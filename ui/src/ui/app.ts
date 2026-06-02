@@ -949,9 +949,18 @@ export class OpenClawApp extends LitElement implements NativeDialogInvoker {
   }
 
   async ackOpsAlertGroup(domain: string, groupId: string) {
+    const note = window.prompt("确认或关闭此告警，请填写处理备注或关闭原因：", "已确认并修复该告警");
+    if (note === null) {
+      return; // user cancelled
+    }
+    const trimmedNote = note.trim();
+    if (!trimmedNote) {
+      this.setOpsDashboardToast("确认失败：必须填写处理备注或关闭原因");
+      return;
+    }
     try {
       const { patchOpsAlertGroup } = await import("./controllers/ops-alerts.ts");
-      await patchOpsAlertGroup(this, groupId, { status: "resolved" });
+      await patchOpsAlertGroup(this, groupId, { status: "resolved", ackNote: trimmedNote });
       await this.loadOpsDomainAlerts(domain);
       this.setOpsDashboardToast("告警组已标记为已处理");
     } catch (err) {

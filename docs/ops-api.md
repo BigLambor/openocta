@@ -41,11 +41,30 @@
   "components": ["HDFS", "YARN", "HIVE"],
   "owner": "张三",
   "status": "healthy",
-  "description": ""
+  "description": "",
+  "monitorLabels": "cluster=\"bj-bch-prod\",env=\"prod\"",
+  "vmUrlRef": "VICTORIAMETRICS_URL_BJ_BCH",
+  "metricsBaseUrl": "https://vm.example.com",
+  "jmxUrl": "https://rm.example.com/jmx",
+  "fiManagerUrl": "",
+  "gbaseDsnRef": "",
+  "credentialsRef": "secret://ops/bj-bch-prod"
 }
 ```
 
-`status`：`healthy` \| `warning` \| `critical` \| `unknown`（默认可省略为 `unknown`）。
+`status`：`healthy` \| `warning` \| `critical` \| `unknown` \| `inactive`（默认可省略为 `unknown`）。
+
+执行配置字段说明：
+
+| 字段 | 说明 |
+|------|------|
+| `monitorLabels` | 注入 PromQL 的标签片段，例如 `cluster="prod-a",env="prod"` |
+| `vmUrlRef` | VictoriaMetrics/Prometheus URL 的环境变量引用名 |
+| `metricsBaseUrl` | 直接配置的指标查询地址；优先级高于 `vmUrlRef` |
+| `jmxUrl` | Hadoop JMX 查询地址 |
+| `fiManagerUrl` | FI Manager 指标 API 地址 |
+| `gbaseDsnRef` | GBase DSN 的环境变量或密钥引用名 |
+| `credentialsRef` | 企业密钥系统中的凭据引用，不建议写明文密码 |
 
 ### `PATCH /api/ops/clusters/{id}`
 
@@ -69,6 +88,7 @@
 
 ```json
 {
+  "strategy": "upsert",
   "clusters": [
     {
       "name": "北京 BCH 生产",
@@ -83,7 +103,33 @@
 }
 ```
 
-按 **业务域 + 集群名**（不区分大小写）upsert：已存在则 PATCH，否则 POST。
+`strategy` 可选：
+
+| 值 | 语义 |
+|----|------|
+| `upsert` | 默认策略；按 **业务域 + 集群名**（不区分大小写）创建或更新，不处理本地缺失项 |
+| `dry-run` | 只校验输入并预估 `created/updated/skipped`，不创建、不更新、不删除 |
+| `mark-inactive` | 先 upsert，再把本地存在但本次 CMDB feed 缺失的集群置为 `inactive` |
+| `delete` | 先 upsert，再删除本地存在但本次 CMDB feed 缺失的集群 |
+
+请求体也可传 `mapping` 覆盖外部字段名：
+
+```json
+{
+  "strategy": "dry-run",
+  "mapping": {
+    "name": "ext_cluster_name",
+    "domain": "ext_domain",
+    "region": "ext_region",
+    "nodeCount": "ext_node_count",
+    "components": "ext_components",
+    "owner": "ext_owner",
+    "status": "ext_status",
+    "description": "ext_desc"
+  },
+  "clusters": []
+}
+```
 
 响应：
 
@@ -93,11 +139,14 @@
   "updated": 2,
   "skipped": 0,
   "total": 3,
-  "source": "webhook"
+  "source": "webhook",
+  "strategy": "upsert",
+  "dryRun": false
 }
 ```
 
 `source`：`webhook`（拉取 URL）或 `body`（请求体内联）。
+`errors` 存在时包含 `{rowIndex,name,error}`，用于展示逐条失败原因。
 
 ## 运维大屏汇总
 

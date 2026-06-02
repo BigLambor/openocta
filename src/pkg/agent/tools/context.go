@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/openocta/openocta/pkg/session"
@@ -93,12 +94,17 @@ func ParseOpsContext(ctx context.Context) *OpsContext {
 			clusterID = strings.TrimSpace(strings.TrimPrefix(part, "cluster="))
 		} else if strings.HasPrefix(part, "clusters=") {
 			clusterID = "all"
+		} else if strings.HasPrefix(part, "component=") {
+			component = strings.TrimSpace(strings.TrimPrefix(part, "component="))
+			if decoded, err := url.QueryUnescape(component); err == nil {
+				component = decoded
+			}
 		} else {
 			subtitle = part
 		}
 	}
 
-	if clusterID != "" && clusterID != "all" {
+	if component == "" && clusterID != "" && clusterID != "all" {
 		if title != "" {
 			if GetClusterConfig != nil {
 				c, err := GetClusterConfig(clusterID)
@@ -193,16 +199,20 @@ func BuildOpsContextLine(domain, clusterId, component string) string {
 		}
 	}
 
-	if !hasCluster {
-		title := clusterId
-		subtitle := "自定义上下文"
-		clusterPart := "cluster=" + clusterId
-		return fmt.Sprintf("[运维上下文] 业务域: %s | 目标: %s | %s | %s", domainName, title, subtitle, clusterPart)
-	}
-
 	if component != "" {
 		title := component
 		subtitle := name
+		if subtitle == "" {
+			subtitle = "自定义上下文"
+		}
+		clusterPart := "cluster=" + clusterId
+		componentPart := "component=" + url.QueryEscape(component)
+		return fmt.Sprintf("[运维上下文] 业务域: %s | 目标: %s | %s | %s | %s", domainName, title, subtitle, clusterPart, componentPart)
+	}
+
+	if !hasCluster {
+		title := clusterId
+		subtitle := "自定义上下文"
 		clusterPart := "cluster=" + clusterId
 		return fmt.Sprintf("[运维上下文] 业务域: %s | 目标: %s | %s | %s", domainName, title, subtitle, clusterPart)
 	}

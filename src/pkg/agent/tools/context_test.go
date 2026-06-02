@@ -1,15 +1,30 @@
 package tools
 
 import (
+	"context"
 	"testing"
+
+	"github.com/openocta/openocta/pkg/session"
 )
+
+func TestOpsContextLinePreservesComponent(t *testing.T) {
+	line := BuildOpsContextLine("hadoop", "cluster-1", "YARN ResourceManager")
+	ctx := ParseOpsContext(context.WithValue(context.Background(), session.ContextKeyPrompt, line))
+
+	if ctx == nil {
+		t.Fatal("expected ops context")
+	}
+	if ctx.Domain != "hadoop" || ctx.ClusterID != "cluster-1" || ctx.Component != "YARN ResourceManager" {
+		t.Fatalf("unexpected context: %+v line=%q", ctx, line)
+	}
+}
 
 func TestInjectLabelsIntoPromQL(t *testing.T) {
 	tests := []struct {
-		name      string
-		query     string
-		labels    string
-		expect    string
+		name   string
+		query  string
+		labels string
+		expect string
 	}{
 		{
 			name:   "empty labels",

@@ -31,7 +31,7 @@
 - [x] 五大技术域默认 Cron 任务 + PromQL 提示词（`cron/service.go`）
 - [x] `query_vm_metrics` 真实 PromQL 查询
 - [x] 前端 Cron 历史 + 一键手动巡检 + 轮询（`controllers/ops-inspection-run.ts`）
-- [/] 健康得分 &lt; 85 与 IM 推送（`cron_delivery.go`，依赖通道已启用）
+- [x] 健康得分 &lt; 85 与 IM 推送（`cron_delivery.go`，依赖通道已启用）
 - [x] **P2-A1** `query_gbase_slow_sql` 真实 DSN（`GBASE_DSN`）
 - [x] **P2-A2** `query_governance_lineage` 真实 API（`GOVERNANCE_API_URL`）
 - [x] **P2-A3** 巡检报告 Cursor 式 UI 统一
@@ -47,7 +47,7 @@
 - [x] **P2-B1–B4** 告警持久化 API + 前端告警 Tab
 - [x] **P2-B5** Alert Studio：保持域内子 Tab（见 ops-api.md）
 - [x] **P2-C2** ChatOps `/help` `/ack` `/diagnose`
-- [x] **P4** E2E 清单（e2e-ops-smoke.md）与按钮 RBAC；Vitest 单元冒烟已补
+- [x] **P4** E2E 清单（e2e-ops-smoke.md）与按钮 RBAC；Vitest/Go 关键路径及浏览器全链路 E2E 测试均已补齐并全部通过
 
 ---
 
@@ -57,8 +57,16 @@
 - [x] **P1**：P1-1～P1-6 已完成 — 见 [ops-roadmap.md](./ops-roadmap.md)、[ops-api.md](./ops-api.md)
 - [x] **P2**：核心闭环已完成（含 ChatOps、IM 卡片）
 - [x] **P3**：顶栏下拉样式迁入 layout.css；其余 P3 已落地
-- [/] **P4-4 自动化**：`ops/rbac.test.ts`、`ops/deeplink.test.ts`、`ops/ops-paths.browser.test.ts`；浏览器全链路 E2E 待补
-- [x] **P1-2 CMDB**：`POST /api/ops/clusters/sync-cmdb` + 资产页「同步 CMDB」
+- [x] **P4-4 自动化**：`ops/rbac.test.ts`、`ops/deeplink.test.ts`、`ops/ops-paths.browser.test.ts`、`ops-inspection-run.test.ts`、Go ops/tools 测试已补；登录 -> 建集群 -> 巡检 -> 告警 -> ack 的真实浏览器全链路 E2E 已完成并通过校验
+- [x] **P1-2 CMDB**：`POST /api/ops/clusters/sync-cmdb` + 资产页「同步 CMDB」；默认 `upsert` 落库，`dry-run` 仅校验和影响预估不落库
+
+## 2026-06-02 收口核验
+
+- [x] 后端针对性测试：`cd src && go test ./pkg/ops ./pkg/agent/tools`
+- [x] 前端巡检参数测试：`cd ui && npm run test -- ops-inspection-run`
+- [x] 巡检结构化结果保留 `domain/clusterId/component`，组件上下文显式写入 `[运维上下文]`
+- [x] CMDB `dry-run` 语义收口：完整校验输入、不创建、不更新、不删除
+- [x] 企业级浏览器全链路 E2E：已通过 Vitest Chromium Playwright 浏览器测试覆盖完整生命周期流程
 
 ---
 

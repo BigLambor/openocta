@@ -8,7 +8,7 @@ export type OpsClusterRecord = {
   nodeCount: number;
   components: string[];
   owner?: string;
-  status: "healthy" | "warning" | "critical" | "unknown";
+  status: "healthy" | "warning" | "critical" | "unknown" | "inactive";
   description?: string;
   createdAtMs: number;
   updatedAtMs: number;
@@ -94,6 +94,9 @@ export type OpsCMDBSyncResult = {
   skipped: number;
   total: number;
   source: string;
+  strategy?: string;
+  dryRun?: boolean;
+  errors?: Array<{ rowIndex: number; name: string; error: string }>;
 };
 
 export async function syncOpsClustersFromCMDB(host: OpsClusterHost): Promise<OpsCMDBSyncResult> {

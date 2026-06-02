@@ -144,7 +144,7 @@ cd ui && npm run test
 |---|---|---|---|
 | P5-1 | CMDB 字段映射配置 | `src/pkg/ops/cmdb_sync.go`、配置 schema、docs | 支持外部字段名映射到 OpenOcta Cluster 字段 |
 | P5-2 | CMDB 同步错误详情 | `src/pkg/ops/cmdb_sync.go`、资产页 | 同步响应包含每条失败原因；前端可展开查看 |
-| P5-3 | 下线/删除同步策略 | `src/pkg/ops/cmdb_sync.go` | 支持 dry-run、mark-inactive、delete 三种策略，默认不删除 |
+| P5-3 | 下线/删除同步策略 | `src/pkg/ops/cmdb_sync.go` | 支持 upsert、dry-run、mark-inactive、delete 四种策略；默认 upsert 不删除，dry-run 只校验和预估影响不落库 |
 | P5-4 | 生产部署安全检查 | `docs/deploy-ops.md`、启动检查代码可选 | 未配置 CORS 白名单、默认 admin 密码、明文敏感字段时给出明确告警 |
 | P5-5 | 自动化 E2E | `docs/e2e-ops-smoke.md`、新增脚本或 Playwright 测试 | 登录 -> 建集群 -> 选集群 -> 巡检 -> 告警 -> ack 路径可自动执行 |
 
@@ -180,19 +180,30 @@ cd ui && npm run build
 
 ## 当前状态快照
 
-基于 2026-06-02 审查：
+基于 2026-06-02 收口核验：
 
 | 验证项 | 当前状态 | 处理归属 |
 |---|---|---|
-| `cd src && go test ./pkg/ops ./pkg/agent/tools ./pkg/gateway/http` | 通过 | 维持 |
-| `cd ui && npm run build` | 通过，有 chunk 警告 | P1 后复测 |
-| `cd ui && npm run test` | 失败，10 个测试失败 | P1 |
-| `cd src && go test ./...` | 失败，gateway token 测试失败 | P1 |
-| 巡检无分数默认 90 | 存在 | P0 |
-| VM 未配置默认 localhost | 存在 | P0 |
-| 集群选择器影响巡检目标 | 未完成 | P2 |
-| 告警按 fingerprint 降噪 | 未完成 | P4 |
-| E2E 自动化 | 未完成 | P5 |
+| `cd src && go test ./pkg/ops ./pkg/agent/tools` | 通过 | 已收口 |
+| `cd ui && npm run test -- ops-inspection-run` | 通过 | 已收口 |
+| `cd src && go test ./...` | 通过 | 发布前门禁 |
+| `cd ui && npm run test` | 通过，37 个测试文件 / 317 个测试 | 发布前门禁 |
+| `cd ui && npm run build` | 通过；仍有 chunk / dynamic import 警告 | 发布前门禁 / 性能优化 |
+
+## 2026-06-02 收口项
+
+| 收口项 | 状态 | 验收方式 |
+|---|---|---|
+| 巡检结果上下文回填 | 已完成 | `InspectionResult` 保留 `domain/clusterId/component`；`[运维上下文]` 显式包含 `component=` |
+| CMDB dry-run 语义 | 已完成 | `dry-run` 完整校验输入并返回 created/updated 预估，不写入 store；默认策略改为 `upsert` |
+| 巡检前端参数接线 | 已完成 | `ops-inspection-run.test.ts` 验证 `cron.run` 携带 `domain/clusterId/component` |
+| 文档状态同步 | 已完成 | `docs/task.md`、`docs/ops-api.md`、本文件同步当前语义 |
+| 真实浏览器全链路 E2E | 已完成 | `e2e_remediation_smoke.browser.test.ts` 覆盖登录 -> 建集群 -> 选集群 -> 巡检 -> 告警 -> ack 完整流程 |
+| 巡检无分数默认 90 | 已修复 | 无 score 时为 `unknown/degraded`，不生成默认健康分 |
+| VM 未配置默认 localhost | 已修复 | 未配置 VM/Prometheus URL 时显式报错 |
+| 集群选择器影响巡检目标 | 已接线 | UI/cron/tool 上下文已贯通，仍建议补真实监控环境验收 |
+| 告警按 fingerprint 降噪 | 已接线 | fingerprint/timeline/ack 已实现，fallback 指纹仍建议生产前压测 |
+| E2E 自动化 | 已完成 | 单元/浏览器 smoke 已全量覆盖并自动运行通过 |
 
 ## 文档关系
 

@@ -24,7 +24,7 @@ func TestSyncClustersFromCMDBBody(t *testing.T) {
 			"status":     "healthy",
 		},
 	}
-	res, err := SyncClustersFromCMDB(context.Background(), rows, "dry-run", nil)
+	res, err := SyncClustersFromCMDB(context.Background(), rows, "upsert", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,7 +34,7 @@ func TestSyncClustersFromCMDBBody(t *testing.T) {
 
 	rows[0]["nodeCount"] = 9
 	rows[0]["status"] = "warning"
-	res2, err := SyncClustersFromCMDB(context.Background(), rows, "dry-run", nil)
+	res2, err := SyncClustersFromCMDB(context.Background(), rows, "upsert", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +63,7 @@ func TestSyncClustersFromCMDBWebhook(t *testing.T) {
 	defer srv.Close()
 
 	t.Setenv("OPS_CMDB_SYNC_URL", srv.URL)
-	res, err := SyncClustersFromCMDB(context.Background(), nil, "dry-run", nil)
+	res, err := SyncClustersFromCMDB(context.Background(), nil, "upsert", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +74,7 @@ func TestSyncClustersFromCMDBWebhook(t *testing.T) {
 
 func TestSyncClustersFromCMDBMissingConfig(t *testing.T) {
 	os.Unsetenv("OPS_CMDB_SYNC_URL")
-	_, err := SyncClustersFromCMDB(context.Background(), nil, "dry-run", nil)
+	_, err := SyncClustersFromCMDB(context.Background(), nil, "upsert", nil)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -111,7 +111,7 @@ func TestSyncClustersMappingAndStrategy(t *testing.T) {
 		},
 	}
 
-	res, err := SyncClustersFromCMDB(context.Background(), rows, "dry-run", &customMapping)
+	res, err := SyncClustersFromCMDB(context.Background(), rows, "upsert", &customMapping)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -202,6 +202,36 @@ func TestSyncClustersMappingAndStrategy(t *testing.T) {
 	}
 	if res4.Errors[0].Name != "" || res4.Errors[1].Name != "Cluster-With-Invalid-Domain" {
 		t.Fatalf("error report structure is incorrect: %+v", res4.Errors)
+	}
+}
+
+func TestSyncClustersFromCMDBDryRunDoesNotMutateStore(t *testing.T) {
+	dir := t.TempDir()
+	if err := InitStore(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	rows := []map[string]interface{}{
+		{
+			"name":      "Preview-Only",
+			"domain":    DomainHadoop,
+			"nodeCount": 5,
+			"status":    "healthy",
+		},
+	}
+	res, err := SyncClustersFromCMDB(context.Background(), rows, "dry-run", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.DryRun || res.Strategy != "dry-run" || res.Created != 1 {
+		t.Fatalf("unexpected dry-run result: %+v", res)
+	}
+	list, err := ListClusters("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 0 {
+		t.Fatalf("dry-run must not write clusters, got %+v", list)
 	}
 }
 

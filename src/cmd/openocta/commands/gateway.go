@@ -22,6 +22,7 @@ import (
 	"github.com/openocta/openocta/pkg/infra"
 	"github.com/openocta/openocta/pkg/logging"
 	"github.com/openocta/openocta/pkg/paths"
+	"github.com/openocta/openocta/pkg/rbac"
 	"github.com/openocta/openocta/pkg/version"
 	"github.com/spf13/cobra"
 )
@@ -132,6 +133,9 @@ func runGateway(cmd *cobra.Command, _ []string) error {
 	logging.Info("Gateway starting addr=%s mode=%s version=%s", addr, runMode, version.Version)
 	srv := gatewayhttp.NewServer(addr, version.Version)
 
+	// Run startup security checks (P5-4)
+	runStartupSecurityChecks(cfg, cmd)
+
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && err != context.Canceled {
 			cmd.PrintErrln("Gateway error:", err)
@@ -143,6 +147,30 @@ func runGateway(cmd *cobra.Command, _ []string) error {
 	<-ctx.Done()
 	cmd.Println("Shutting down...")
 	return srv.Shutdown(context.Background())
+}
+
+func runStartupSecurityChecks(cfg *config.OpenOctaConfig, cmd *cobra.Command) {
+	cors := os.Getenv("OPENOCTA_CORS_ORIGINS")
+	if cors == "" || cors == "*" {
+		cmd.Println("[SECURITY WARNING] OPENOCTA_CORS_ORIGINS is not configured or configured as wildcard (*). Please set a valid domain whitelist for production environments.")
+		logging.Warn("Security Check: OPENOCTA_CORS_ORIGINS is wildcard or empty")
+	}
+
+	if cfg != nil && cfg.Gateway != nil && cfg.Gateway.Auth != nil {
+		if cfg.Gateway.Auth.Token == config.DefaultGatewayToken {
+			cmd.Println("[SECURITY WARNING] Gateway is using the default security token. Please change it in openocta.json.")
+			logging.Warn("Security Check: Default gateway token in use")
+		}
+		if cfg.Gateway.Auth.Password != "" && !strings.HasPrefix(cfg.Gateway.Auth.Password, "$") {
+			cmd.Println("[SECURITY WARNING] Gateway password is configured in cleartext in openocta.json. Consider using environment variable reference.")
+			logging.Warn("Security Check: Cleartext gateway password in openocta.json")
+		}
+	}
+
+	if rbac.IsAdminPasswordDefault() {
+		cmd.Println("[SECURITY WARNING] RBAC admin user is still using the default password 'admin888'. Please change it immediately.")
+		logging.Warn("Security Check: Default RBAC admin password 'admin888' in use")
+	}
 }
 
 // --- status ---

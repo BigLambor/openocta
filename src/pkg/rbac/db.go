@@ -213,3 +213,16 @@ func HashPassword(password, salt string) string {
 	hasher.Write([]byte(password + salt))
 	return hex.EncodeToString(hasher.Sum(nil))
 }
+
+// IsAdminPasswordDefault checks if the default admin user is still using the default password "admin888".
+func IsAdminPasswordDefault() bool {
+	if db == nil {
+		return false
+	}
+	var passwordHash, salt string
+	err := db.QueryRow(`SELECT password_hash, salt FROM users WHERE username = ?`, "admin").Scan(&passwordHash, &salt)
+	if err != nil {
+		return false
+	}
+	return passwordHash == HashPassword("admin888", salt)
+}

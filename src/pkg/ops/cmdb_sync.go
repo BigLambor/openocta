@@ -20,12 +20,14 @@ type SyncError struct {
 
 // CMDBSyncResult summarizes a CMDB import run (P1-2).
 type CMDBSyncResult struct {
-	Created int         `json:"created"`
-	Updated int         `json:"updated"`
-	Skipped int         `json:"skipped"`
-	Total   int         `json:"total"`
-	Source  string      `json:"source"`
-	Errors  []SyncError `json:"errors,omitempty"`
+	Created  int         `json:"created"`
+	Updated  int         `json:"updated"`
+	Skipped  int         `json:"skipped"`
+	Total    int         `json:"total"`
+	Source   string      `json:"source"`
+	Strategy string      `json:"strategy"`
+	DryRun   bool        `json:"dryRun,omitempty"`
+	Errors   []SyncError `json:"errors,omitempty"`
 }
 
 // CMDBMapping defines external field mappings for CMDB import.
@@ -185,8 +187,8 @@ func applyCMDBMapping(raw map[string]interface{}, mapping CMDBMapping) CMDBClust
 	return row
 }
 
-// SyncClustersFromCMDB upserts clusters from inline rows or OPS_CMDB_SYNC_URL (GET JSON).
-// Supports dry-run, mark-inactive, delete strategies and custom mapping fields.
+// SyncClustersFromCMDB imports clusters from inline rows or OPS_CMDB_SYNC_URL (GET JSON).
+// Supports upsert, dry-run, mark-inactive, delete strategies and custom mapping fields.
 func SyncClustersFromCMDB(ctx context.Context, rawClusters []map[string]interface{}, strategy string, mapping *CMDBMapping) (CMDBSyncResult, error) {
 	source := "body"
 	var rawRows []map[string]interface{}
@@ -211,8 +213,8 @@ func SyncClustersFromCMDB(ctx context.Context, rawClusters []map[string]interfac
 	if strat == "" {
 		strat = strings.TrimSpace(strings.ToLower(os.Getenv("OPS_CMDB_SYNC_STRATEGY")))
 	}
-	if strat != "dry-run" && strat != "mark-inactive" && strat != "delete" {
-		strat = "dry-run" // Default strategy is dry-run (do not modify/delete unmapped clusters)
+	if strat != "upsert" && strat != "dry-run" && strat != "mark-inactive" && strat != "delete" {
+		strat = "upsert"
 	}
 
 	// Apply mapping
@@ -228,7 +230,7 @@ func SyncClustersFromCMDB(ctx context.Context, rawClusters []map[string]interfac
 		mappedRows = append(mappedRows, applyCMDBMapping(raw, m))
 	}
 
-	result := CMDBSyncResult{Source: source, Total: len(mappedRows)}
+	result := CMDBSyncResult{Source: source, Total: len(mappedRows), Strategy: strat, DryRun: strat == "dry-run"}
 	processedKeys := make(map[string]bool)
 
 	for idx, row := range mappedRows {
@@ -242,6 +244,28 @@ func SyncClustersFromCMDB(ctx context.Context, rawClusters []map[string]interfac
 			})
 			continue
 		}
+		if err := validateClusterCreate(in); err != nil {
+			result.Skipped++
+			result.Errors = append(result.Errors, SyncError{
+				RowIndex: idx,
+				Name:     row.Name,
+				Error:    err.Error(),
+			})
+			continue
+		}
+		domainKey := strings.TrimSpace(strings.ToLower(row.Domain))
+		nameKey := strings.TrimSpace(strings.ToLower(row.Name))
+		processedKeys[domainKey+"/"+nameKey] = true
+
+		if strat == "dry-run" {
+			if _, ok := findClusterByDomainName(in.Domain, in.Name); ok {
+				result.Updated++
+			} else {
+				result.Created++
+			}
+			continue
+		}
+
 		created, err := upsertCluster(in)
 		if err != nil {
 			result.Skipped++
@@ -257,10 +281,6 @@ func SyncClustersFromCMDB(ctx context.Context, rawClusters []map[string]interfac
 		} else {
 			result.Updated++
 		}
-
-		domainKey := strings.TrimSpace(strings.ToLower(row.Domain))
-		nameKey := strings.TrimSpace(strings.ToLower(row.Name))
-		processedKeys[domainKey+"/"+nameKey] = true
 	}
 
 	// Apply post-sync strategy for local clusters not found in the CMDB feed
@@ -335,24 +355,24 @@ func upsertCluster(in ClusterCreate) (created bool, err error) {
 	}
 	name := strings.TrimSpace(in.Name)
 
-	serviceMu.RLock()
-	var existingID string
-	for _, c := range clusters {
-		if c.Domain == domain && strings.EqualFold(c.Name, name) {
-			existingID = c.ID
-			break
-		}
-	}
-	serviceMu.RUnlock()
+	existing, ok := findClusterByDomainName(domain, name)
+	existingID := existing.ID
 
-	if existingID != "" {
+	if ok {
 		comps := normalizeComponents(in.Components)
 		patch := ClusterPatch{
-			Region:      strPtr(strings.TrimSpace(in.Region)),
-			NodeCount:   &in.NodeCount,
-			Components:  &comps,
-			Owner:       strPtr(strings.TrimSpace(in.Owner)),
-			Description: strPtr(strings.TrimSpace(in.Description)),
+			Region:         strPtr(strings.TrimSpace(in.Region)),
+			NodeCount:      &in.NodeCount,
+			Components:     &comps,
+			Owner:          strPtr(strings.TrimSpace(in.Owner)),
+			Description:    strPtr(strings.TrimSpace(in.Description)),
+			MonitorLabels:  strPtr(strings.TrimSpace(in.MonitorLabels)),
+			VMUrlRef:       strPtr(strings.TrimSpace(in.VMUrlRef)),
+			MetricsBaseUrl: strPtr(strings.TrimSpace(in.MetricsBaseUrl)),
+			JMXUrl:         strPtr(strings.TrimSpace(in.JMXUrl)),
+			FIManagerUrl:   strPtr(strings.TrimSpace(in.FIManagerUrl)),
+			GBaseDsnRef:    strPtr(strings.TrimSpace(in.GBaseDsnRef)),
+			CredentialsRef: strPtr(strings.TrimSpace(in.CredentialsRef)),
 		}
 		if strings.TrimSpace(in.Status) != "" {
 			status, serr := NormalizeStatus(in.Status)
@@ -366,4 +386,34 @@ func upsertCluster(in ClusterCreate) (created bool, err error) {
 	}
 	_, err = CreateCluster(in)
 	return true, err
+}
+
+func validateClusterCreate(in ClusterCreate) error {
+	if strings.TrimSpace(in.Name) == "" {
+		return fmt.Errorf("集群名称不能为空")
+	}
+	if _, err := NormalizeDomain(in.Domain); err != nil {
+		return err
+	}
+	if _, err := NormalizeStatus(in.Status); err != nil {
+		return err
+	}
+	if in.NodeCount < 0 {
+		return fmt.Errorf("节点数不能为负数")
+	}
+	return nil
+}
+
+func findClusterByDomainName(domain, name string) (Cluster, bool) {
+	domain = strings.TrimSpace(strings.ToLower(domain))
+	name = strings.TrimSpace(name)
+
+	serviceMu.RLock()
+	defer serviceMu.RUnlock()
+	for _, c := range clusters {
+		if c.Domain == domain && strings.EqualFold(c.Name, name) {
+			return c, true
+		}
+	}
+	return Cluster{}, false
 }

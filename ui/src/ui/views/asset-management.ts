@@ -51,6 +51,8 @@ function statusLabel(status: string) {
       return "亚健康";
     case "critical":
       return "异常";
+    case "inactive":
+      return "已下线";
     default:
       return "未知";
   }
@@ -166,6 +168,7 @@ export function renderAssetManagement(props: AssetManagementProps = {}) {
                     <option value="warning">亚健康</option>
                     <option value="critical">异常</option>
                     <option value="unknown">未知</option>
+                    <option value="inactive">已下线</option>
                   </select>
                 </label>
                 <label class="asset-form__field">
@@ -317,6 +320,11 @@ export function renderAssetManagement(props: AssetManagementProps = {}) {
         background: rgba(255, 255, 255, 0.05);
         color: var(--text-muted);
         border: 1px solid var(--border);
+      }
+      .asset-status--inactive {
+        background: rgba(148, 163, 184, 0.12);
+        color: #94a3b8;
+        border: 1px solid rgba(148, 163, 184, 0.24);
       }
     </style>
   `;

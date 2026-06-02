@@ -2,12 +2,20 @@ package ops
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"regexp"
 	"strings"
 
 	"github.com/openocta/openocta/pkg/session"
 )
+
+// InspectionContext is the selected ops scope for a run.
+type InspectionContext struct {
+	Domain    string
+	ClusterID string
+	Component string
+}
 
 // ToolRunReport structures the execution output of an individual tool during an inspection.
 type ToolRunReport struct {
@@ -36,10 +44,21 @@ type InspectionResult struct {
 
 // ParseInspectionResult extracts the score, status, tool runs, and errors for a completed session.
 func ParseInspectionResult(sessionID string, jobID string, summary string, status string, runAtMs int64, durationMs int64) InspectionResult {
+	return ParseInspectionResultWithContext(sessionID, jobID, summary, status, runAtMs, durationMs, InspectionContext{})
+}
+
+// ParseInspectionResultWithContext extracts the score, status, tool runs, errors, and selected ops scope.
+func ParseInspectionResultWithContext(sessionID string, jobID string, summary string, status string, runAtMs int64, durationMs int64, inspectCtx InspectionContext) InspectionResult {
+	domain := strings.TrimSpace(inspectCtx.Domain)
+	if domain == "" {
+		domain = DomainFromInspectJobID(jobID)
+	}
 	res := InspectionResult{
 		ID:         sessionID,
 		JobID:      jobID,
-		Domain:     DomainFromInspectJobID(jobID),
+		Domain:     domain,
+		ClusterID:  strings.TrimSpace(inspectCtx.ClusterID),
+		Component:  strings.TrimSpace(inspectCtx.Component),
 		StartedAt:  runAtMs,
 		FinishedAt: runAtMs + durationMs,
 	}
@@ -67,6 +86,23 @@ func ParseInspectionResult(sessionID string, jobID string, summary string, statu
 		var toolOrder []string
 
 		for _, m := range msgs {
+			if strings.EqualFold(m.Role, "user") && (res.Domain == "" || res.ClusterID == "" || res.Component == "") {
+				for _, block := range m.Content {
+					if strings.EqualFold(block.Type, "text") && strings.Contains(block.Text, "[运维上下文]") {
+						ctx := parseInspectionContextLine(block.Text)
+						if res.Domain == "" {
+							res.Domain = ctx.Domain
+						}
+						if res.ClusterID == "" {
+							res.ClusterID = ctx.ClusterID
+						}
+						if res.Component == "" {
+							res.Component = ctx.Component
+						}
+						break
+					}
+				}
+			}
 			// Check Tool Call
 			for _, block := range m.Content {
 				if strings.EqualFold(block.Type, "toolCall") || strings.EqualFold(block.Type, "tool_file") || strings.EqualFold(block.Type, "tool_use") {
@@ -124,4 +160,50 @@ func ParseInspectionResult(sessionID string, jobID string, summary string, statu
 
 	res.ReportMarkdown = summary
 	return res
+}
+
+func parseInspectionContextLine(text string) InspectionContext {
+	lines := strings.Split(text, "\n")
+	for _, line := range lines {
+		if !strings.Contains(line, "[运维上下文]") {
+			continue
+		}
+		ctx := InspectionContext{}
+		for _, part := range strings.Split(line, "|") {
+			part = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(part), "[运维上下文]"))
+			part = strings.TrimSpace(part)
+			switch {
+			case strings.HasPrefix(part, "业务域:"):
+				ctx.Domain = inspectionDisplayNameToDomain(strings.TrimSpace(strings.TrimPrefix(part, "业务域:")))
+			case strings.HasPrefix(part, "cluster="):
+				ctx.ClusterID = strings.TrimSpace(strings.TrimPrefix(part, "cluster="))
+			case strings.HasPrefix(part, "clusters="):
+				ctx.ClusterID = "all"
+			case strings.HasPrefix(part, "component="):
+				ctx.Component = strings.TrimSpace(strings.TrimPrefix(part, "component="))
+				if decoded, err := url.QueryUnescape(ctx.Component); err == nil {
+					ctx.Component = decoded
+				}
+			}
+		}
+		return ctx
+	}
+	return InspectionContext{}
+}
+
+func inspectionDisplayNameToDomain(name string) string {
+	switch name {
+	case "BCH生态":
+		return DomainHadoop
+	case "FI商业生态":
+		return DomainFI
+	case "GBase数据库":
+		return DomainGBase
+	case "开发治理平台":
+		return DomainGovernance
+	case "数据App运维":
+		return DomainDataApps
+	default:
+		return strings.ToLower(strings.TrimSpace(name))
+	}
 }
