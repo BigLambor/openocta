@@ -105,7 +105,7 @@ const outcomes = [
     role: "SRE工程师",
     name: "邓雪",
     avatar: "/img/avatar/dengxue.png",
-    desc: "用上OpenOcta后，服务器巡检、告警排查全交给智能体，深夜再也不用爬起来处理故障，值班轻松了不止一倍",
+    desc: "用上ApexOps后，服务器巡检、告警排查全交给智能体，深夜再也不用爬起来处理故障，值班轻松了不止一倍",
   },
   {
     role: "DBA工程师",
@@ -171,7 +171,7 @@ export function renderTutorials(props: TutorialsProps) {
       <div class="tutorials-board">
         <div class="tutorials-board__header">
           <div class="tutorials-board__title-wrap">
-            <h2 class="tutorials-board__title">OpenOcta 教程</h2>
+            <h2 class="tutorials-board__title">ApexOps 教程</h2>
           </div>
           ${toolbarActions}
         </div>

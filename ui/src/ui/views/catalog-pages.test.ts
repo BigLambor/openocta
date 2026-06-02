@@ -834,7 +834,7 @@ describe("catalog pages", () => {
     const onLessonClick = vi.fn();
     renderIntoContainer(renderTutorials(tutorialProps({ onLessonClick })), container);
 
-    expect(container.textContent).toContain("OpenOcta 教程");
+    expect(container.textContent).toContain("ApexOps 教程");
     expect(container.textContent).toContain("Windows 极速体验");
 
     const lesson = container.querySelector(".tutorials-lesson--clickable");
