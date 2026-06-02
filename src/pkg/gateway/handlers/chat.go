@@ -26,8 +26,8 @@ import (
 	"github.com/openocta/openocta/pkg/employees"
 	"github.com/openocta/openocta/pkg/gateway/protocol"
 	"github.com/openocta/openocta/pkg/logging"
-	"github.com/openocta/openocta/pkg/session"
 	"github.com/openocta/openocta/pkg/ops"
+	"github.com/openocta/openocta/pkg/session"
 	"github.com/stellarlinkco/agentsdk-go/pkg/api"
 	"github.com/stellarlinkco/agentsdk-go/pkg/model"
 	sdkTool "github.com/stellarlinkco/agentsdk-go/pkg/tool"
@@ -395,19 +395,19 @@ func writeCronSessionResult(sessionKey, sessionID, summary, status string, runAt
 	res := ops.ParseInspectionResult(sessionID, jobID, summary, status, runAtMs, durationMs)
 
 	doc := map[string]interface{}{
-		"ts":          nowMs,
-		"jobId":       jobID,
-		"action":      "finished",
-		"status":      status,
-		"summary":     summary,
-		"sessionId":   sessionID,
-		"sessionKey":  resultSessionKey,
-		"runAtMs":     runAtMs,
-		"durationMs":  durationMs,
-		"domain":      res.Domain,
-		"clusterId":   res.ClusterID,
-		"component":   res.Component,
-		"result":      res,
+		"ts":         nowMs,
+		"jobId":      jobID,
+		"action":     "finished",
+		"status":     status,
+		"summary":    summary,
+		"sessionId":  sessionID,
+		"sessionKey": resultSessionKey,
+		"runAtMs":    runAtMs,
+		"durationMs": durationMs,
+		"domain":     res.Domain,
+		"clusterId":  res.ClusterID,
+		"component":  res.Component,
+		"result":     res,
 	}
 	data, err := json.Marshal(doc)
 	if err != nil {
@@ -640,7 +640,7 @@ type SessionRunSnapshot struct {
 }
 
 // updateSessionAfterRun updates the session entry with channel, sessionFile, updatedAt, and optional snapshot.
-func updateSessionAfterRun(ctx *Context, sessionKey string, sessionID string, sessionFile string, snapshot *SessionRunSnapshot) {
+func updateSessionAfterRun(ctx *Context, sessionKey string, sessionID string, sessionFile string, runID string, snapshot *SessionRunSnapshot) {
 	if ctx == nil {
 		return
 	}
@@ -685,7 +685,8 @@ func updateSessionAfterRun(ctx *Context, sessionKey string, sessionID string, se
 		if emp, err := employees.LoadManifest(employeeID, env); err == nil && emp != nil {
 			tPath := resolveSessionTranscriptPath(sessionID, target.storePath, sessionFile, target.agentID, env)
 			var inputMsg, outputMsg, conclusion string
-			status := "success"
+			executionStatus := employees.ExecutionSucceeded
+			workflowStatus := employees.WorkflowWaitingApproval
 			var startedAt int64 = time.Now().UnixMilli()
 			var finishedAt int64 = time.Now().UnixMilli()
 
@@ -734,32 +735,34 @@ func updateSessionAfterRun(ctx *Context, sessionKey string, sessionID string, se
 
 			if domainKey == "" {
 				if len(emp.DomainKeys) > 0 {
-					domainKey = emp.DomainKeys[0]
+					domainKey = employees.NormalizeDomainKey(emp.DomainKeys[0])
 				} else {
-					domainKey = "hadoop"
+					domainKey = employees.DomainHadoop
 				}
+			} else {
+				domainKey = employees.NormalizeDomainKey(domainKey)
 			}
 
 			// 匹配能力域
 			var capKey string
 			if len(emp.CapabilityKeys) > 0 {
-				capKey = emp.CapabilityKeys[0]
+				capKey = employees.NormalizeCapabilityKey(emp.CapabilityKeys[0])
 			} else {
 				switch strings.ToLower(emp.RoleType) {
 				case "oncall":
-					capKey = "observability-alert"
+					capKey = employees.CapabilityObservabilityAlert
 				case "inspector":
-					capKey = "health-inspection"
+					capKey = employees.CapabilityHealthInspection
 				case "diagnoser":
-					capKey = "diagnosis-incident"
+					capKey = employees.CapabilityDiagnosisIncident
 				case "governor":
-					capKey = "governance-optimization"
+					capKey = employees.CapabilityGovernanceOptimization
 				case "capacity", "cost":
-					capKey = "capacity-performance-cost"
+					capKey = employees.CapabilityCapacityPerformanceCost
 				case "escort", "change":
-					capKey = "change-config-compliance"
+					capKey = employees.CapabilityChangeConfigCompliance
 				default:
-					capKey = "observability-alert"
+					capKey = employees.CapabilityObservabilityAlert
 				}
 			}
 
@@ -782,7 +785,8 @@ func updateSessionAfterRun(ctx *Context, sessionKey string, sessionID string, se
 			}
 
 			if strings.Contains(strings.ToLower(outputMsg), "[错误]") || strings.Contains(strings.ToLower(outputMsg), "failed") {
-				status = "failed"
+				executionStatus = employees.ExecutionFailed
+				workflowStatus = employees.WorkflowOpen
 			}
 
 			conclusion = outputMsg
@@ -790,33 +794,27 @@ func updateSessionAfterRun(ctx *Context, sessionKey string, sessionID string, se
 				conclusion = conclusion[:297] + "..."
 			}
 
-			// 加载或创建 task
-			task, tErr := employees.LoadTask(sessionID, env)
-			if tErr != nil || task == nil {
-				task = &employees.EmployeeTask{
-					ID:            sessionID,
-					EmployeeID:    employeeID,
-					DomainKey:     domainKey,
-					CapabilityKey: capKey,
-					ScenarioKey:   "",
-					ObjectRef:     objectRef,
-					TriggerType:   triggerType,
-					Status:        status,
-					Input:         inputMsg,
-					Output:        outputMsg,
-					Conclusion:    conclusion,
-					StartedAt:     startedAt,
-					FinishedAt:    finishedAt,
-					Operator:      operator,
-					Evaluation:    "unrated",
-				}
-			} else {
-				task.Status = status
-				task.Output = outputMsg
-				task.Conclusion = conclusion
-				task.FinishedAt = finishedAt
+			task := &employees.EmployeeTask{
+				ID:              employees.NewTaskID(),
+				SessionID:       sessionID,
+				RunID:           runID,
+				EmployeeID:      employeeID,
+				DomainKey:       domainKey,
+				CapabilityKey:   capKey,
+				ScenarioKey:     "",
+				ObjectRef:       objectRef,
+				TriggerType:     triggerType,
+				ExecutionStatus: executionStatus,
+				WorkflowStatus:  workflowStatus,
+				Status:          employees.LegacyStatusFromExecution(executionStatus),
+				Input:           inputMsg,
+				Output:          outputMsg,
+				Conclusion:      conclusion,
+				StartedAt:       startedAt,
+				FinishedAt:      finishedAt,
+				Operator:        operator,
+				Evaluation:      employees.EvaluationUnrated,
 			}
-
 			_ = employees.SaveTask(task, env)
 		}
 	}
@@ -903,7 +901,7 @@ func ChatHistoryHandler(opts HandlerOpts) error {
 		}, nil, nil)
 		return nil
 	}
-		// Take last N messages (match TS behavior)
+	// Take last N messages (match TS behavior)
 	start := 0
 	if len(msgs) > limit {
 		start = len(msgs) - limit
@@ -1119,7 +1117,7 @@ func ChatSendHandler(opts HandlerOpts) error {
 	// 对于 cron 会话，在真正请求大模型前，就先在 sessions.json 中建立或更新一条记录，
 	// 这样控制台可以及时看到该会话。
 	if cronSession {
-		updateSessionAfterRun(opts.Context, sessionKey, sessionID, sessionFile, nil)
+		updateSessionAfterRun(opts.Context, sessionKey, sessionID, sessionFile, "", nil)
 	}
 
 	// Support attachments (simplified - just check if present)
@@ -1637,18 +1635,18 @@ func ChatSendHandler(opts HandlerOpts) error {
 					base64Data = parts[1]
 				}
 
-			var blockType model.ContentBlockType = model.ContentBlockDocument
-			if strings.HasPrefix(strings.ToLower(mimeType), "image/") {
-				blockType = model.ContentBlockImage
-			}
+				var blockType model.ContentBlockType = model.ContentBlockDocument
+				if strings.HasPrefix(strings.ToLower(mimeType), "image/") {
+					blockType = model.ContentBlockImage
+				}
 
-			// Xunfei's OpenAI-compatible chat endpoint (like Spark 4.0 Ultra) supports image/image_url
-			// in messages. We do not skip image blocks.
-			contentBlocks = append(contentBlocks, model.ContentBlock{
-				Type:      blockType,
-				MediaType: mimeType,
-				Data:      base64Data,
-			})
+				// Xunfei's OpenAI-compatible chat endpoint (like Spark 4.0 Ultra) supports image/image_url
+				// in messages. We do not skip image blocks.
+				contentBlocks = append(contentBlocks, model.ContentBlock{
+					Type:      blockType,
+					MediaType: mimeType,
+					Data:      base64Data,
+				})
 			}
 
 			req := api.Request{
@@ -1735,7 +1733,7 @@ func ChatSendHandler(opts HandlerOpts) error {
 					appendErrorToTranscript(transcriptPath, "模型未返回任何输出", runId, sessionKey, ctxForBroadcast)
 				}
 				snapshot := &SessionRunSnapshot{SkillsSnapshot: buildSkillsSnapshotForSession(projectRoot, runtimeConfig, sessionKey)}
-				updateSessionAfterRun(ctxForBroadcast, sessionKey, sessionID, sessionFile, snapshot)
+				updateSessionAfterRun(ctxForBroadcast, sessionKey, sessionID, sessionFile, runId, snapshot)
 				return
 			}
 
@@ -1909,30 +1907,30 @@ func ChatSendHandler(opts HandlerOpts) error {
 						if err := session.AppendTranscriptLine(transcriptPath, line); err != nil {
 							chatLog.Warn("append assistant message to transcript failed path=%s err=%v", transcriptPath, err)
 						}
-					messageBody := map[string]interface{}{
-						"role":             "assistant",
-						"content":          contentSnapshot,
-						"timestamp":        tsMs,
-						"durationMs":       durationMs,
-						"firstTokenMs":     currentFirstTokenMs,
-						"toolDurationMs":   totalToolDurationMs,
-						"outputDurationMs": currentOutputMs,
-					}
-					// 只在真正结束时广播 final；工具调用轮次不广播，避免前端反复刷新
-					if stopReason != "tool_use" {
-						broadcastChatFinal(ctxForBroadcast, runId, sessionKey, messageBody)
-					}
-					if t := extractAssistantTextForIMDelivery(messageBody); t != "" {
+						messageBody := map[string]interface{}{
+							"role":             "assistant",
+							"content":          contentSnapshot,
+							"timestamp":        tsMs,
+							"durationMs":       durationMs,
+							"firstTokenMs":     currentFirstTokenMs,
+							"toolDurationMs":   totalToolDurationMs,
+							"outputDurationMs": currentOutputMs,
+						}
+						// 只在真正结束时广播 final；工具调用轮次不广播，避免前端反复刷新
+						if stopReason != "tool_use" {
+							broadcastChatFinal(ctxForBroadcast, runId, sessionKey, messageBody)
+						}
+						if t := extractAssistantTextForIMDelivery(messageBody); t != "" {
 							streamIMPlain = t
 							lastAssistantContent = t
 						}
 						// Reset accumulators so next EventMessageStop (if any) does not include this turn's content
 						assistantContent = nil
 						textBuf.Reset()
-				} else if usageSnapshot != nil && stopReason != "tool_use" {
-					broadcastChatFinal(ctxForBroadcast, runId, sessionKey, map[string]interface{}{
-						"role": "assistant", "content": []map[string]interface{}{}, "timestamp": time.Now().UnixMilli(),
-					})
+					} else if usageSnapshot != nil && stopReason != "tool_use" {
+						broadcastChatFinal(ctxForBroadcast, runId, sessionKey, map[string]interface{}{
+							"role": "assistant", "content": []map[string]interface{}{}, "timestamp": time.Now().UnixMilli(),
+						})
 					}
 				case api.EventError:
 					outMsg := ""
@@ -2041,7 +2039,7 @@ func ChatSendHandler(opts HandlerOpts) error {
 			}
 
 			snapshot := &SessionRunSnapshot{SkillsSnapshot: buildSkillsSnapshotForSession(projectRoot, runtimeConfig, sessionKey)}
-			updateSessionAfterRun(ctxForBroadcast, sessionKey, sessionID, sessionFile, snapshot)
+			updateSessionAfterRun(ctxForBroadcast, sessionKey, sessionID, sessionFile, runId, snapshot)
 		}()
 	}
 

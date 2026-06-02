@@ -49,7 +49,10 @@ func EmployeeTasksListHandler(opts HandlerOpts) error {
 		if capFilter != "" && !strings.Contains(strings.ToLower(t.CapabilityKey), capFilter) {
 			continue
 		}
-		if statusFilter != "" && strings.ToLower(strings.TrimSpace(t.Status)) != statusFilter {
+		if statusFilter != "" &&
+			strings.ToLower(strings.TrimSpace(t.Status)) != statusFilter &&
+			strings.ToLower(strings.TrimSpace(t.ExecutionStatus)) != statusFilter &&
+			strings.ToLower(strings.TrimSpace(t.WorkflowStatus)) != statusFilter {
 			continue
 		}
 		if queryFilter != "" &&
@@ -98,10 +101,10 @@ func EmployeeTasksGetHandler(opts HandlerOpts) error {
 func EmployeeTasksCreateHandler(opts HandlerOpts) error {
 	id, _ := opts.Params["id"].(string)
 	id = strings.TrimSpace(id)
-	if id == "" {
+	if id != "" && !employees.IsValidTaskID(id) {
 		opts.Respond(false, nil, &protocol.ErrorShape{
 			Code:    protocol.ErrCodeInvalidRequest,
-			Message: "employee.tasks.create: id required",
+			Message: "employee.tasks.create: invalid id",
 		}, nil)
 		return nil
 	}
@@ -113,6 +116,8 @@ func EmployeeTasksCreateHandler(opts HandlerOpts) error {
 	objectRef, _ := opts.Params["objectRef"].(string)
 	triggerType, _ := opts.Params["triggerType"].(string)
 	status, _ := opts.Params["status"].(string)
+	executionStatus, _ := opts.Params["executionStatus"].(string)
+	workflowStatus, _ := opts.Params["workflowStatus"].(string)
 	input, _ := opts.Params["input"].(string)
 	output, _ := opts.Params["output"].(string)
 	conclusion, _ := opts.Params["conclusion"].(string)
@@ -138,26 +143,29 @@ func EmployeeTasksCreateHandler(opts HandlerOpts) error {
 	finishedAt := int64(finishedAtVal)
 
 	task := employees.EmployeeTask{
-		ID:            id,
-		EmployeeID:    empID,
-		DomainKey:     domainKey,
-		CapabilityKey: capKey,
-		ScenarioKey:   scenarioKey,
-		ObjectRef:     objectRef,
-		TriggerType:   triggerType,
-		Status:        status,
-		Input:         input,
-		Output:        output,
-		Conclusion:    conclusion,
-		Artifacts:     artifacts,
-		StartedAt:     startedAt,
-		FinishedAt:    finishedAt,
-		Operator:      operator,
-		Evaluation:    evaluation,
+		ID:              id,
+		EmployeeID:      empID,
+		DomainKey:       domainKey,
+		CapabilityKey:   capKey,
+		ScenarioKey:     scenarioKey,
+		ObjectRef:       objectRef,
+		TriggerType:     triggerType,
+		ExecutionStatus: employees.NormalizeExecutionStatus(firstNonEmptyString(executionStatus, status)),
+		WorkflowStatus:  employees.NormalizeWorkflowStatus(workflowStatus),
+		Status:          employees.LegacyStatusFromExecution(firstNonEmptyString(executionStatus, status)),
+		Input:           input,
+		Output:          output,
+		Conclusion:      conclusion,
+		Artifacts:       artifacts,
+		StartedAt:       startedAt,
+		FinishedAt:      finishedAt,
+		Operator:        operator,
+		Evaluation:      evaluation,
+		Metrics:         taskMetricsFromParams(opts.Params, artifacts),
 	}
 
 	if task.Evaluation == "" {
-		task.Evaluation = "unrated"
+		task.Evaluation = employees.EvaluationUnrated
 	}
 
 	env := func(k string) string { return os.Getenv(k) }
@@ -196,7 +204,15 @@ func EmployeeTasksUpdateHandler(opts HandlerOpts) error {
 	}
 
 	if status, ok := opts.Params["status"].(string); ok {
-		task.Status = status
+		task.ExecutionStatus = employees.ExecutionFromLegacyStatus(status)
+		task.Status = employees.LegacyStatusFromExecution(task.ExecutionStatus)
+	}
+	if executionStatus, ok := opts.Params["executionStatus"].(string); ok {
+		task.ExecutionStatus = employees.NormalizeExecutionStatus(executionStatus)
+		task.Status = employees.LegacyStatusFromExecution(task.ExecutionStatus)
+	}
+	if workflowStatus, ok := opts.Params["workflowStatus"].(string); ok {
+		task.WorkflowStatus = employees.NormalizeWorkflowStatus(workflowStatus)
 	}
 	if input, ok := opts.Params["input"].(string); ok {
 		task.Input = input
@@ -208,11 +224,16 @@ func EmployeeTasksUpdateHandler(opts HandlerOpts) error {
 		task.Conclusion = conclusion
 	}
 	if evaluation, ok := opts.Params["evaluation"].(string); ok {
-		task.Evaluation = evaluation
+		task.Evaluation = strings.ToLower(strings.TrimSpace(evaluation))
+		if task.Evaluation == employees.EvaluationAccepted {
+			task.WorkflowStatus = employees.WorkflowClosed
+		} else if task.Evaluation == employees.EvaluationRejected {
+			task.WorkflowStatus = employees.WorkflowRejected
+		}
 	}
 	if finishedAtVal, ok := opts.Params["finishedAt"].(float64); ok {
 		task.FinishedAt = int64(finishedAtVal)
-	} else if task.FinishedAt == 0 && task.Status != "pending" && task.Status != "running" {
+	} else if task.FinishedAt == 0 && task.ExecutionStatus != employees.ExecutionPending && task.ExecutionStatus != employees.ExecutionRunning {
 		task.FinishedAt = time.Now().UnixMilli()
 	}
 
@@ -224,6 +245,10 @@ func EmployeeTasksUpdateHandler(opts HandlerOpts) error {
 			}
 		}
 		task.Artifacts = artifacts
+		task.Metrics = taskMetricsFromParams(opts.Params, artifacts)
+	}
+	if rawMetrics, ok := opts.Params["metrics"].(map[string]interface{}); ok {
+		task.Metrics = taskMetricsFromMap(rawMetrics, task.Metrics)
 	}
 
 	if err := employees.SaveTask(task, env); err != nil {
@@ -276,86 +301,58 @@ func EmployeeEffectivenessGetHandler(opts HandlerOpts) error {
 	}
 
 	taskCount := len(tasks)
-	successCount := 0
+	completedCount := 0
+	closedCount := 0
 	ratedCount := 0
 	acceptedCount := 0
 
-	taskBreakdown := map[string]int{
-		"observability-alert":       0,
-		"health-inspection":         0,
-		"diagnosis-incident":        0,
-		"governance-optimization":   0,
-		"capacity-performance-cost": 0,
-		"change-config-compliance":  0,
-	}
-
-	domainBreakdown := map[string]int{
-		"hadoop":     0,
-		"fi":         0,
-		"gbase":      0,
-		"governance": 0,
-		"data-apps":  0,
-	}
+	taskBreakdown := emptyCapabilityBreakdown()
+	domainBreakdown := emptyDomainBreakdown()
 
 	savedHours := 0.0
-	observableTaskCount := 0
-	observableSuccessCount := 0
+	totalRawAlerts := 0
+	totalReducedAlerts := 0
+	alertMetricSamples := 0
 	costSpent := 0.0
+	mttrSamples := 0
+	totalMTTRMs := int64(0)
 
 	for _, t := range tasks {
-		if strings.EqualFold(t.Status, "success") {
-			successCount++
+		if t.ExecutionStatus == employees.ExecutionSucceeded || t.ExecutionStatus == employees.ExecutionFailed {
+			completedCount++
+		}
+		if t.WorkflowStatus == employees.WorkflowClosed {
+			closedCount++
 		}
 		eval := strings.ToLower(t.Evaluation)
-		if eval == "accepted" || eval == "rejected" {
+		if eval == employees.EvaluationAccepted || eval == employees.EvaluationRejected {
 			ratedCount++
-			if eval == "accepted" {
+			if eval == employees.EvaluationAccepted {
 				acceptedCount++
 			}
 		}
 
-		// Capability breakdown & saved hours
-		capKey := t.CapabilityKey
-		if capKey == "" {
-			capKey = "observability-alert" // default fallback
-		}
+		capKey := employees.NormalizeCapabilityKey(t.CapabilityKey)
 		taskBreakdown[capKey]++
-		if capKey == "observability-alert" {
-			observableTaskCount++
-			if strings.EqualFold(t.Status, "success") {
-				observableSuccessCount++
-			}
+		if t.Metrics.RawAlertCount > 0 && t.Metrics.ReducedAlertCount >= 0 && t.Metrics.ReducedAlertCount <= t.Metrics.RawAlertCount {
+			totalRawAlerts += t.Metrics.RawAlertCount
+			totalReducedAlerts += t.Metrics.ReducedAlertCount
+			alertMetricSamples++
+		}
+		savedHours += t.Metrics.SavedHours
+		costSpent += t.Metrics.CostUSD
+		if t.Metrics.MTTRMs > 0 {
+			totalMTTRMs += t.Metrics.MTTRMs
+			mttrSamples++
 		}
 
-		switch capKey {
-		case "observability-alert":
-			savedHours += 0.5
-		case "health-inspection":
-			savedHours += 2.0
-		case "diagnosis-incident":
-			savedHours += 1.5
-		case "governance-optimization":
-			savedHours += 3.0
-		case "capacity-performance-cost":
-			savedHours += 4.0
-		case "change-config-compliance":
-			savedHours += 2.5
-		default:
-			savedHours += 1.0
-		}
-
-		// Domain breakdown
-		domKey := t.DomainKey
-		if domKey == "" {
-			domKey = "hadoop"
-		}
+		domKey := employees.NormalizeDomainKey(t.DomainKey)
 		domainBreakdown[domKey]++
-		costSpent += parseTaskCostUSD(t.Artifacts)
 	}
 
 	autoCloseRate := 0.0
-	if taskCount > 0 {
-		autoCloseRate = float64(successCount) / float64(taskCount)
+	if completedCount > 0 {
+		autoCloseRate = float64(closedCount) / float64(completedCount)
 	}
 
 	adoptionRate := 0.0
@@ -363,23 +360,124 @@ func EmployeeEffectivenessGetHandler(opts HandlerOpts) error {
 		adoptionRate = float64(acceptedCount) / float64(ratedCount)
 	}
 
-	// 基于真实任务结果计算：观测告警任务中成功闭环占比。
 	noiseReductionRate := 0.0
-	if observableTaskCount > 0 {
-		noiseReductionRate = float64(observableSuccessCount) / float64(observableTaskCount)
+	if totalRawAlerts > 0 {
+		noiseReductionRate = float64(totalRawAlerts-totalReducedAlerts) / float64(totalRawAlerts)
+	}
+	avgMTTRMs := int64(0)
+	if mttrSamples > 0 {
+		avgMTTRMs = totalMTTRMs / int64(mttrSamples)
+	}
+	metricConfidence := "measured"
+	if alertMetricSamples == 0 && savedHours == 0 && costSpent == 0 && mttrSamples == 0 {
+		metricConfidence = "insufficient_data"
 	}
 
 	opts.Respond(true, map[string]interface{}{
 		"taskCount":          taskCount,
+		"completedTaskCount": completedCount,
+		"closedTaskCount":    closedCount,
 		"autoCloseRate":      autoCloseRate,
 		"adoptionRate":       adoptionRate,
 		"noiseReductionRate": noiseReductionRate,
+		"rawAlertCount":      totalRawAlerts,
+		"reducedAlertCount":  totalReducedAlerts,
+		"alertMetricSamples": alertMetricSamples,
 		"savedHours":         savedHours,
 		"costSpent":          costSpent,
+		"avgMttrMs":          avgMTTRMs,
+		"mttrSamples":        mttrSamples,
+		"metricConfidence":   metricConfidence,
 		"taskBreakdown":      taskBreakdown,
 		"domainBreakdown":    domainBreakdown,
 	}, nil, nil)
 	return nil
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+func emptyCapabilityBreakdown() map[string]int {
+	out := map[string]int{}
+	for _, key := range employees.CanonicalCapabilityKeys {
+		out[key] = 0
+	}
+	return out
+}
+
+func emptyDomainBreakdown() map[string]int {
+	out := map[string]int{}
+	for _, key := range employees.CanonicalDomainKeys {
+		out[key] = 0
+	}
+	return out
+}
+
+func taskMetricsFromParams(params map[string]interface{}, artifacts []string) employees.EmployeeTaskMetrics {
+	metrics := taskMetricsFromArtifacts(artifacts)
+	if rawMetrics, ok := params["metrics"].(map[string]interface{}); ok {
+		metrics = taskMetricsFromMap(rawMetrics, metrics)
+	}
+	return metrics
+}
+
+func taskMetricsFromMap(raw map[string]interface{}, base employees.EmployeeTaskMetrics) employees.EmployeeTaskMetrics {
+	if v, ok := raw["rawAlertCount"].(float64); ok && v >= 0 {
+		base.RawAlertCount = int(v)
+	}
+	if v, ok := raw["reducedAlertCount"].(float64); ok && v >= 0 {
+		base.ReducedAlertCount = int(v)
+	}
+	if v, ok := raw["savedHours"].(float64); ok && v >= 0 {
+		base.SavedHours = v
+	}
+	if v, ok := raw["costUsd"].(float64); ok && v >= 0 {
+		base.CostUSD = v
+	}
+	if v, ok := raw["costUSD"].(float64); ok && v >= 0 {
+		base.CostUSD = v
+	}
+	if v, ok := raw["mttaMs"].(float64); ok && v >= 0 {
+		base.MTTAMs = int64(v)
+	}
+	if v, ok := raw["mttrMs"].(float64); ok && v >= 0 {
+		base.MTTRMs = int64(v)
+	}
+	return base
+}
+
+func taskMetricsFromArtifacts(artifacts []string) employees.EmployeeTaskMetrics {
+	return employees.EmployeeTaskMetrics{
+		RawAlertCount:     int(parseTaskArtifactNumber(artifacts, "alerts_raw:", "raw_alerts:")),
+		ReducedAlertCount: int(parseTaskArtifactNumber(artifacts, "alerts_reduced:", "reduced_alerts:", "alerts_deduped:")),
+		SavedHours:        parseTaskArtifactNumber(artifacts, "saved_hours:", "savedHours:"),
+		CostUSD:           parseTaskCostUSD(artifacts),
+		MTTAMs:            int64(parseTaskArtifactNumber(artifacts, "mtta_ms:", "mttaMs:")),
+		MTTRMs:            int64(parseTaskArtifactNumber(artifacts, "mttr_ms:", "mttrMs:")),
+	}
+}
+
+func parseTaskArtifactNumber(artifacts []string, prefixes ...string) float64 {
+	for _, raw := range artifacts {
+		v := strings.TrimSpace(raw)
+		lower := strings.ToLower(v)
+		for _, prefix := range prefixes {
+			p := strings.ToLower(prefix)
+			if strings.HasPrefix(lower, p) {
+				num := strings.TrimSpace(v[len(prefix):])
+				if f, err := strconv.ParseFloat(num, 64); err == nil && f >= 0 {
+					return f
+				}
+			}
+		}
+	}
+	return 0
 }
 
 func parseTaskCostUSD(artifacts []string) float64 {

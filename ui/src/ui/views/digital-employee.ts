@@ -1,6 +1,7 @@
 import { html, nothing, type TemplateResult } from "lit";
 import { icons } from "../icons.js";
 import { t } from "../strings.js";
+import { opsCapabilityLabel, opsDomainLabel } from "../ops/taxonomy.ts";
 import type { McpServerEntry } from "./mcp.js";
 
 export type DigitalEmployee = {
@@ -1330,39 +1331,11 @@ function roleTypeLabel(roleType?: string) {
 }
 
 function domainLabel(value: string) {
-  switch (value) {
-    case "hadoop":
-      return "BCH";
-    case "fi":
-      return "FI";
-    case "gbase":
-      return "GBase";
-    case "governance":
-      return "开发治理";
-    case "dataapps":
-      return "数据 App";
-    default:
-      return value;
-  }
+  return opsDomainLabel(value);
 }
 
 function capabilityLabel(value: string) {
-  switch (value) {
-    case "observability":
-      return "可观测";
-    case "inspection":
-      return "巡检";
-    case "diagnosis":
-      return "诊断";
-    case "governance":
-      return "治理";
-    case "capacity":
-      return "容量";
-    case "change":
-      return "变更";
-    default:
-      return value;
-  }
+  return opsCapabilityLabel(value);
 }
 
 function renderSkillMcpHint(emp: DigitalEmployee) {

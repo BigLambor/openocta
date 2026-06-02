@@ -1,16 +1,9 @@
 /** Ops context selector: built from cluster API (P1-3) with stable entity IDs. */
 
 import type { OpsClusterRecord } from "../controllers/ops-clusters.ts";
+import { OPS_DOMAIN_KEYS, type OpsDomainKey } from "./taxonomy.ts";
 
-export type OpsDomainKey = "hadoop" | "fi" | "gbase" | "governance" | "dataapps";
-
-export const OPS_DOMAIN_KEYS: OpsDomainKey[] = [
-  "hadoop",
-  "fi",
-  "gbase",
-  "governance",
-  "dataapps",
-];
+export type { OpsDomainKey };
 
 export function isOpsDomainTab(tab: string): tab is OpsDomainKey {
   return (OPS_DOMAIN_KEYS as string[]).includes(tab);

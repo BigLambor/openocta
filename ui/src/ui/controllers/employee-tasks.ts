@@ -2,17 +2,29 @@ import type { AppViewState } from "../app-view-state.ts";
 
 export type EmployeeTask = {
   id: string;
+  sessionId?: string;
+  runId?: string;
   employeeId: string;
   domainKey: string;
   capabilityKey: string;
   scenarioKey: string;
   objectRef: string;
   triggerType: string;
+  executionStatus: string;
+  workflowStatus: string;
   status: string;
   input: string;
   output: string;
   conclusion: string;
   artifacts?: string[];
+  metrics?: {
+    rawAlertCount?: number;
+    reducedAlertCount?: number;
+    savedHours?: number;
+    costUsd?: number;
+    mttaMs?: number;
+    mttrMs?: number;
+  };
   startedAt: number;
   finishedAt: number;
   operator: string;
@@ -21,11 +33,19 @@ export type EmployeeTask = {
 
 export type EmployeeEffectiveness = {
   taskCount: number;
+  completedTaskCount?: number;
+  closedTaskCount?: number;
   autoCloseRate: number;
   adoptionRate: number;
   noiseReductionRate: number;
+  rawAlertCount?: number;
+  reducedAlertCount?: number;
+  alertMetricSamples?: number;
   savedHours: number;
   costSpent: number;
+  avgMttrMs?: number;
+  mttrSamples?: number;
+  metricConfidence?: "measured" | "insufficient_data" | string;
   taskBreakdown: Record<string, number>;
   domainBreakdown: Record<string, number>;
 };

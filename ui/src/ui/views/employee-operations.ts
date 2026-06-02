@@ -2,6 +2,8 @@ import { html, nothing } from "lit";
 import { icons } from "../icons.ts";
 import type { DigitalEmployee } from "./digital-employee.ts";
 import type { EmployeeTask, EmployeeEffectiveness } from "../controllers/employee-tasks.ts";
+import { nativeConfirm } from "../native-dialog-bridge.ts";
+import { opsCapabilityLabel, opsDomainLabel } from "../ops/taxonomy.ts";
 
 export type EmployeeOperationsProps = {
   employees: DigitalEmployee[];
@@ -27,23 +29,6 @@ export type EmployeeOperationsProps = {
   onRateTask: (id: string, evaluation: "accepted" | "rejected") => void;
   onDeleteTask: (id: string) => void;
   onOpenChat: (sessionKey: string) => void;
-};
-
-const CAPABILITY_LABELS: Record<string, string> = {
-  "observability-alert": "可观测与告警",
-  "health-inspection": "健康度与巡检",
-  "diagnosis-incident": "故障诊断与应急",
-  "governance-optimization": "治理与优化",
-  "capacity-performance-cost": "容量性能与成本",
-  "change-config-compliance": "变更配置与合规",
-};
-
-const DOMAIN_LABELS: Record<string, string> = {
-  "hadoop": "BCH生态",
-  "fi": "FI商业生态",
-  "gbase": "GBase数据库",
-  "governance": "开发治理平台",
-  "data-apps": "数据App运维",
 };
 
 export function renderEmployeeOperations(props: EmployeeOperationsProps) {
@@ -158,14 +143,17 @@ function renderTasksView(props: EmployeeOperationsProps) {
                   const emp = props.employees.find((e) => e.id === task.employeeId);
                   const empName = emp ? (emp.name || emp.id) : task.employeeId;
 
+                  const executionStatus = task.executionStatus || task.status;
                   let statusBadge = html`<span class="badge badge--blue">进行中</span>`;
-                  if (task.status === "success") {
+                  if (executionStatus === "succeeded" || executionStatus === "success") {
                     statusBadge = html`<span class="badge badge--green">成功</span>`;
-                  } else if (task.status === "failed") {
+                  } else if (executionStatus === "failed") {
                     statusBadge = html`<span class="badge badge--red">失败</span>`;
+                  } else if (executionStatus === "pending") {
+                    statusBadge = html`<span class="badge badge--muted">待执行</span>`;
                   }
 
-                  let evalBadge = html`<span class="badge badge--muted">待采纳</span>`;
+                  let evalBadge = html`<span class="badge badge--muted">${workflowLabel(task.workflowStatus)}</span>`;
                   if (task.evaluation === "accepted") {
                     evalBadge = html`<span class="badge badge--green" style="font-weight: 500;">已采纳</span>`;
                   } else if (task.evaluation === "rejected") {
@@ -183,10 +171,10 @@ function renderTasksView(props: EmployeeOperationsProps) {
                       </td>
                       <td style="padding: 12px 16px; font-weight: 500;">${empName}</td>
                       <td style="padding: 12px 16px;">
-                        <span class="badge badge--purple">${DOMAIN_LABELS[task.domainKey] || task.domainKey || "通用"}</span>
+                        <span class="badge badge--purple">${opsDomainLabel(task.domainKey) || "通用"}</span>
                       </td>
                       <td style="padding: 12px 16px;">
-                        <span class="badge badge--blue">${CAPABILITY_LABELS[task.capabilityKey] || task.capabilityKey || "其它"}</span>
+                        <span class="badge badge--blue">${opsCapabilityLabel(task.capabilityKey) || "其它"}</span>
                       </td>
                       <td style="padding: 12px 16px; color: var(--text-muted); font-size: 12px;">
                         ${task.objectRef || "-"}
@@ -198,11 +186,11 @@ function renderTasksView(props: EmployeeOperationsProps) {
                           <button class="btn btn--sm" type="button" @click=${() => props.onSetActiveTask(task)}>
                             详情
                           </button>
-                          <button class="btn btn--sm" type="button" @click=${() => props.onOpenChat(`agent:main:employee:${task.employeeId}:run:${task.id}`)}>
+                          <button class="btn btn--sm" type="button" @click=${() => props.onOpenChat(taskSessionKey(task))}>
                             会话
                           </button>
-                          <button class="btn btn--sm btn--danger" type="button" @click=${() => {
-                            if (confirm("确定要删除这条任务记录吗？")) {
+                          <button class="btn btn--sm btn--danger" type="button" @click=${async () => {
+                            if (await nativeConfirm("确定要删除这条任务记录吗？")) {
                               props.onDeleteTask(task.id);
                             }
                           }}>
@@ -235,6 +223,11 @@ function renderEffectivenessView(props: EmployeeOperationsProps) {
   }
 
   return html`
+    ${eff.metricConfidence === "insufficient_data"
+      ? html`<div class="callout" style="margin-top: 16px;">
+          当前效能仅统计任务闭环和采纳反馈；告警降噪、人时、成本、MTTR 需要任务写入 metrics 后才展示真实值。
+        </div>`
+      : nothing}
     <!-- 指标卡片 -->
     <section class="stats-grid" style="margin-top: 16px;">
       <article class="stat-card">
@@ -248,7 +241,7 @@ function renderEffectivenessView(props: EmployeeOperationsProps) {
       <article class="stat-card">
         <div class="stat-icon stat-icon--ok">${icons.overviewGrid}</div>
         <div class="stat-content">
-          <h3>自主闭环率</h3>
+          <h3>任务闭环率</h3>
           <div class="stat-value">${(eff.autoCloseRate * 100).toFixed(1)}</div>
           <div class="stat-sub">%</div>
         </div>
@@ -299,7 +292,7 @@ function renderEffectivenessView(props: EmployeeOperationsProps) {
             return html`
               <div>
                 <div class="row" style="justify-content: space-between; font-size: 13px; margin-bottom: 4px;">
-                  <span>${CAPABILITY_LABELS[key] || key}</span>
+                  <span>${opsCapabilityLabel(key)}</span>
                   <span class="muted">${val} 次 (${pct.toFixed(0)}%)</span>
                 </div>
                 <div style="background: rgba(0,0,0,0.06); height: 8px; border-radius: 4px; overflow: hidden;">
@@ -320,7 +313,7 @@ function renderEffectivenessView(props: EmployeeOperationsProps) {
             return html`
               <div>
                 <div class="row" style="justify-content: space-between; font-size: 13px; margin-bottom: 4px;">
-                  <span>${DOMAIN_LABELS[key] || key}</span>
+                  <span>${opsDomainLabel(key)}</span>
                   <span class="muted">${val} 次 (${pct.toFixed(0)}%)</span>
                 </div>
                 <div style="background: rgba(0,0,0,0.06); height: 8px; border-radius: 4px; overflow: hidden;">
@@ -339,6 +332,7 @@ function renderEffectivenessView(props: EmployeeOperationsProps) {
 function renderTaskDetailsModal(task: EmployeeTask, props: EmployeeOperationsProps) {
   const emp = props.employees.find((e) => e.id === task.employeeId);
   const empName = emp ? (emp.name || emp.id) : task.employeeId;
+  const executionStatus = task.executionStatus || task.status;
 
   return html`
     <div class="modal-overlay" @click=${() => props.onSetActiveTask(null)}>
@@ -363,11 +357,11 @@ function renderTaskDetailsModal(task: EmployeeTask, props: EmployeeOperationsPro
             </div>
             <div>
               <span class="muted" style="font-size: 11px; display: block;">运维技术域</span>
-              <span class="badge badge--purple" style="margin-top: 2px;">${DOMAIN_LABELS[task.domainKey] || task.domainKey || "通用"}</span>
+              <span class="badge badge--purple" style="margin-top: 2px;">${opsDomainLabel(task.domainKey) || "通用"}</span>
             </div>
             <div>
               <span class="muted" style="font-size: 11px; display: block;">服务能力域</span>
-              <span class="badge badge--blue" style="margin-top: 2px;">${CAPABILITY_LABELS[task.capabilityKey] || task.capabilityKey || "其它"}</span>
+              <span class="badge badge--blue" style="margin-top: 2px;">${opsCapabilityLabel(task.capabilityKey) || "其它"}</span>
             </div>
             <div>
               <span class="muted" style="font-size: 11px; display: block;">关联对象引用</span>
@@ -380,7 +374,8 @@ function renderTaskDetailsModal(task: EmployeeTask, props: EmployeeOperationsPro
             <div>
               <span class="muted" style="font-size: 11px; display: block;">状态 / 开始时间</span>
               <span style="font-size: 12px;">
-                ${task.status === "success" ? "成功" : "失败"} (${new Date(task.startedAt).toLocaleTimeString("zh-CN", { hour12: false })})
+                ${executionStatusLabel(executionStatus)} / ${workflowLabel(task.workflowStatus)}
+                (${new Date(task.startedAt).toLocaleTimeString("zh-CN", { hour12: false })})
               </span>
             </div>
           </div>
@@ -426,7 +421,7 @@ function renderTaskDetailsModal(task: EmployeeTask, props: EmployeeOperationsPro
               返回
             </button>
             <button class="btn primary" type="button" @click=${() => {
-              props.onOpenChat(`agent:main:employee:${task.employeeId}:run:${task.id}`);
+              props.onOpenChat(taskSessionKey(task));
               props.onSetActiveTask(null);
             }}>
               进入会话追问
@@ -437,4 +432,39 @@ function renderTaskDetailsModal(task: EmployeeTask, props: EmployeeOperationsPro
       </div>
     </div>
   `;
+}
+
+function executionStatusLabel(status?: string) {
+  switch (status) {
+    case "succeeded":
+    case "success":
+      return "执行成功";
+    case "failed":
+      return "执行失败";
+    case "running":
+      return "执行中";
+    case "pending":
+      return "待执行";
+    default:
+      return status || "未知";
+  }
+}
+
+function workflowLabel(status?: string) {
+  switch (status) {
+    case "closed":
+      return "已闭环";
+    case "rejected":
+      return "已驳回";
+    case "waiting_approval":
+      return "待确认";
+    case "open":
+      return "处理中";
+    default:
+      return status || "待确认";
+  }
+}
+
+function taskSessionKey(task: EmployeeTask) {
+  return `agent:main:employee:${task.employeeId}:run:${task.sessionId || task.id}`;
 }
