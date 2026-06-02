@@ -501,7 +501,7 @@ function renderUsageMosaic(
             ${stats.weekdayTotals.map((part) => {
               const intensity = Math.min(part.tokens / maxWeekday, 1);
               const bg =
-                part.tokens > 0 ? `rgba(36, 186, 81, ${0.12 + intensity * 0.6})` : "transparent";
+                part.tokens > 0 ? `rgba(var(--accent-rgb), ${0.12 + intensity * 0.6})` : "transparent";
               return html`
                 <div class="usage-daypart-cell" style="background: ${bg};">
                   <div class="usage-daypart-label">${part.label}</div>
@@ -519,9 +519,9 @@ function renderUsageMosaic(
           <div class="usage-hour-grid">
             ${stats.hourTotals.map((value, hour) => {
               const intensity = Math.min(value / maxHour, 1);
-              const bg = value > 0 ? `rgba(36, 186, 81, ${0.08 + intensity * 0.7})` : "transparent";
+              const bg = value > 0 ? `rgba(var(--accent-rgb), ${0.08 + intensity * 0.7})` : "transparent";
               const title = `${hour}:00 · ${formatTokens(value)} ${t("usageTokensUnit")}`;
-              const border = intensity > 0.7 ? "rgba(36, 186, 81, 0.6)" : "rgba(36, 186, 81, 0.2)";
+              const border = intensity > 0.7 ? "rgba(var(--accent-rgb), 0.6)" : "rgba(var(--accent-rgb), 0.2)";
               const selected = selectedHours.includes(hour);
               return html`
                 <div

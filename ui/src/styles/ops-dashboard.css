@@ -40,6 +40,13 @@
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: var(--ops-radius-md, 10px);
+  transition: transform var(--duration-normal) var(--ease-out), box-shadow var(--duration-normal) var(--ease-out), border-color var(--duration-normal) var(--ease-out);
+}
+
+.ops-dashboard .stat-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--accent);
+  box-shadow: var(--shadow-md);
 }
 
 .ops-dashboard .stat-icon {
@@ -154,6 +161,18 @@
   border-radius: var(--ops-radius-md, 10px);
   background: var(--bg);
   min-width: 0;
+  transition: transform var(--duration-normal) var(--ease-out), box-shadow var(--duration-normal) var(--ease-out), border-color var(--duration-normal) var(--ease-out);
+}
+
+.ops-dashboard .domain-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--accent);
+  box-shadow: 0 8px 24px rgba(var(--accent-rgb), 0.08);
+}
+
+.ops-dashboard .domain-card--muted:hover {
+  border-color: var(--border-primary);
+  box-shadow: var(--shadow-sm);
 }
 
 .ops-dashboard .domain-card-header {

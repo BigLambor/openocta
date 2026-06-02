@@ -291,7 +291,7 @@
 
 .content--catalog .emp-card-wrap:hover {
   border-color: var(--accent);
-  box-shadow: 0px 2px 10px 10px rgba(36, 186, 81, 0.04);
+  box-shadow: 0px 2px 10px 10px rgba(var(--accent-rgb), 0.04);
   .emp-card__actions {
     display: flex;
     top: 20px;

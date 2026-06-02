@@ -474,8 +474,8 @@ details.usage-filter-select summary::-webkit-details-marker {
   border-radius: 8px;
   padding: 10px;
   color: var(--text-regular);
-  background: rgba(36, 186, 81, 0.08);
-  border: 1px solid rgba(36, 186, 81, 0.2);
+  background: rgba(var(--accent-rgb), 0.08);
+  border: 1px solid rgba(var(--accent-rgb), 0.2);
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -495,14 +495,14 @@ details.usage-filter-select summary::-webkit-details-marker {
 .usage-hour-cell {
   height: 28px;
   border-radius: 6px;
-  background: rgba(36, 186, 81, 0.1);
-  border: 1px solid rgba(36, 186, 81, 0.2);
+  background: rgba(var(--accent-rgb), 0.1);
+  border: 1px solid rgba(var(--accent-rgb), 0.2);
   cursor: pointer;
   transition: border-color 0.15s, box-shadow 0.15s;
 }
 .usage-hour-cell.selected {
-  border-color: rgba(36, 186, 81, 0.8);
-  box-shadow: 0 0 0 2px rgba(36, 186, 81, 0.2);
+  border-color: rgba(var(--accent-rgb), 0.8);
+  box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.2);
 }
 .usage-hour-labels {
   display: grid;
@@ -525,8 +525,8 @@ details.usage-filter-select summary::-webkit-details-marker {
   width: 14px;
   height: 10px;
   border-radius: 4px;
-  background: rgba(36, 186, 81, 0.15);
-  border: 1px solid rgba(36, 186, 81, 0.2);
+  background: rgba(var(--accent-rgb), 0.15);
+  border: 1px solid rgba(var(--accent-rgb), 0.2);
 }
 .usage-calendar-labels {
   display: grid;
@@ -544,8 +544,8 @@ details.usage-filter-select summary::-webkit-details-marker {
 .usage-calendar-cell {
   height: 18px;
   border-radius: 4px;
-  border: 1px solid rgba(36, 186, 81, 0.2);
-  background: rgba(36, 186, 81, 0.08);
+  border: 1px solid rgba(var(--accent-rgb), 0.2);
+  background: rgba(var(--accent-rgb), 0.08);
 }
 .usage-calendar-cell.empty {
   background: transparent;
@@ -997,7 +997,7 @@ details.usage-filter-select summary::-webkit-details-marker {
 }
 .session-bar-fill {
   height: 100%;
-  background: rgba(36, 186, 81, 0.7);
+  background: rgba(var(--accent-rgb), 0.7);
   border-radius: 4px;
   transition: width 0.3s ease;
 }
@@ -1453,7 +1453,7 @@ details.usage-filter-select summary::-webkit-details-marker {
 .sessions-card .session-bar-row.selected {
   border-color: var(--accent);
   background: var(--accent-subtle);
-  box-shadow: inset 0 0 0 1px rgba(36, 186, 81, 0.15);
+  box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.15);
 }
 .sessions-card .session-bar-label {
   flex: 1 1 auto;
@@ -1471,7 +1471,7 @@ details.usage-filter-select summary::-webkit-details-marker {
   opacity: 0.5;
 }
 .sessions-card .session-bar-fill {
-  background: rgba(36, 186, 81, 0.55);
+  background: rgba(var(--accent-rgb), 0.55);
 }
 .sessions-clear-btn {
   margin-left: auto;

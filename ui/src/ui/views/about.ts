@@ -25,7 +25,7 @@ export function renderAbout(props: AboutViewProps) {
     <div class="card">
       <div class="card-title">邮箱</div>
       <div class="card-sub">ApexOps官方邮箱</div>
-      <a href="mailto:sales@databuff.com" style="display:inline-flex;margin-top:20px;">sales@databuff.com</a>
+      <a href="mailto:sales@aspirecn.com" style="display:inline-flex;margin-top:20px;">sales@aspirecn.com</a>
     </div>
 
     <div class="card">
@@ -42,7 +42,7 @@ export function renderAbout(props: AboutViewProps) {
         <li>不能替换和修改 ApexOps 的 Logo 和版权信息；</li>
         <li>二次开发后的衍生作品必须遵守 GPLv3 的开源义务。</li>
       </ul>
-      <p>如需商业授权，请联系：<strong>sales@databuff.com</strong>。</p>
+      <p>如需商业授权，请联系：<strong>sales@aspirecn.com</strong>。</p>
     </div>
 
     <div class="card">

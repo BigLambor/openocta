@@ -295,26 +295,6 @@ export function renderTutorials(props: TutorialsProps) {
         </div>
       </div>
 
-      <aside class="tutorials-outcomes">
-        <h3 class="tutorials-outcomes__title">看看Ta们的学习成果</h3>
-        <div class="tutorials-outcomes__list">
-          ${outcomes.map(
-            (item) => html`
-              <div class="tutorials-outcomes__card">
-                <div class="tutorials-outcomes__card-header">
-                  <span class="tutorials-outcomes__avatar"><img src=${item.avatar} alt=${item.name} /></span>
-                  <div class="tutorials-outcomes__card-info">
-                    <span class="tutorials-outcomes__role">${item.role}</span>
-                    <span class="tutorials-outcomes__name">${item.name}</span>
-                  </div>
-                </div>
-                <p class="tutorials-outcomes__desc">${item.desc}</p>
-              </div>
-            `,
-          )}
-        </div>
-      </aside>
-
       ${props.playingLink
         ? html`
             <div class="modal-overlay" @click=${props.onPlayingClose} role="dialog" aria-modal="true" aria-labelledby="tutorial-detail-title">

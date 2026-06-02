@@ -109,7 +109,6 @@ export function renderAssetManagement(props: AssetManagementProps = {}) {
               <summary style="cursor: pointer; font-size: 14px; font-weight: 600;">新增纳管集群</summary>
               <form
                 class="asset-form"
-                style="margin-top: 16px; display: grid; gap: 12px; max-width: 560px;"
                 @submit=${async (e: Event) => {
                   e.preventDefault();
                   const form = e.target as HTMLFormElement;
@@ -139,11 +138,13 @@ export function renderAssetManagement(props: AssetManagementProps = {}) {
                 </label>
                 <label class="asset-form__field">
                   <span>业务域</span>
-                  <select name="domain" class="asset-form__input">
-                    ${DOMAIN_OPTIONS.map(
-                      (o) => html`<option value=${o.value}>${o.label}</option>`,
-                    )}
-                  </select>
+                  <span class="select">
+                    <select name="domain">
+                      ${DOMAIN_OPTIONS.map(
+                        (o) => html`<option value=${o.value}>${o.label}</option>`,
+                      )}
+                    </select>
+                  </span>
                 </label>
                 <label class="asset-form__field">
                   <span>区域</span>
@@ -153,7 +154,7 @@ export function renderAssetManagement(props: AssetManagementProps = {}) {
                   <span>节点规模</span>
                   <input name="nodeCount" type="number" min="0" value="0" class="asset-form__input" />
                 </label>
-                <label class="asset-form__field">
+                <label class="asset-form__field span-2">
                   <span>核心组件（逗号分隔）</span>
                   <input name="components" class="asset-form__input" placeholder="HDFS, YARN, HIVE" />
                 </label>
@@ -163,45 +164,49 @@ export function renderAssetManagement(props: AssetManagementProps = {}) {
                 </label>
                 <label class="asset-form__field">
                   <span>纳管状态</span>
-                  <select name="status" class="asset-form__input">
-                    <option value="healthy">健康</option>
-                    <option value="warning">亚健康</option>
-                    <option value="critical">异常</option>
-                    <option value="unknown">未知</option>
-                    <option value="inactive">已下线</option>
-                  </select>
+                  <span class="select">
+                    <select name="status">
+                      <option value="healthy">健康</option>
+                      <option value="warning">亚健康</option>
+                      <option value="critical">异常</option>
+                      <option value="unknown">未知</option>
+                      <option value="inactive">已下线</option>
+                    </select>
+                  </span>
                 </label>
-                <label class="asset-form__field">
+                <label class="asset-form__field span-2">
                   <span>监控标签 (JSON)</span>
                   <input name="monitorLabels" class="asset-form__input" placeholder='{"env":"prod","cluster":"bch"}' />
                 </label>
-                <label class="asset-form__field">
+                <label class="asset-form__field span-2">
                   <span>VictoriaMetrics/Prometheus 引用 URL</span>
                   <input name="vmUrlRef" class="asset-form__input" placeholder="例如：http://victoria-metrics:8428" />
                 </label>
-                <label class="asset-form__field">
+                <label class="asset-form__field span-2">
                   <span>指标 Base URL</span>
                   <input name="metricsBaseUrl" class="asset-form__input" placeholder="例如：http://prometheus:9090" />
                 </label>
-                <label class="asset-form__field">
+                <label class="asset-form__field span-2">
                   <span>JMX URL</span>
                   <input name="jmxUrl" class="asset-form__input" placeholder="例如：http://hadoop-namenode:8088" />
                 </label>
-                <label class="asset-form__field">
+                <label class="asset-form__field span-2">
                   <span>FI Manager URL</span>
                   <input name="fiManagerUrl" class="asset-form__input" placeholder="例如：http://fi-manager:8080" />
                 </label>
-                <label class="asset-form__field">
+                <label class="asset-form__field span-2">
                   <span>GBase DSN 引用</span>
                   <input name="gbaseDsnRef" class="asset-form__input" placeholder="例如：gbase_dsn_production" />
                 </label>
-                <label class="asset-form__field">
+                <label class="asset-form__field span-2">
                   <span>敏感凭证引用</span>
                   <input name="credentialsRef" class="asset-form__input" placeholder="例如：secret_credentials" />
                 </label>
-                <button type="submit" class="ops-btn ops-btn--primary" style="width: fit-content;">
-                  保存集群
-                </button>
+                <div class="asset-form__field span-2" style="margin-top: 8px;">
+                  <button type="submit" class="ops-btn ops-btn--primary" style="width: fit-content;">
+                    保存集群
+                  </button>
+                </div>
               </form>
             </details>
           `
@@ -261,6 +266,21 @@ export function renderAssetManagement(props: AssetManagementProps = {}) {
             `}
     </div>
     <style>
+      .asset-form {
+        margin-top: 16px;
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 16px;
+        max-width: 800px;
+      }
+      @media (min-width: 640px) {
+        .asset-form {
+          grid-template-columns: repeat(2, 1fr);
+        }
+        .asset-form__field.span-2 {
+          grid-column: span 2;
+        }
+      }
       .asset-form__field {
         display: flex;
         flex-direction: column;
@@ -290,7 +310,14 @@ export function renderAssetManagement(props: AssetManagementProps = {}) {
       .asset-table th {
         font-weight: 500;
         color: var(--text-secondary);
-        background: rgba(0, 0, 0, 0.15);
+        background: var(--bg-content);
+        border-bottom: 2px solid var(--border);
+      }
+      .asset-table tr {
+        transition: background var(--duration-fast) ease;
+      }
+      .asset-table tr:hover {
+        background: var(--bg-content);
       }
       .asset-table tr:last-child td {
         border-bottom: none;

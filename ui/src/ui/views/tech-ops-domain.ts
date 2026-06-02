@@ -89,9 +89,9 @@ export function renderTechOpsDomain(props: TechOpsDomainProps) {
         <!-- 侧边栏：场景列表 -->
         <div class="ops-sidebar">
           <div class="ops-sidebar__header">
-            <div class="ops-sidebar__domain-title">
-              <span style="color: var(--accent);">${icons[props.domainKey === "hadoop" ? "network" : props.domainKey === "fi" ? "building" : props.domainKey === "gbase" ? "database" : props.domainKey === "governance" ? "layout" : "folder"]}</span>
-              ${props.domainName}
+            <div class="ops-sidebar__domain-card ops-sidebar__domain-title">
+              <span class="ops-sidebar__domain-icon">${icons[props.domainKey === "hadoop" ? "network" : props.domainKey === "fi" ? "building" : props.domainKey === "gbase" ? "database" : props.domainKey === "governance" ? "layout" : "folder"]}</span>
+              <span class="ops-sidebar__domain-name">${props.domainName}</span>
             </div>
           </div>
           <div class="ops-sidebar__menu">
@@ -121,7 +121,8 @@ export function renderTechOpsDomain(props: TechOpsDomainProps) {
         <div class="ops-main-content">
           <div class="ops-main-header">
             <div class="ops-main-header__left">
-              <span class="ops-main-header__label">当前运维实体上下文</span>
+              <span class="ops-main-header__breadcrumb-domain">${props.domainName}</span>
+              <span class="ops-main-header__breadcrumb-separator">/</span>
               <div class="ops-entity-selector">
                 <button
                   type="button"

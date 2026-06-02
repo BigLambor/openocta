@@ -1838,6 +1838,19 @@
   gap: 16px;
 }
 
+.rbac-layout-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 24px;
+  align-items: start;
+}
+
+@media (min-width: 1024px) {
+  .rbac-layout-grid {
+    grid-template-columns: 3fr 2fr;
+  }
+}
+
 .env-vars__toolbar {
   display: flex;
   gap: 8px;

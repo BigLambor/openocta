@@ -668,10 +668,6 @@
   align-items: center;
 }
 
-:root[data-theme="light"] .btn.primary {
-  background: #24BA51;
-}
-
 :root[data-theme="light"] .btn-kbd {
   background: rgba(0, 0, 0, 0.08);
 }

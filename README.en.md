@@ -154,4 +154,4 @@ You may create derivative works from OpenOcta’s source, provided you:
 - Do **not** replace or alter the OpenOcta logo or copyright notices.
 - Keep derivative works compliant with GPLv3 obligations.
 
-For commercial licensing, contact: **sales@databuff.com**.
+For commercial licensing, contact: **sales@aspirecn.com**.

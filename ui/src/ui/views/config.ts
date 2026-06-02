@@ -803,15 +803,15 @@ function renderRbacManagement(props: ConfigProps) {
   };
 
   return html`
-    <div class="env-vars" style="display: flex; flex-direction: column; gap: 24px;">
+    <div class="rbac-layout-grid">
       <section class="env-vars__section card">
         <h3 class="card-title" style="margin-bottom: 8px;">用户与权限管理</h3>
         <p class="muted" style="font-size: 12px; margin-bottom: 16px;">
-          在此管理 OpenOcta 系统的登录用户及其对应的角色权限。默认管理员账号 admin 无法删除。
+          在此管理 ApexOps 系统的登录用户及其对应的角色权限。默认管理员账号 admin 无法删除。
         </p>
 
         ${loading
-          ? html`<div style="text-align: center; padding: 20px; color: var(--color-text-muted);">正在加载用户列表...</div>`
+          ? html`<div style="text-align: center; padding: 20px; color: var(--text-secondary);">正在加载用户列表...</div>`
           : html`
               <table class="env-vars__table">
                 <thead>
@@ -828,9 +828,9 @@ function renderRbacManagement(props: ConfigProps) {
                     (u: any) => html`
                       <tr>
                         <td style="padding: 12px 8px;">${u.id}</td>
-                        <td style="font-weight: 500; color: var(--color-text-accent); padding: 12px 8px;">${u.username}</td>
+                        <td style="font-weight: 500; color: var(--accent); padding: 12px 8px;">${u.username}</td>
                         <td style="padding: 12px 8px;">
-                          <span class="pill pill--sm" style="background: rgba(255,255,255,0.05); color: #fff;">
+                          <span class="pill pill--sm" style="background: var(--accent-subtle); color: var(--accent); border: 1px solid rgba(var(--accent-rgb), 0.2); font-weight: 500;">
                             ${u.roleName}
                           </span>
                         </td>
@@ -841,7 +841,7 @@ function renderRbacManagement(props: ConfigProps) {
                             : html`
                                 <button
                                   class="btn small btn--ghost"
-                                  style="color: var(--color-danger); padding: 2px 6px;"
+                                  style="color: var(--danger); padding: 2px 6px;"
                                   @click=${() => {
                                     if (confirm(`确认删除用户 ${u.username} 吗？`)) {
                                       props.onDeleteUser?.(u.id);
@@ -860,7 +860,7 @@ function renderRbacManagement(props: ConfigProps) {
             `}
       </section>
 
-      <section class="env-vars__section card" style="max-width: 500px;">
+      <section class="env-vars__section card">
         <h3 class="card-title" style="margin-bottom: 12px;">新增系统用户</h3>
         <form @submit=${handleSubmit} style="display: flex; flex-direction: column; gap: 16px;">
           <label class="field">
@@ -879,9 +879,9 @@ function renderRbacManagement(props: ConfigProps) {
 
           <label class="field">
             <span style="font-size: 13px; font-weight: 500; margin-bottom: 6px;">角色</span>
-            <span class="input" style="background: var(--color-bg-content); border-radius: 4px; border: 1px solid var(--color-border);">
-              <select id="rbac-role" style="background: transparent; border: none; color: #fff; width: 100%; height: 36px; padding: 0 8px; outline: none; cursor: pointer;">
-                ${roles.map((r: any) => html`<option value=${r.id} style="background: var(--color-bg-sidebar); color: #fff;">${r.description || r.name}</option>`)}
+            <span class="select">
+              <select id="rbac-role">
+                ${roles.map((r: any) => html`<option value=${r.id}>${r.description || r.name}</option>`)}
               </select>
             </span>
           </label>
