@@ -496,6 +496,16 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("PATCH /api/ops/alerts/groups/{id}", s.requireRbacOrGatewayToken("ops:ack", s.handleOpsPatchAlertGroup))
 	s.mux.HandleFunc("GET /api/ops/inspection/im-status", s.requireRbacOrGatewayToken("", s.handleOpsInspectionIMStatus))
 
+	// Ops: BCH Big Data Ecosystem Scenarios
+	s.mux.HandleFunc("GET /api/ops/bch/clusters/health", s.requireRbacOrGatewayToken("", s.handleBchClustersHealth))
+	s.mux.HandleFunc("GET /api/ops/bch/flink/jobs", s.requireRbacOrGatewayToken("", s.handleBchListFlinkJobs))
+	s.mux.HandleFunc("GET /api/ops/bch/flink/jobs/{id}/config", s.requireRbacOrGatewayToken("", s.handleBchGetFlinkJobConfig))
+	s.mux.HandleFunc("POST /api/ops/bch/flink/jobs/{id}/diagnose", s.requireRbacOrGatewayToken("", s.handleBchDiagnoseFlinkJob))
+	s.mux.HandleFunc("GET /api/ops/bch/spark/jobs", s.requireRbacOrGatewayToken("", s.handleBchListSparkJobs))
+	s.mux.HandleFunc("POST /api/ops/bch/spark/jobs/{id}/tune", s.requireRbacOrGatewayToken("", s.handleBchTuneSparkJob))
+	s.mux.HandleFunc("GET /api/ops/bch/hdfs/fsimage", s.requireRbacOrGatewayToken("", s.handleBchGetHdfsFsImage))
+	s.mux.HandleFunc("GET /api/ops/bch/employees", s.requireRbacOrGatewayToken("", s.handleBchListEmployees))
+
 	s.mux.HandleFunc("GET /health", s.requireRbacOrGatewayToken("", s.handleHealth))
 	s.mux.HandleFunc("GET /api/health", s.requireRbacOrGatewayToken("", s.handleHealth))
 	s.mux.HandleFunc("POST /api/skills/upload", s.requireRbacOrGatewayToken("menu:config", s.handleSkillsUpload))

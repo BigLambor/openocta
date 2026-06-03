@@ -3384,6 +3384,11 @@ export function renderApp(state: AppViewState) {
                   selectedEntityId,
                   domainClusters,
                 );
+                const clientHost = {
+                  gatewayHttpUrl: state.settings?.gatewayUrl ?? "",
+                  rbacToken: state.rbacUser?.token ?? null,
+                  settings: { token: state.settings?.token ?? "" },
+                };
                 const domainChatProps = {
                   ...chatProps,
                   contextBanner: opsContextLine,
@@ -3393,6 +3398,7 @@ export function renderApp(state: AppViewState) {
                   domainKey: opsDomain,
                   domainName: titleForTab(state.tab),
                   activeSubTab,
+                  host: clientHost,
                   onSubTabChange: (nextTab) => {
                     state.opsActiveSubTabs = {
                       ...state.opsActiveSubTabs,

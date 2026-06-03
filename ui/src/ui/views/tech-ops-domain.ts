@@ -1,6 +1,10 @@
 import { html, nothing } from "lit";
 import { unsafeHTML } from "lit/directives/unsafe-html.js";
 import { icons } from "../icons.ts";
+import "./ops/bch-cluster-overview.ts";
+import "./ops/bch-job-governance.ts";
+import "./ops/bch-fsimage-dashboard.ts";
+import "./ops/bch-employee-workstation.ts";
 import { renderOpsEmpty, renderOpsError } from "../components/ops-status.ts";
 import { toSanitizedMarkdownHtml } from "../markdown.ts";
 import {
@@ -72,9 +76,9 @@ export type TechOpsDomainProps = {
     hint?: string;
   } | null;
   onOpenChannels?: () => void;
-  canInspect?: boolean;
   canAckAlerts?: boolean;
   onAckAlert?: (groupId: string) => void;
+  host?: any;
 };
 
 type CapabilityNavItem = {
@@ -233,6 +237,14 @@ export function renderTechOpsDomain(props: TechOpsDomainProps) {
             ? renderAlertsSubTab(props)
             : props.activeSubTab === "inspection"
             ? renderInspectionsSubTab(props)
+            : props.domainKey === "hadoop" && props.activeSubTab === "overview"
+            ? html`<bch-cluster-overview .host=${props.host}></bch-cluster-overview>`
+            : props.domainKey === "hadoop" && props.activeSubTab === "jobGovernance"
+            ? html`<bch-job-governance .host=${props.host}></bch-job-governance>`
+            : props.domainKey === "hadoop" && props.activeSubTab === "capacity"
+            ? html`<bch-fsimage-dashboard .host=${props.host}></bch-fsimage-dashboard>`
+            : props.domainKey === "hadoop" && props.activeSubTab === "employees"
+            ? html`<bch-employee-workstation .host=${props.host}></bch-employee-workstation>`
             : renderCapabilityPlaceholder(props)}
           </div>
         </div>
