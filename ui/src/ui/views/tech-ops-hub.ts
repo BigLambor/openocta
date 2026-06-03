@@ -181,14 +181,18 @@ export function renderTechOpsHub(props: TechOpsHubProps) {
             @click=${() => props.onRunGlobalInspection?.()}
             title=${props.canInspect === false ? "当前账号无 ops:inspect 权限" : ""}
           >
-            ${props.globalInspecting ? icons.loader : icons.historyClock}
-            ${props.globalInspecting ? "全域巡检中..." : "一键全域巡检"}
+            <span class="ops-dashboard-actions__icon" aria-hidden="true">
+              ${props.globalInspecting ? icons.loader : icons.historyClock}
+            </span>
+            <span>${props.globalInspecting ? "全域巡检中..." : "一键全域巡检"}</span>
           </button>
           <button class="ops-dashboard-actions__btn" type="button" @click=${() => props.onOpenPendingAlerts?.()}>
-            ${icons.bell} 查看待处理告警
+            <span class="ops-dashboard-actions__icon" aria-hidden="true">${icons.bell}</span>
+            <span>查看待处理告警</span>
           </button>
           <button class="ops-dashboard-actions__btn" type="button" @click=${() => props.onOpenAssets?.()}>
-            ${icons.server} 管理集群资产
+            <span class="ops-dashboard-actions__icon" aria-hidden="true">${icons.server}</span>
+            <span>管理集群资产</span>
           </button>
         </div>
       </section>

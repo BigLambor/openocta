@@ -265,21 +265,84 @@
 }
 
 .ops-dashboard-actions__inner {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+}
+
+.ops-dashboard-header .ops-dashboard-actions__inner {
+  margin-top: 16px;
+}
+
+.ops-dashboard-actions .ops-dashboard-actions__inner {
   padding: 16px 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--ops-radius-md, 10px);
   background: var(--bg);
 }
 
-.ops-dashboard-actions__btn {
+/* Card-style quick actions (tech ops hub, employee center header, etc.) */
+.ops-dashboard-actions__btn:not(.ops-btn) {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 108px;
+  padding: 18px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--ops-radius-md, 10px);
+  background: var(--bg);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.35;
+  text-align: center;
+  cursor: pointer;
+  transition:
+    transform var(--duration-normal) var(--ease-out),
+    box-shadow var(--duration-normal) var(--ease-out),
+    border-color var(--duration-normal) var(--ease-out);
+}
+
+.ops-dashboard-actions__btn:not(.ops-btn):hover:not(:disabled) {
+  transform: translateY(-2px);
+  border-color: var(--accent);
+  box-shadow: 0 8px 24px rgba(var(--accent-rgb), 0.08);
+}
+
+.ops-dashboard-actions__btn:not(.ops-btn):disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.ops-dashboard-actions__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  background: var(--accent-subtle, rgba(59, 130, 246, 0.1));
+  color: var(--accent, #3b82f6);
+  flex-shrink: 0;
+}
+
+.ops-dashboard-actions__icon svg {
+  display: block;
+  width: 20px;
+  height: 20px;
+}
+
+/* Toolbar-style actions paired with ops-btn (overview dashboard) */
+.ops-dashboard-actions__btn.ops-btn {
   width: auto;
   flex: 1 1 200px;
   justify-content: center;
 }
 
 @media (min-width: 900px) {
-  .ops-dashboard-actions__btn {
+  .ops-dashboard-actions__btn.ops-btn {
     flex: 0 1 auto;
     min-width: 160px;
   }

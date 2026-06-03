@@ -47,7 +47,8 @@ export function renderEmployeeOperations(props: EmployeeOperationsProps) {
         </div>
         <div class="ops-dashboard-actions__inner">
           <button class="ops-dashboard-actions__btn" type="button" @click=${props.onOpenEmployees}>
-            ${icons.users} 我的员工
+            <span class="ops-dashboard-actions__icon" aria-hidden="true">${icons.users}</span>
+            <span>我的员工</span>
           </button>
         </div>
       </div>

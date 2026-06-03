@@ -1,0 +1,769 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flink Doctor - AI AIOps Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; background-color: #fafaf9; color: #1c1917; }
+        
+        .chart-container {
+            position: relative;
+            width: 100%;
+            max-width: 100%;
+            margin-left: auto;
+            margin-right: auto;
+            height: 280px;
+            max-height: 350px;
+        }
+
+        .radar-container {
+            position: relative;
+            width: 100%;
+            max-width: 400px;
+            margin-left: auto;
+            margin-right: auto;
+            height: 250px;
+            max-height: 300px;
+        }
+
+        .modal-backdrop {
+            backdrop-filter: blur(4px);
+        }
+
+        .chain-step {
+            border-left: 3px solid #e7e5e4;
+            padding-left: 1rem;
+            position: relative;
+            margin-bottom: 1.5rem;
+        }
+        .chain-step::before {
+            content: '';
+            position: absolute;
+            left: -7px;
+            top: 0;
+            width: 11px;
+            height: 11px;
+            border-radius: 50%;
+            background-color: #e7e5e4;
+            border: 2px solid #fff;
+        }
+        .chain-step.active {
+            border-left-color: #3b82f6;
+        }
+        .chain-step.active::before {
+            background-color: #3b82f6;
+        }
+        .chain-step.warning {
+            border-left-color: #f59e0b;
+        }
+        .chain-step.warning::before {
+            background-color: #f59e0b;
+        }
+        .chain-step.critical {
+            border-left-color: #ef4444;
+        }
+        .chain-step.critical::before {
+            background-color: #ef4444;
+        }
+
+        .copilot-btn {
+            position: absolute;
+            bottom: 10px;
+            right: 10px;
+            background: #fff;
+            border: 1px solid #e7e5e4;
+            border-radius: 9999px;
+            padding: 4px 10px;
+            font-size: 12px;
+            cursor: pointer;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            transition: all 0.2s;
+            z-index: 10;
+        }
+        .copilot-btn:hover {
+            background: #f0f9ff;
+            border-color: #3b82f6;
+            transform: scale(1.05);
+        }
+        .copilot-popover {
+            position: absolute;
+            bottom: 45px;
+            right: 10px;
+            background: #1e293b;
+            color: #f8fafc;
+            padding: 12px;
+            border-radius: 8px;
+            font-size: 12px;
+            width: 240px;
+            display: none;
+            z-index: 20;
+            box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1);
+        }
+        .copilot-popover::after {
+            content: '';
+            position: absolute;
+            bottom: -5px;
+            right: 20px;
+            width: 10px;
+            height: 10px;
+            background: #1e293b;
+            transform: rotate(45deg);
+        }
+        
+        @keyframes pulse-opacity {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .animate-pulse-opacity {
+            animation: pulse-opacity 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+    </style>
+    </head>
+<body class="min-h-screen flex flex-col">
+
+    <header class="bg-white border-b border-stone-200 sticky top-0 z-30">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+            <div class="flex items-center space-x-3">
+                <div class="bg-blue-600 text-white w-8 h-8 rounded flex items-center justify-center font-bold text-lg">F</div>
+                <h1 class="text-xl font-bold text-stone-800 tracking-tight">Flink Doctor Agent</h1>
+            </div>
+        </div>
+    </header>
+
+    <main class="flex-grow max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full">
+
+        <section class="mb-8">
+            <h2 class="text-lg font-bold text-stone-800 mb-4">全局健康概览</h2>
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+                <div class="bg-white p-5 rounded-xl border border-stone-200 shadow-sm flex flex-col">
+                    <span class="text-sm font-medium text-stone-500 mb-1">健康作业 (Health ≥ 90)</span>
+                    <span class="text-3xl font-bold text-emerald-600" id="stat-healthy">--</span>
+                </div>
+                <div class="bg-white p-5 rounded-xl border border-stone-200 shadow-sm flex flex-col">
+                    <span class="text-sm font-medium text-stone-500 mb-1">亚健康 (Health 60-89)</span>
+                    <span class="text-3xl font-bold text-amber-500" id="stat-warning">--</span>
+                </div>
+                <div class="bg-white p-5 rounded-xl border border-stone-200 shadow-sm flex flex-col">
+                    <span class="text-sm font-medium text-stone-500 mb-1">高危作业 (Health < 60)</span>
+                    <span class="text-3xl font-bold text-rose-600" id="stat-critical">--</span>
+                </div>
+                <div class="bg-gradient-to-br from-blue-50 to-indigo-50 p-5 rounded-xl border border-blue-100 shadow-sm flex flex-col">
+                    <span class="text-sm font-medium text-blue-700 mb-1">识别资源浪费</span>
+                    <span class="text-3xl font-bold text-blue-700" id="stat-waste">-- <span class="text-sm font-normal">Jobs</span></span>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <div class="lg:col-span-1 bg-white p-5 rounded-xl border border-stone-200 shadow-sm">
+                    <h3 class="text-sm font-bold text-stone-700 mb-4 text-center">集群多维评估均值</h3>
+                    <div class="radar-container">
+                        <canvas id="clusterRadarChart"></canvas>
+                    </div>
+                </div>
+                <div class="lg:col-span-2 bg-white p-5 rounded-xl border border-stone-200 shadow-sm flex flex-col justify-center">
+                    <h3 class="text-sm font-bold text-stone-700 mb-2">智能体运作摘要</h3>
+                    <p class="text-sm text-stone-600 leading-relaxed mb-4">
+                        当前环境共接入 <strong id="total-jobs" class="text-stone-900">0</strong> 个 Flink 作业。Flink Doctor Agent 正在执行 5 分钟级滑动窗口巡检。
+                        通过 <span class="bg-blue-100 text-blue-800 px-1 rounded">三角验证逻辑</span>，本周期共排查出多起假性空闲与真实瓶颈事件。
+                    </p>
+                    <div class="flex space-x-4 text-xs">
+                        <div class="flex items-center text-stone-500">
+                            <span class="text-emerald-500 mr-1">●</span> 稳定性基准: 正常
+                        </div>
+                        <div class="flex items-center text-stone-500">
+                            <span class="text-amber-500 mr-1">●</span> 性能基准: 波动
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section>
+            <div class="flex flex-col sm:flex-row justify-between items-center mb-4 space-y-4 sm:space-y-0">
+                <h2 class="text-lg font-bold text-stone-800">作业巡检列表</h2>
+                <div class="flex space-x-3 items-center">
+                    <select id="cluster-filter" class="bg-white border border-stone-300 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-2">
+                        <option value="all">所有集群</option>
+                        <option value="prod-a">生产集群 A</option>
+                        <option value="prod-b">生产集群 B</option>
+                    </select>
+                    <button onclick="refreshAll()" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium py-2 px-4 rounded-lg transition-colors flex items-center">
+                        <span class="mr-1">🔄</span> 刷新全部
+                    </button>
+                </div>
+            </div>
+
+            <div class="bg-white border border-stone-200 rounded-xl shadow-sm overflow-hidden overflow-x-auto">
+                <table class="w-full text-left text-sm text-stone-600">
+                    <thead class="bg-stone-50 text-xs uppercase text-stone-500 border-b border-stone-200 whitespace-nowrap">
+                        <tr>
+                            <th scope="col" class="px-6 py-3 font-medium">作业名称</th>
+                            <th scope="col" class="px-6 py-3 font-medium">Owner</th>
+                            <th scope="col" class="px-6 py-3 font-medium">所属集群</th>
+                            <th scope="col" class="px-6 py-3 font-medium text-center">健康分 (点击诊断)</th>
+                            <th scope="col" class="px-6 py-3 font-medium text-center" title="提取 YARN 运行时配置">作业配置</th>
+                            <th scope="col" class="px-6 py-3 font-medium">初步诊断摘要</th>
+                            <th scope="col" class="px-6 py-3 font-medium text-right">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="job-table-body" class="divide-y divide-stone-200">
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+    </main>
+
+    <div id="ai-modal" class="fixed inset-0 z-50 hidden">
+        <div class="absolute inset-0 bg-stone-900/60 modal-backdrop" onclick="closeModal()"></div>
+        <div class="absolute inset-y-0 right-0 w-full md:w-3/4 lg:w-2/3 bg-white shadow-2xl overflow-y-auto transform transition-transform translate-x-full" id="modal-content" style="transition: transform 0.3s ease-out;">
+            
+            <div class="sticky top-0 bg-white border-b border-stone-200 px-6 py-4 flex justify-between items-center z-10">
+                <div>
+                    <h2 class="text-xl font-bold text-stone-900 flex items-center">
+                        <span class="mr-2">🤖</span> AI 深度诊断报告
+                    </h2>
+                    <p class="text-sm text-stone-500 mt-1" id="modal-job-name">Job Name</p>
+                </div>
+                <button onclick="closeModal()" class="text-stone-400 hover:text-stone-700 text-2xl font-bold">&times;</button>
+            </div>
+
+            <div class="p-6">
+                <div class="bg-stone-50 rounded-xl p-5 mb-8 border border-stone-200">
+                    <div class="flex items-center justify-between mb-4">
+                        <div>
+                            <div class="text-xs font-bold text-stone-500 uppercase tracking-wider mb-1">综合健康评分</div>
+                            <div class="flex items-baseline space-x-3">
+                                <span class="text-5xl font-extrabold" id="modal-score">100</span>
+                                <span class="px-2 py-1 text-xs font-bold rounded-full" id="modal-status-badge">HEALTHY</span>
+                            </div>
+                        </div>
+                        <div class="text-right">
+                            <div class="text-xs font-bold text-stone-500 uppercase tracking-wider mb-1">根因定位</div>
+                            <div class="text-lg font-bold text-stone-800" id="modal-root-cause-code">--</div>
+                        </div>
+                    </div>
+                    
+                    <div class="border-t border-stone-200 pt-4">
+                        <div class="text-xs font-bold text-stone-500 uppercase mb-2">健康度打分模型 (扣分明细)</div>
+                        <div id="modal-penalties" class="flex flex-wrap items-center gap-2">
+                            </div>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                    <div>
+                        <h3 class="text-base font-bold text-stone-800 mb-4 border-b pb-2">数据举证 (Metrics Context)</h3>
+                        
+                        <div class="mb-6">
+                            <h4 class="text-sm font-semibold text-stone-700 mb-2">消费积压与计算负载趋势 (过去1小时)</h4>
+                            <div class="chart-container bg-white border border-stone-100 rounded-lg p-2 shadow-sm relative">
+                                <canvas id="detailTrendChart"></canvas>
+                                <button class="copilot-btn" onclick="toggleCopilot('trend-copilot')">🤖 问问 AI</button>
+                                <div id="trend-copilot" class="copilot-popover">
+                                    <strong class="block mb-1 text-blue-300">AI 解读：</strong>
+                                    <span id="trend-copilot-text">载入中...</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div>
+                            <h4 class="text-sm font-semibold text-stone-700 mb-2">稳定性与资源快照</h4>
+                            <div class="chart-container bg-white border border-stone-100 rounded-lg p-2 shadow-sm relative" style="height: 200px;">
+                                <canvas id="detailBarChart"></canvas>
+                                <button class="copilot-btn" onclick="toggleCopilot('bar-copilot')">🤖 问问 AI</button>
+                                <div id="bar-copilot" class="copilot-popover">
+                                    <strong class="block mb-1 text-blue-300">AI 解读：</strong>
+                                    <span id="bar-copilot-text">载入中...</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div>
+                        <h3 class="text-base font-bold text-stone-800 mb-4 border-b pb-2">思维链推理 (Chain of Thought)</h3>
+                        <div class="bg-white border border-stone-200 rounded-xl p-5 shadow-sm">
+                            
+                            <div class="chain-step" id="cot-step-1">
+                                <h5 class="text-sm font-bold text-stone-800 mb-1">Step 1: 消费趋势诊断</h5>
+                                <p class="text-xs text-stone-600" id="cot-text-1">正在分析 Lag 趋势...</p>
+                            </div>
+                            
+                            <div class="chain-step" id="cot-step-2">
+                                <h5 class="text-sm font-bold text-stone-800 mb-1">Step 2: 瓶颈定位 (三角验证)</h5>
+                                <p class="text-xs text-stone-600" id="cot-text-2">结合反压状态分析...</p>
+                            </div>
+
+                            <div class="chain-step" id="cot-step-3">
+                                <h5 class="text-sm font-bold text-stone-800 mb-1">Step 3: 资源归因与内存红线</h5>
+                                <p class="text-xs text-stone-600" id="cot-text-3">校验 CPU/GC 状态...</p>
+                            </div>
+
+                            <div class="mt-6 pt-4 border-t border-stone-200">
+                                <h5 class="text-sm font-bold text-stone-800 mb-2">AI 处方建议 (Actionable Advice)</h5>
+                                <ul id="modal-actions" class="text-sm text-blue-700 space-y-2 list-disc pl-5">
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <div id="config-modal" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4">
+        <div class="absolute inset-0 bg-stone-900/60 modal-backdrop" onclick="closeConfigModal()"></div>
+        <div class="relative bg-white rounded-xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[85vh]">
+            <div class="border-b border-stone-200 px-6 py-4 flex justify-between items-center bg-stone-50">
+                <div>
+                    <h3 class="font-bold text-stone-800 text-lg">集群运行配置提取</h3>
+                    <p class="text-xs text-stone-500 mt-1">Target: YARN ResourceManager</p>
+                </div>
+                <button onclick="closeConfigModal()" class="text-stone-400 hover:text-stone-700 text-2xl font-bold leading-none">&times;</button>
+            </div>
+            <div class="p-6 overflow-y-auto bg-stone-900 text-green-400 font-mono text-xs sm:text-sm">
+                <div id="config-loading" class="text-center py-16 text-stone-400 flex flex-col items-center">
+                    <div class="mb-3 text-2xl">⏳</div>
+                    <span class="animate-pulse-opacity">正在向集群 API 发送提取请求...</span>
+                    <span class="text-[10px] text-stone-600 mt-2 font-sans">Connecting to Cluster...</span>
+                </div>
+                <pre id="config-content" class="hidden whitespace-pre-wrap break-all"></pre>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- 1. Mock Data & State ---
+        const mockJobs = [
+            { id: 'job_tx_core', name: '交易核心链路 (Trade_Analysis)', owner: 'cui.chao', cluster: 'prod-a', data: { lagTrend: 0, maxLag: 10, avgLag: 8, isBP: false, cpuMax: 60, cpuAvg: 55, heapMax: 60, fullGcCount: 0, restarts: 0 } },
+            { id: 'job_log_sink', name: '日志归档 (Log_ES_Sink)', owner: 'lu.yang', cluster: 'prod-a', data: { lagTrend: 500, maxLag: 8000, avgLag: 7800, isBP: true, cpuMax: 25, cpuAvg: 15, heapMax: 40, fullGcCount: 0, restarts: 0 } },
+            { id: 'job_risk_calc', name: '风控实时计算 (Risk_Model)', owner: 'tom', cluster: 'prod-b', data: { lagTrend: 800, maxLag: 12000, avgLag: 11500, isBP: true, cpuMax: 98, cpuAvg: 95, heapMax: 70, fullGcCount: 0, restarts: 0 } },
+            { id: 'job_user_tag', name: '用户画像流 (User_Tagging)', owner: 'peter', cluster: 'prod-b', data: { lagTrend: 50, maxLag: 50000, avgLag: 2000, isBP: true, cpuMax: 99, cpuAvg: 45, heapMax: 65, fullGcCount: 0, restarts: 0 } },
+            { id: 'job_click_heat', name: '点击热力图 (Click_Heatmap)', owner: 'zhang.san', cluster: 'prod-a', data: { lagTrend: 0, maxLag: 0, avgLag: 0, isBP: false, cpuMax: 15, cpuAvg: 10, heapMax: 20, fullGcCount: 0, restarts: 0 } },
+            { id: 'job_state_heavy', name: '大促状态机 (Promo_State)', owner: 'li.si', cluster: 'prod-b', data: { lagTrend: 1200, maxLag: 15000, avgLag: 14000, isBP: true, cpuMax: 75, cpuAvg: 40, heapMax: 95, fullGcCount: 2, restarts: 1 } }
+        ];
+
+        let radarChartInstance = null;
+        let trendChartInstance = null;
+        let barChartInstance = null;
+        let analyzedJobs = [];
+
+        // --- 2. V3.0 Scoring & Reasoning Engine ---
+        function analyzeJob(job) {
+            const d = job.data;
+            let score = 100;
+            let stabilityPenalty = 0, perfPenalty = 0, effPenalty = 0;
+            let penalties = []; // To track exact deductions
+            
+            let rootCause = "S0", rootCauseText = "运行健康";
+            let diagnosis = "各项指标正常，无积压。";
+            let actions = ["无需干预，持续观察。"];
+            let cotSteps = {
+                step1: { text: "Lag 趋势平稳，无数据倾斜。", state: "active" },
+                step2: { text: "无反压现象，数据流通顺畅。", state: "active" },
+                step3: { text: "计算资源与内存利用率处于健康区间。", state: "active" }
+            };
+
+            // 1. Stability (40%)
+            if (d.restarts > 3) {
+                stabilityPenalty += 100;
+                penalties.push({ item: '频繁重启 (>3次/h)', deduction: 100, type: 'fatal' });
+                rootCause = "Fatal"; rootCauseText = "频繁重启";
+                diagnosis = "作业陷入死亡循环。";
+                actions = ["检查 JobManager 日志", "排查代码逻辑错误"];
+                cotSteps.step3 = { text: "检测到 1h 内重启 > 3次，触发一票否决。", state: "critical" };
+            } else if (d.fullGcCount > 0) {
+                let p = d.fullGcCount * 20;
+                stabilityPenalty += p;
+                penalties.push({ item: `GC 雪崩 (${d.fullGcCount}次)`, deduction: p, type: 'fatal' });
+                rootCause = "S2"; rootCauseText = "内存不足/GC停顿";
+                diagnosis = "发生 Full GC，面临 OOM 风险，业务线程停顿。";
+                actions = ["扩容 TaskManager Heap 内存", "检查 State TTL 设置"];
+                cotSteps.step3 = { text: `检测到 ${d.fullGcCount} 次 Full GC，内存触发红线。`, state: "critical" };
+            }
+
+            // 2. Performance (35%)
+            let hasLag = d.lagTrend > 0;
+            let hasSkew = d.maxLag > (5 * d.avgLag) && d.avgLag > 0;
+
+            if (hasLag) {
+                perfPenalty += 20;
+                penalties.push({ item: '积压恶化 (LagTrend>0)', deduction: 20, type: 'fatal' });
+                cotSteps.step1 = { text: `Lag 趋势向上 (斜率 ${d.lagTrend})，出现严重积压。`, state: "critical" };
+            }
+            if (hasSkew) {
+                perfPenalty += 15;
+                penalties.push({ item: '数据倾斜 (Max>5*Avg)', deduction: 15, type: 'warning' });
+                rootCause = "S4"; rootCauseText = "数据倾斜";
+                diagnosis = "Max Lag 远超 Avg Lag，存在严重单点倾斜。";
+                actions = ["开启 LocalKeyBy 预聚合", "增加随机盐 (Salting) 打散数据"];
+                cotSteps.step1 = { text: `Max Lag (${d.maxLag}) 远大于 Avg Lag，存在单点倾斜。`, state: "warning" };
+            }
+            if (d.isBP) {
+                perfPenalty += 10;
+                penalties.push({ item: '持续反压', deduction: 10, type: 'warning' });
+                cotSteps.step2 = { text: "检测到持续反压，瓶颈在 Flink 内部或下游。", state: "warning" };
+            } else if (hasLag && !d.isBP) {
+                cotSteps.step2 = { text: "有积压但无反压，判定为 Source 端读取瓶颈。", state: "warning" };
+            }
+
+            // 3. Efficiency (25%) & Triangulation
+            if (rootCause === "S0" || rootCause === "S4") { 
+                if (hasLag && d.isBP && d.cpuMax > 90) {
+                    rootCause = "S1"; rootCauseText = "计算资源瓶颈";
+                    diagnosis = "CPU被打满，算力不足导致积压反压。";
+                    actions = ["增加并行度 (Parallelism)", "Profile 热点代码优化"];
+                    effPenalty += 5;
+                    penalties.push({ item: '计算过载 (CPU>90%)', deduction: 5, type: 'info' });
+                    cotSteps.step3 = { text: "CPU Max > 90%，结合反压判定为计算瓶颈。", state: "critical" };
+                } 
+                else if (hasLag && d.isBP && d.cpuMax < 40) {
+                    rootCause = "S3"; rootCauseText = "外部 IO 阻塞";
+                    diagnosis = "CPU 闲置但存在反压，说明线程在等待下游 IO 响应。";
+                    actions = ["检查 Sink 端数据库负载", "开启批量写入 (Batch Flush)"];
+                    cotSteps.step3 = { text: `CPU Max仅 ${d.cpuMax}% 但存在反压，判定为假性空闲 (IO 阻塞)，严禁缩容。`, state: "warning" };
+                }
+                else if (!hasLag && !d.isBP && d.cpuMax < 30) {
+                    rootCause = "S7"; rootCauseText = "资源过度配置";
+                    diagnosis = "无积压无反压且峰值 CPU 极低，资源严重浪费。";
+                    actions = ["降低作业并行度", "减少 TaskManager 数量以节约成本"];
+                    effPenalty += 10;
+                    penalties.push({ item: '资源浪费 (闲置)', deduction: 10, type: 'info' });
+                    cotSteps.step3 = { text: "无积压且 CPU < 30%，判定为资源过度配置。", state: "warning" };
+                }
+            }
+
+            score = Math.max(0, 100 - stabilityPenalty - perfPenalty - effPenalty);
+            
+            // Dimensional scores for Radar
+            let sScore = Math.max(0, 100 - (stabilityPenalty*2.5));
+            let pScore = Math.max(0, 100 - (perfPenalty*2.8));
+            let eScore = Math.max(0, 100 - (effPenalty*4));
+
+            return {
+                ...job,
+                score, sScore, pScore, eScore,
+                penalties, rootCause, rootCauseText, diagnosis, actions, cotSteps
+            };
+        }
+
+        // --- 3. UI Rendering ---
+        function renderDashboard() {
+            analyzedJobs = mockJobs.map(analyzeJob);
+            
+            let healthy = 0, warning = 0, critical = 0, waste = 0;
+            let avgS = 0, avgP = 0, avgE = 0;
+
+            const tbody = document.getElementById('job-table-body');
+            tbody.innerHTML = '';
+
+            analyzedJobs.forEach(job => {
+                if (job.score >= 90) healthy++;
+                else if (job.score >= 60) warning++;
+                else critical++;
+                
+                if (job.rootCause === 'S7') waste++;
+
+                avgS += job.sScore; avgP += job.pScore; avgE += job.eScore;
+
+                let badgeColor = job.score >= 90 ? 'bg-emerald-100 text-emerald-800' : (job.score >= 60 ? 'bg-amber-100 text-amber-800' : 'bg-rose-100 text-rose-800');
+                
+                const tr = document.createElement('tr');
+                tr.className = "hover:bg-stone-50 transition-colors whitespace-nowrap";
+                tr.innerHTML = `
+                    <td class="px-6 py-4 font-medium text-stone-900">${job.name}</td>
+                    <td class="px-6 py-4 text-xs font-mono text-stone-500">${job.owner}</td>
+                    <td class="px-6 py-4"><span class="px-2 py-1 bg-stone-100 rounded text-xs">${job.cluster}</span></td>
+                    <td class="px-6 py-4 text-center">
+                        <button onclick="openModal('${job.id}')" class="px-3 py-1 font-bold rounded-full ${badgeColor} hover:scale-105 transition-transform shadow-sm" title="查看 AI 诊断详情">
+                            ${job.score}
+                        </button>
+                    </td>
+                    <td class="px-6 py-4 text-center">
+                        <button onclick="fetchJobConfig('${job.id}')" class="text-stone-400 hover:text-blue-600 font-bold text-lg px-3 py-1 bg-white rounded border border-stone-200 hover:border-blue-300 transition-colors shadow-sm" title="提取当前配置">
+                            ...
+                        </button>
+                    </td>
+                    <td class="px-6 py-4 text-xs truncate max-w-xs" title="${job.diagnosis}">${job.rootCauseText} - ${job.diagnosis}</td>
+                    <td class="px-6 py-4 text-right">
+                        <button onclick="refreshJob('${job.id}')" class="text-blue-600 hover:text-blue-800 text-xs font-medium border border-blue-200 bg-blue-50 px-3 py-1.5 rounded flex items-center float-right shadow-sm">
+                           <span class="mr-1 text-sm">🩺</span> 实时问诊
+                        </button>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+
+            document.getElementById('stat-healthy').innerText = healthy;
+            document.getElementById('stat-warning').innerText = warning;
+            document.getElementById('stat-critical').innerText = critical;
+            document.getElementById('stat-waste').innerHTML = `${waste} <span class="text-sm font-normal text-blue-600">Jobs</span>`;
+            document.getElementById('total-jobs').innerText = analyzedJobs.length;
+
+            avgS /= analyzedJobs.length; avgP /= analyzedJobs.length; avgE /= analyzedJobs.length;
+            renderRadar(avgS, avgP, avgE);
+        }
+
+        function renderRadar(s, p, e) {
+            const ctx = document.getElementById('clusterRadarChart').getContext('2d');
+            if (radarChartInstance) radarChartInstance.destroy();
+            
+            radarChartInstance = new Chart(ctx, {
+                type: 'radar',
+                data: {
+                    labels: ['稳定性 (Stability)', '性能 (Performance)', '效率 (Efficiency)'],
+                    datasets: [{
+                        label: '集群平均水位',
+                        data: [s, p, e],
+                        backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                        borderColor: 'rgba(59, 130, 246, 1)',
+                        pointBackgroundColor: 'rgba(59, 130, 246, 1)',
+                        borderWidth: 2
+                    }]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    scales: { r: { min: 0, max: 100, ticks: { stepSize: 20, display: false } } },
+                    plugins: { legend: { display: false } }
+                }
+            });
+        }
+
+        // --- 4. Modal & AI Detail Logic ---
+        function openModal(jobId) {
+            const job = analyzedJobs.find(j => j.id === jobId);
+            if (!job) return;
+
+            document.getElementById('modal-job-name').innerText = job.name;
+            document.getElementById('modal-score').innerText = job.score;
+            document.getElementById('modal-root-cause-code').innerText = job.rootCauseText;
+            
+            const badge = document.getElementById('modal-status-badge');
+            if (job.score >= 90) { badge.innerText = "HEALTHY"; badge.className = "px-2 py-1 text-xs font-bold rounded-full bg-emerald-100 text-emerald-800"; }
+            else if (job.score >= 60) { badge.innerText = "WARNING"; badge.className = "px-2 py-1 text-xs font-bold rounded-full bg-amber-100 text-amber-800"; }
+            else { badge.innerText = "CRITICAL"; badge.className = "px-2 py-1 text-xs font-bold rounded-full bg-rose-100 text-rose-800"; }
+
+            // Populate Penalty Breakdown
+            const penaltyContainer = document.getElementById('modal-penalties');
+            if (job.penalties && job.penalties.length > 0) {
+                let html = `<span class="px-2 py-1 bg-emerald-50 text-emerald-700 text-xs rounded border border-emerald-200 font-mono">100</span>`;
+                job.penalties.forEach(p => {
+                    let colorCls = p.type === 'fatal' ? 'bg-rose-50 text-rose-700 border-rose-200' : 
+                                   (p.type === 'warning' ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-blue-50 text-blue-700 border-blue-200');
+                    html += `<span class="text-stone-400 text-xs">➔</span>`;
+                    html += `<span class="px-2 py-1 ${colorCls} text-xs rounded border font-mono" title="${p.item}">-${p.deduction} (${p.item})</span>`;
+                });
+                html += `<span class="text-stone-400 text-xs">➔</span>`;
+                html += `<span class="px-2 py-1 bg-stone-800 text-white text-xs rounded font-bold font-mono">=${job.score}</span>`;
+                penaltyContainer.innerHTML = html;
+            } else {
+                penaltyContainer.innerHTML = `<span class="px-2 py-1 bg-emerald-50 text-emerald-700 text-xs rounded border border-emerald-200 font-mono">100 (满分，无扣分项)</span>`;
+            }
+
+            document.getElementById('modal-actions').innerHTML = job.actions.map(a => `<li>${a}</li>`).join('');
+
+            updateCotStep(1, job.cotSteps.step1);
+            updateCotStep(2, job.cotSteps.step2);
+            updateCotStep(3, job.cotSteps.step3);
+
+            setupCopilotText(job);
+
+            document.getElementById('ai-modal').classList.remove('hidden');
+            setTimeout(() => {
+                document.getElementById('modal-content').classList.remove('translate-x-full');
+                renderDetailCharts(job);
+            }, 10);
+        }
+
+        function updateCotStep(num, data) {
+            const el = document.getElementById(`cot-step-${num}`);
+            const textEl = document.getElementById(`cot-text-${num}`);
+            el.className = `chain-step ${data.state}`;
+            textEl.innerText = data.text;
+        }
+
+        function closeModal() {
+            document.getElementById('modal-content').classList.add('translate-x-full');
+            document.querySelectorAll('.copilot-popover').forEach(p => p.style.display = 'none');
+            setTimeout(() => {
+                document.getElementById('ai-modal').classList.add('hidden');
+            }, 300);
+        }
+
+        // --- Config Modal Logic ---
+        function fetchJobConfig(jobId) {
+            const modal = document.getElementById('config-modal');
+            const loading = document.getElementById('config-loading');
+            const content = document.getElementById('config-content');
+            
+            modal.classList.remove('hidden');
+            loading.classList.remove('hidden');
+            content.classList.add('hidden');
+
+            const job = mockJobs.find(j => j.id === jobId);
+            const parallelismStr = (job && job.data.cpuMax > 50) ? (Math.floor(Math.random() * 20) + 10).toString() : (Math.floor(Math.random() * 5) + 1).toString();
+
+            setTimeout(() => {
+                loading.classList.add('hidden');
+                content.classList.remove('hidden');
+                
+                const mockConfig = {
+                    "_info": "Configuration fetched via YARN REST API",
+                    "job_id": jobId,
+                    "application_id": `application_1704067200000_${Math.floor(Math.random()*9000)+1000}`,
+                    "owner": job ? job.owner : "unknown",
+                    "environment": {
+                        "flink.version": "1.16.2",
+                        "java.version": "1.8.0_312"
+                    },
+                    "jobmanager.config": {
+                        "jobmanager.memory.process.size": "2048m",
+                        "jobmanager.rpc.address": `ip-10-0-${Math.floor(Math.random()*100)}-${Math.floor(Math.random()*255)}`
+                    },
+                    "taskmanager.config": {
+                        "parallelism.default": parallelismStr,
+                        "taskmanager.numberOfTaskSlots": "4",
+                        "taskmanager.memory.process.size": "4096m",
+                        "taskmanager.memory.managed.fraction": "0.4"
+                    },
+                    "state.config": {
+                        "state.backend": "rocksdb",
+                        "state.checkpoints.dir": "hdfs://namenode:8020/flink/checkpoints",
+                        "execution.checkpointing.interval": "180000",
+                        "execution.checkpointing.min-pause": "60000"
+                    },
+                    "jvm.args": "-XX:+UseParallelGC -XX:MaxGCPauseMillis=200 -XX:+HeapDumpOnOutOfMemoryError"
+                };
+
+                content.innerText = JSON.stringify(mockConfig, null, 2);
+            }, 800);
+        }
+
+        function closeConfigModal() {
+            document.getElementById('config-modal').classList.add('hidden');
+        }
+
+        // --- Copilot ---
+        function toggleCopilot(id) {
+            const el = document.getElementById(id);
+            if (el.style.display === 'block') {
+                el.style.display = 'none';
+            } else {
+                document.querySelectorAll('.copilot-popover').forEach(p => p.style.display = 'none');
+                el.style.display = 'block';
+            }
+        }
+
+        function setupCopilotText(job) {
+            const d = job.data;
+            let trendText = d.lagTrend > 0 ? 
+                `AI 观察到 Lag 曲线呈现持续上升趋势 (斜率>${d.lagTrend})，且伴随反压，说明系统处理能力已经跟不上数据输入速度。` : 
+                `AI 观察到 Lag 曲线平稳，当前无积压风险。`;
+            if (job.rootCause === 'S4') trendText += ` 注意：这里显示的是平均趋势，但底层数据存在严重倾斜。`;
+            
+            let barText = `当前 Peak CPU 为 ${d.cpuMax}%。`;
+            if (job.rootCause === 'S3') barText += `CPU利用率极低，但存在反压，这是典型的 IO 等待特征（即假性空闲）。`;
+            if (job.rootCause === 'S2') barText += `检测到 ${d.fullGcCount} 次 Full GC，内存状态高危。`;
+            if (job.rootCause === 'S7') barText += `资源闲置明显，建议缩容降本。`;
+
+            document.getElementById('trend-copilot-text').innerText = trendText;
+            document.getElementById('bar-copilot-text').innerText = barText;
+        }
+
+        function renderDetailCharts(job) {
+            const d = job.data;
+            
+            const ctxTrend = document.getElementById('detailTrendChart').getContext('2d');
+            if (trendChartInstance) trendChartInstance.destroy();
+            
+            let lagData = [], cpuData = [];
+            for(let i=0; i<30; i++) {
+                let baseLag = d.lagTrend > 0 ? (i * (d.lagTrend/5)) : 10;
+                lagData.push(baseLag + Math.random() * 50);
+                
+                let baseCpu = d.cpuAvg;
+                if (job.rootCause === 'S2') baseCpu += (Math.random() > 0.8 ? -30 : 5); 
+                cpuData.push(Math.min(100, Math.max(0, baseCpu + (Math.random() * 10 - 5))));
+            }
+
+            trendChartInstance = new Chart(ctxTrend, {
+                type: 'line',
+                data: {
+                    labels: Array.from({length: 30}, (_, i) => `-${30-i}m`),
+                    datasets: [
+                        { label: 'Consumer Lag', data: lagData, borderColor: '#ef4444', backgroundColor: 'rgba(239, 68, 68, 0.1)', fill: true, tension: 0.4, yAxisID: 'y' },
+                        { label: 'CPU Load (%)', data: cpuData, borderColor: '#3b82f6', tension: 0.2, yAxisID: 'y1' }
+                    ]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    scales: {
+                        y: { type: 'linear', display: true, position: 'left', title: {display: true, text: 'Lag'} },
+                        y1: { type: 'linear', display: true, position: 'right', min: 0, max: 100, grid: {drawOnChartArea: false} }
+                    },
+                    plugins: { legend: { position: 'top', labels: {boxWidth: 12} } }
+                }
+            });
+
+            const ctxBar = document.getElementById('detailBarChart').getContext('2d');
+            if (barChartInstance) barChartInstance.destroy();
+            
+            barChartInstance = new Chart(ctxBar, {
+                type: 'bar',
+                data: {
+                    labels: ['Max CPU %', 'Heap Max %', 'Full GC 次数', 'Restart 次数'],
+                    datasets: [{
+                        label: '当前指标快照',
+                        data: [d.cpuMax, d.heapMax, d.fullGcCount, d.restarts],
+                        backgroundColor: ['#3b82f6', '#8b5cf6', '#ef4444', '#f59e0b'],
+                        borderRadius: 4
+                    }]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: { y: { beginAtZero: true } }
+                }
+            });
+        }
+
+        // --- 5. Global Actions ---
+        function refreshAll() {
+            mockJobs.forEach(j => {
+                if(j.data.lagTrend > 0) j.data.lagTrend += Math.floor(Math.random() * 20 - 5);
+                j.data.cpuAvg = Math.min(100, Math.max(0, j.data.cpuAvg + Math.floor(Math.random() * 10 - 5)));
+            });
+            renderDashboard();
+        }
+
+        function refreshJob(id) {
+            const j = mockJobs.find(x => x.id === id);
+            if(j) {
+                j.data.cpuAvg = Math.min(100, Math.max(0, j.data.cpuAvg + Math.floor(Math.random() * 10 - 5)));
+                renderDashboard();
+            }
+        }
+
+        document.getElementById('cluster-filter').addEventListener('change', (e) => {
+            const val = e.target.value;
+            const rows = document.querySelectorAll('#job-table-body tr');
+            rows.forEach(row => {
+                const cluster = row.cells[2].innerText; 
+                if (val === 'all' || cluster === (val === 'prod-a' ? 'prod-a' : 'prod-b')) {
+                    row.style.display = '';
+                } else {
+                    row.style.display = 'none';
+                }
+            });
+        });
+
+        document.addEventListener('DOMContentLoaded', renderDashboard);
+
+    </script>
+</body>
+</html>

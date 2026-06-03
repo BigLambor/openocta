@@ -63,10 +63,12 @@ export function renderEmployeeCenter(props: EmployeeCenterProps) {
         </div>
         <div class="ops-dashboard-actions__inner">
           <button class="ops-dashboard-actions__btn" type="button" @click=${props.onOpenMarket}>
-            ${icons.users} 员工市场
+            <span class="ops-dashboard-actions__icon" aria-hidden="true">${icons.users}</span>
+            <span>员工市场</span>
           </button>
           <button class="ops-dashboard-actions__btn" type="button" @click=${props.onCreateEmployee}>
-            ${icons.plus} 新建员工
+            <span class="ops-dashboard-actions__icon" aria-hidden="true">${icons.plus}</span>
+            <span>新建员工</span>
           </button>
         </div>
       </div>
