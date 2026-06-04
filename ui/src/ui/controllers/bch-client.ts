@@ -285,3 +285,19 @@ export async function fetchBchEmployees(host: BchClientHost): Promise<BchEmploye
   const data = await res.json();
   return Array.isArray(data) ? data : [];
 }
+
+export async function chatBchFlinkJob(host: BchClientHost, id: string, message: string): Promise<string> {
+  const res = await fetch(`${baseUrl(host)}/api/ops/bch/flink/jobs/${encodeURIComponent(id)}/chat`, {
+    method: "POST",
+    headers: {
+      ...authHeaders(host),
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ message }),
+  });
+  if (!res.ok) {
+    throw new Error(`数字员工回复失败 (${res.status})`);
+  }
+  const data = await res.json();
+  return data.reply || "";
+}

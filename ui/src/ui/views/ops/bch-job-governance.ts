@@ -1,5 +1,6 @@
 import { LitElement, html, css, nothing } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
+import { unsafeHTML } from "lit/directives/unsafe-html.js";
 import {
   fetchBchFlinkJobs,
   fetchBchFlinkJobConfig,
@@ -8,8 +9,10 @@ import {
   tuneBchSparkJob,
   FlinkJob,
   SparkJob,
+  chatBchFlinkJob,
 } from "../../controllers/bch-client.ts";
 import { icons } from "../../icons.ts";
+import { toSanitizedMarkdownHtml } from "../../markdown.ts";
 
 @customElement("bch-job-governance")
 export class BchJobGovernance extends LitElement {
@@ -220,6 +223,23 @@ export class BchJobGovernance extends LitElement {
       color: #fff;
     }
 
+    .config-btn {
+      background: rgba(16, 185, 129, 0.08);
+      border: 1px solid rgba(16, 185, 129, 0.2);
+      color: #10b981;
+      padding: 6px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 11px;
+      transition: all 0.2s;
+      font-weight: 500;
+    }
+
+    .config-btn:hover {
+      background: #10b981;
+      color: #fff;
+    }
+
     .tag-badge {
       background: rgba(255, 255, 255, 0.05);
       border: 1px solid rgba(255, 255, 255, 0.1);
@@ -257,25 +277,25 @@ export class BchJobGovernance extends LitElement {
     }
 
     .modal-container {
-      background: var(--bg-card, #1c1c1e);
-      border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+      background: var(--bg);
+      border: 1px solid var(--border);
       border-radius: 12px;
       width: 100%;
       max-width: 960px;
       max-height: 85vh;
       overflow-y: auto;
-      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+      box-shadow: var(--shadow-xl);
       display: flex;
       flex-direction: column;
     }
 
     .modal-header {
       padding: 16px 24px;
-      border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+      border-bottom: 1px solid var(--border);
       display: flex;
       justify-content: space-between;
       align-items: center;
-      background: rgba(255, 255, 255, 0.01);
+      background: var(--bg-hover, rgba(0, 0, 0, 0.02));
     }
 
     .modal-title h3 {
@@ -425,7 +445,7 @@ export class BchJobGovernance extends LitElement {
     }
 
     .copilot-popover strong {
-      color: #93c5fd;
+      color: var(--accent, #3b82f6);
       display: block;
       margin-bottom: 4px;
     }
@@ -489,7 +509,7 @@ export class BchJobGovernance extends LitElement {
     .action-list h5 {
       margin: 0 0 8px 0;
       font-size: 12px;
-      color: #93c5fd;
+      color: var(--accent, #3b82f6);
     }
 
     .action-list ul {
@@ -500,96 +520,215 @@ export class BchJobGovernance extends LitElement {
       line-height: 1.6;
     }
 
-    /* Copilot Chat Console */
-    .copilot-chat-console {
+    /* Copilot Chat Layout */
+    .copilot-chat-layout {
+      display: flex;
       border: 1px solid var(--border);
       background: var(--bg-content);
       border-radius: 8px;
-      margin-top: 16px;
-      display: flex;
-      flex-direction: column;
-      height: 180px;
+      margin-top: 24px;
+      height: 280px;
+      overflow: hidden;
     }
 
-    .chat-header {
-      font-size: 11px;
-      font-weight: 600;
-      padding: 6px 12px;
-      background: var(--bg-hover, rgba(0, 0, 0, 0.02));
-      border-bottom: 1px solid var(--border);
-      color: var(--text-muted);
+    .copilot-profile-pane {
+      width: 240px;
+      border-right: 1px solid var(--border);
+      background: var(--bg-hover, rgba(0, 0, 0, 0.01));
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      flex-shrink: 0;
+    }
+
+    .copilot-profile-header {
       display: flex;
       align-items: center;
-      gap: 6px;
+      gap: 8px;
     }
 
-    .chat-messages {
-      flex: 1;
-      overflow-y: auto;
-      padding: 10px;
+    .copilot-avatar {
+      font-size: 24px;
+    }
+
+    .copilot-profile-name {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    .copilot-status-dot {
+      display: inline-block;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #10b981;
+      margin-right: 4px;
+    }
+
+    .copilot-status-text {
+      font-size: 11px;
+      color: var(--text-secondary);
+    }
+
+    .copilot-skills-list {
+      margin: 0;
+      padding-left: 14px;
+      font-size: 11px;
+      color: var(--text-secondary);
       display: flex;
       flex-direction: column;
-      gap: 8px;
-      font-size: 11px;
+      gap: 4px;
+    }
+
+    .copilot-chat-pane {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      background: var(--bg);
+    }
+
+    .copilot-chat-messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      font-size: 12px;
     }
 
     .chat-bubble {
       max-width: 85%;
-      padding: 6px 10px;
-      border-radius: 6px;
-      line-height: 1.4;
+      padding: 10px 14px;
+      border-radius: 8px;
+      line-height: 1.6;
+      font-size: 12px;
+      box-sizing: border-box;
+      word-wrap: break-word;
+      word-break: break-word;
     }
 
     .chat-bubble.user {
       align-self: flex-end;
-      background: var(--accent, #3b82f6);
+      background: var(--accent);
       color: white;
     }
 
     .chat-bubble.ai {
       align-self: flex-start;
-      background: var(--bg);
+      background: var(--bg-hover, rgba(0, 0, 0, 0.02));
       border: 1px solid var(--border);
       color: var(--text-primary);
     }
 
-    .chat-input-row {
-      display: flex;
-      border-top: 1px solid var(--border);
+    /* Style markdown elements in AI response */
+    .chat-bubble.ai p {
+      margin: 0 0 8px 0;
     }
-
-    .chat-input {
-      flex: 1;
-      background: transparent;
-      border: none;
-      padding: 8px 12px;
+    .chat-bubble.ai p:last-child {
+      margin-bottom: 0;
+    }
+    .chat-bubble.ai strong {
       color: var(--text-primary);
-      font-size: 11px;
-    }
-
-    .chat-input:focus {
-      outline: none;
-    }
-
-    .chat-send-btn {
-      background: transparent;
-      border: none;
-      color: var(--accent, #3b82f6);
-      padding: 0 12px;
-      cursor: pointer;
-      font-size: 11px;
       font-weight: 600;
     }
+    .chat-bubble.ai code {
+      font-family: var(--mono, monospace);
+      background: rgba(127, 127, 127, 0.1);
+      padding: 2px 4px;
+      border-radius: 4px;
+      font-size: 11px;
+      color: var(--accent);
+    }
+    .chat-bubble.ai pre {
+      background: var(--bg-content, #1e1e1e);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 10px;
+      margin: 8px 0;
+      overflow-x: auto;
+    }
+    .chat-bubble.ai pre code {
+      background: transparent;
+      padding: 0;
+      border-radius: 0;
+      color: var(--text-primary);
+      font-size: 11px;
+      display: block;
+    }
+    .chat-bubble.ai ul, .chat-bubble.ai ol {
+      margin: 0 0 8px 0;
+      padding-left: 20px;
+    }
+    .chat-bubble.ai li {
+      margin-bottom: 4px;
+    }
+    .chat-bubble.ai h1, .chat-bubble.ai h2, .chat-bubble.ai h3, .chat-bubble.ai h4 {
+      margin: 12px 0 6px 0;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+    .chat-bubble.ai h1:first-child, .chat-bubble.ai h2:first-child, .chat-bubble.ai h3:first-child {
+      margin-top: 0;
+    }
 
-    .chat-send-btn:hover {
-      color: white;
+    .copilot-input-area {
+      display: flex;
+      align-items: flex-end;
+      border-top: 1px solid var(--border);
+      background: var(--bg-content);
+      padding: 10px 16px;
+      gap: 12px;
+    }
+
+    .copilot-textarea {
+      flex: 1;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px 12px;
+      color: var(--text-primary);
+      font-size: 12px;
+      resize: none;
+      height: 40px;
+      line-height: 1.5;
+      box-sizing: border-box;
+      font-family: inherit;
+    }
+
+    .copilot-textarea:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+
+    .copilot-send-button {
+      background: var(--accent);
+      color: var(--accent-foreground, #fff);
+      border: none;
+      padding: 8px 16px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 500;
+      transition: opacity 0.15s;
+      height: 40px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .copilot-send-button:hover {
+      opacity: 0.9;
     }
 
     /* Configuration Modal Specific */
     .config-pre {
-      background: #09090b;
-      color: #4ade80;
-      font-family: monospace;
+      background: var(--bg-content);
+      color: var(--text-primary);
+      font-family: var(--mono);
       padding: 16px;
       border-radius: 8px;
       overflow: auto;
@@ -656,15 +795,15 @@ export class BchJobGovernance extends LitElement {
     }
 
     .tuning-advice-box pre {
-      background: #09090b;
+      background: var(--bg-content);
       padding: 10px 14px;
       border-radius: 6px;
-      font-family: monospace;
+      font-family: var(--mono);
       font-size: 11px;
-      color: #60a5fa;
+      color: var(--text-primary);
       overflow-x: auto;
       margin: 0;
-      border: 1px solid rgba(255,255,255,0.05);
+      border: 1px solid var(--border);
     }
   `;
 
@@ -718,39 +857,45 @@ export class BchJobGovernance extends LitElement {
     }
   }
 
-  sendCopilotMessage() {
+  async sendCopilotMessage() {
     const text = this.copilotInput.trim();
     if (!text || !this.selectedFlinkJob) return;
 
     this.copilotMessages = [...this.copilotMessages, { sender: "user", text }];
     this.copilotInput = "";
 
-    // Generate mock expert responses based on the job context
-    const job = this.selectedFlinkJob;
-    setTimeout(() => {
-      let reply = "";
-      if (text.includes("配置") || text.includes("内存") || text.includes("GC")) {
-        if (job.rootCause === "S2") {
-          reply = `当前该作业存在 ${job.metrics.fullGcCount} 次 Full GC 记录。建议通过 YARN 调整配置，调大 TaskManager 内存：将 \`taskmanager.memory.process.size\` 从 4096m 增加至 8192m，并根据 State 规模增加堆外 RocksDB 缓存。`;
-        } else {
-          reply = `该作业的 JVM 参数包含了 RocksDB 状态后端配置，当前整体内存处于安全线内，暂不需要专门调大内存配置。`;
-        }
-      } else if (text.includes("Lag") || text.includes("积压") || text.includes("消费")) {
-        if (job.metrics.lagTrend > 0) {
-          reply = `根据监测，该作业 Consumer Lag 在过去1小时呈现恶化上升趋势（最大 Lag 达到 ${job.metrics.maxLag}）。结合反压判定，这是由于下游处理较慢。您可以点击左栏的 [实时问诊] 扩容并行度（Parallelism）。`;
-        } else {
-          reply = `目前作业 Consumer Lag 稳定维持在均值 ${job.metrics.avgLag} 左右，无积压压力，消费速度正常。`;
-        }
-      } else {
-        reply = `对于作业「${job.name}」，AI 诊断建议主要为：${job.actions.join("；") || "持续观察，当前无明显性能瓶颈。"}`;
-      }
-      this.copilotMessages = [...this.copilotMessages, { sender: "ai", text: reply }];
-    }, 600);
+    // Show a typing/loading indicator from AI
+    const tempAiMessage = { sender: "ai" as const, text: "正在思考中..." };
+    this.copilotMessages = [...this.copilotMessages, tempAiMessage];
+
+    try {
+      const reply = await chatBchFlinkJob(this.host, this.selectedFlinkJob.id, text);
+      // Replace the loading message with the real reply
+      this.copilotMessages = [
+        ...this.copilotMessages.slice(0, -1),
+        { sender: "ai", text: reply },
+      ];
+    } catch (err: any) {
+      // Replace the loading message with the error message
+      this.copilotMessages = [
+        ...this.copilotMessages.slice(0, -1),
+        { sender: "ai", text: `出错了: ${err.message || String(err)}` },
+      ];
+    }
   }
 
   openSparkTuningModal(job: SparkJob) {
     this.selectedSparkJob = job;
     this.sparkModalOpen = true;
+  }
+
+  updated(changedProperties: Map<PropertyKey, unknown>) {
+    if (changedProperties.has("copilotMessages")) {
+      const messagesContainer = this.renderRoot.querySelector(".copilot-chat-messages");
+      if (messagesContainer) {
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+      }
+    }
   }
 
   switchSubTab(tab: "flink" | "spark") {
@@ -851,8 +996,8 @@ export class BchJobGovernance extends LitElement {
                     </button>
                   </td>
                   <td style="text-align: center;">
-                    <button class="action-icon-btn" title="提取当前运行配置" @click=${() => this.openConfigModal(job)}>
-                      ${icons.settings || "配置"}
+                    <button class="config-btn" @click=${() => this.openConfigModal(job)}>
+                      查看配置
                     </button>
                   </td>
                   <td style="font-size: 11px; color: var(--text-secondary);">
@@ -934,7 +1079,7 @@ export class BchJobGovernance extends LitElement {
             </div>
             <button class="close-btn" @click=${() => (this.configModalOpen = false)}>&times;</button>
           </div>
-          <div class="modal-body" style="background: #09090b; padding: 16px;">
+          <div class="modal-body" style="padding: 16px;">
             ${this.configLoading
               ? html`
                   <div class="config-loader">
@@ -982,18 +1127,41 @@ export class BchJobGovernance extends LitElement {
             }}>&times;</button>
           </div>
           <div class="modal-body">
-            <div class="diag-summary-panel">
-              <div>
-                <div style="font-size: 10px; font-weight: bold; color: var(--text-muted); text-transform: uppercase;">综合健康评分</div>
-                <div class="diag-score-group">
-                  <span class="diag-score ${scoreClass}">${job.score}</span>
-                  <span class="diag-badge ${scoreClass}">${scoreClass.toUpperCase()}</span>
+            <div class="diag-summary-panel" style="display: flex; flex-direction: column; align-items: stretch; gap: 12px;">
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                  <div style="font-size: 10px; font-weight: bold; color: var(--text-muted); text-transform: uppercase;">综合健康评分</div>
+                  <div class="diag-score-group">
+                    <span class="diag-score ${scoreClass}">${job.score}</span>
+                    <span class="diag-badge ${scoreClass}">${scoreClass.toUpperCase()}</span>
+                  </div>
+                </div>
+                <div style="text-align: right;">
+                  <div style="font-size: 10px; font-weight: bold; color: var(--text-muted); text-transform: uppercase;">诊断定位</div>
+                  <div style="font-size: 14px; font-weight: 700; color: var(--text-primary); margin-top: 4px;">
+                    ${job.rootCauseText} (${job.rootCause})
+                  </div>
                 </div>
               </div>
-              <div style="text-align: right;">
-                <div style="font-size: 10px; font-weight: bold; color: var(--text-muted); text-transform: uppercase;">诊断定位</div>
-                <div style="font-size: 14px; font-weight: 700; color: var(--text-primary); margin-top: 4px;">
-                  ${job.rootCauseText} (${job.rootCause})
+              
+              <div style="border-top: 1px solid var(--border); padding-top: 12px;">
+                <div style="font-size: 11px; font-weight: bold; color: var(--text-secondary); margin-bottom: 8px;">健康度打分模型 (扣分明细)</div>
+                <div class="penalty-track">
+                  ${job.penalties && job.penalties.length > 0
+                    ? html`
+                        <span class="penalty-pill" style="background: rgba(16, 185, 129, 0.08); color: #10b981; border-color: rgba(16, 185, 129, 0.2);">100</span>
+                        ${job.penalties.map(p => {
+                          const penaltyClass = p.type === 'fatal' ? 'fatal' : (p.type === 'warning' ? 'warning' : 'info');
+                          return html`
+                            <span style="color: var(--text-placeholder); font-size: 10px;">➔</span>
+                            <span class="penalty-pill ${penaltyClass}">${p.item} (-${p.deduction})</span>
+                          `;
+                        })}
+                        <span style="color: var(--text-placeholder); font-size: 10px;">➔</span>
+                        <span class="penalty-pill" style="background: var(--text-primary); color: var(--bg); font-weight: bold; border-color: var(--text-primary); font-size: 12px;">=${job.score}</span>
+                      `
+                    : html`<span class="penalty-pill" style="background: rgba(16, 185, 129, 0.08); color: #10b981; border-color: rgba(16, 185, 129, 0.2);">100 (满分，无扣分项)</span>`
+                  }
                 </div>
               </div>
             </div>
@@ -1013,13 +1181,13 @@ export class BchJobGovernance extends LitElement {
                       const x2 = cx + gr * Math.sin((120 * Math.PI) / 180), y2 = cy - gr * Math.cos((120 * Math.PI) / 180);
                       const x3 = cx + gr * Math.sin((240 * Math.PI) / 180), y3 = cy - gr * Math.cos((240 * Math.PI) / 180);
                       return html`
-                        <polygon points="${x1},${y1} ${x2},${y2} ${x3},${y3}" fill="none" stroke="rgba(255,255,255,0.05)" />
+                        <polygon points="${x1},${y1} ${x2},${y2} ${x3},${y3}" fill="none" stroke="var(--border)" stroke-opacity="0.6" />
                       `;
                     })}
                     <!-- Axes lines -->
-                    <line x1="${cx}" y1="${cy}" x2="${cx}" y2="${cy - r}" stroke="rgba(255,255,255,0.1)" />
-                    <line x1="${cx}" y1="${cy}" x2="${cx + r * Math.sin((120 * Math.PI) / 180)}" y2="${cy - r * Math.cos((120 * Math.PI) / 180)}" stroke="rgba(255,255,255,0.1)" />
-                    <line x1="${cx}" y1="${cy}" x2="${cx + r * Math.sin((240 * Math.PI) / 180)}" y2="${cy - r * Math.cos((240 * Math.PI) / 180)}" stroke="rgba(255,255,255,0.1)" />
+                    <line x1="${cx}" y1="${cy}" x2="${cx}" y2="${cy - r}" stroke="var(--border)" stroke-opacity="0.8" />
+                    <line x1="${cx}" y1="${cy}" x2="${cx + r * Math.sin((120 * Math.PI) / 180)}" y2="${cy - r * Math.cos((120 * Math.PI) / 180)}" stroke="var(--border)" stroke-opacity="0.8" />
+                    <line x1="${cx}" y1="${cy}" x2="${cx + r * Math.sin((240 * Math.PI) / 180)}" y2="${cy - r * Math.cos((240 * Math.PI) / 180)}" stroke="var(--border)" stroke-opacity="0.8" />
                     
                     <!-- Labels -->
                     <text x="${cx}" y="${cy - r - 6}" text-anchor="middle" fill="var(--text-muted)" font-size="9">稳定性 (${job.sScore}分)</text>
@@ -1053,12 +1221,12 @@ export class BchJobGovernance extends LitElement {
                   <!-- Custom SVG line graph -->
                   <svg width="100%" height="100%" viewBox="0 0 400 160" preserveAspectRatio="none">
                     <!-- Grid lines -->
-                    <line x1="40" y1="20" x2="380" y2="20" stroke="rgba(255,255,255,0.03)" />
-                    <line x1="40" y1="70" x2="380" y2="70" stroke="rgba(255,255,255,0.03)" />
-                    <line x1="40" y1="120" x2="380" y2="120" stroke="rgba(255,255,255,0.03)" />
+                    <line x1="40" y1="20" x2="380" y2="20" stroke="var(--border)" stroke-opacity="0.4" />
+                    <line x1="40" y1="70" x2="380" y2="70" stroke="var(--border)" stroke-opacity="0.4" />
+                    <line x1="40" y1="120" x2="380" y2="120" stroke="var(--border)" stroke-opacity="0.4" />
                     <!-- Ticks & Axis -->
-                    <line x1="40" y1="20" x2="40" y2="120" stroke="rgba(255,255,255,0.1)" />
-                    <line x1="40" y1="120" x2="380" y2="120" stroke="rgba(255,255,255,0.1)" />
+                    <line x1="40" y1="20" x2="40" y2="120" stroke="var(--border)" stroke-opacity="0.8" />
+                    <line x1="40" y1="120" x2="380" y2="120" stroke="var(--border)" stroke-opacity="0.8" />
                     
                     <!-- Axis Labels -->
                     <text x="35" y="24" text-anchor="end" fill="var(--text-muted)" font-size="8">MAX</text>
@@ -1097,31 +1265,55 @@ export class BchJobGovernance extends LitElement {
                     ${job.actions.map((act) => html`<li>${act}</li>`)}
                   </ul>
                 </div>
+              </div>
+            </div>
 
-                <!-- Digital Employee Copilot Console -->
-                <div class="copilot-chat-console">
-                  <div class="chat-header">
-                    <span>🤖</span>
-                    <span>BCH 作业诊断数字员工</span>
+            <!-- Digital Employee Copilot Chat Layout (Spans 100% width) -->
+            <div class="copilot-chat-layout">
+              <div class="copilot-profile-pane">
+                <div class="copilot-profile-header">
+                  <span class="copilot-avatar">🤖</span>
+                  <div>
+                    <div class="copilot-profile-name">BCH 诊断数字员工</div>
+                    <div style="display: flex; align-items: center; margin-top: 2px;">
+                      <span class="copilot-status-dot"></span>
+                      <span class="copilot-status-text">在线值守</span>
+                    </div>
                   </div>
-                  <div class="chat-messages">
-                    ${this.copilotMessages.map(
-                      (msg) => html`
-                        <div class="chat-bubble ${msg.sender}">${msg.text}</div>
-                      `
-                    )}
-                  </div>
-                  <div class="chat-input-row">
-                    <input
-                      class="chat-input"
-                      type="text"
-                      placeholder="问问数字员工该作业的调优建议..."
-                      .value=${this.copilotInput}
-                      @input=${(e: any) => (this.copilotInput = e.target.value)}
-                      @keydown=${(e: KeyboardEvent) => e.key === "Enter" && this.sendCopilotMessage()}
-                    />
-                    <button class="chat-send-btn" @click=${this.sendCopilotMessage}>发送</button>
-                  </div>
+                </div>
+                <div style="font-size: 11px; color: var(--text-secondary); line-height: 1.4; border-top: 1px solid var(--border); padding-top: 10px; margin-top: 8px;">
+                  授权 SOP 技能库：
+                  <ul class="copilot-skills-list" style="margin-top: 4px;">
+                    <li>Flink 流量积压溯源 SOP</li>
+                    <li>YARN 内存与资源三角校验</li>
+                    <li>JVM FullGC 根因诊断 SOP</li>
+                  </ul>
+                </div>
+              </div>
+              <div class="copilot-chat-pane">
+                <div class="copilot-chat-messages">
+                  ${this.copilotMessages.map(
+                    (msg) => html`
+                      <div class="chat-bubble ${msg.sender}">
+                        ${msg.sender === 'user' ? msg.text : unsafeHTML(toSanitizedMarkdownHtml(msg.text))}
+                      </div>
+                    `
+                  )}
+                </div>
+                <div class="copilot-input-area">
+                  <textarea
+                    class="copilot-textarea"
+                    placeholder="请输入关于作业「${job.name}」的调优疑问..."
+                    .value=${this.copilotInput}
+                    @input=${(e: any) => (this.copilotInput = e.target.value)}
+                    @keydown=${(e: KeyboardEvent) => {
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        this.sendCopilotMessage();
+                      }
+                    }}
+                  ></textarea>
+                  <button class="copilot-send-button" @click=${this.sendCopilotMessage}>发送</button>
                 </div>
               </div>
             </div>

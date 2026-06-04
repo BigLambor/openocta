@@ -434,30 +434,58 @@ func isAPIPath(path string) bool {
 		strings.HasPrefix(path, "/debug/")
 }
 
+type statusLoggingResponseWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (w *statusLoggingResponseWriter) WriteHeader(status int) {
+	w.status = status
+	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w *statusLoggingResponseWriter) Write(b []byte) (int, error) {
+	if w.status == 0 {
+		w.status = http.StatusOK
+	}
+	return w.ResponseWriter.Write(b)
+}
+
 // Handler returns the HTTP handler for testing (e.g. httptest).
 // Wraps mux to handle WebSocket upgrade on root path (ws://host:port) for TS compatibility.
 // 非 API 路径的 GET/HEAD 直接走 handleDist，避免 ServeMux 在 app 环境下匹配异常导致 404。
 func (s *Server) Handler() http.Handler {
 	handlerFunc := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/" && r.Method == "GET" && strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+			slog.Info("WS Upgrade Request", "method", r.Method, "url", r.URL.String(), "remote_addr", r.RemoteAddr)
 			s.handleWSUpgrade(w, r)
 			return
 		}
+
+		sw := &statusLoggingResponseWriter{ResponseWriter: w, status: 0}
+
+		defer func() {
+			if sw.status == 0 {
+				sw.status = http.StatusOK
+			}
+			slog.Info("HTTP Request", "method", r.Method, "url", r.URL.String(), "status", sw.status, "remote_addr", r.RemoteAddr)
+		}()
+
 		// CORS headers for all API requests (allowing dev environments and cross-origin access)
 		if isAPIPath(r.URL.Path) {
-			applyAPICORS(w, r)
+			applyAPICORS(sw, r)
 			if r.Method == http.MethodOptions {
-				w.WriteHeader(http.StatusNoContent)
+				sw.WriteHeader(http.StatusNoContent)
 				return
 			}
 		}
 
 		// 非 API 路径的 GET/HEAD 直接走前端静态服务，不依赖 ServeMux 匹配
 		if (r.Method == http.MethodGet || r.Method == http.MethodHead) && !isAPIPath(r.URL.Path) {
-			s.handleDist(w, r)
+			s.handleDist(sw, r)
 			return
 		}
-		s.mux.ServeHTTP(w, r)
+		s.mux.ServeHTTP(sw, r)
 	})
 
 	var handler http.Handler = handlerFunc
@@ -501,6 +529,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/ops/bch/flink/jobs", s.requireRbacOrGatewayToken("", s.handleBchListFlinkJobs))
 	s.mux.HandleFunc("GET /api/ops/bch/flink/jobs/{id}/config", s.requireRbacOrGatewayToken("", s.handleBchGetFlinkJobConfig))
 	s.mux.HandleFunc("POST /api/ops/bch/flink/jobs/{id}/diagnose", s.requireRbacOrGatewayToken("", s.handleBchDiagnoseFlinkJob))
+	s.mux.HandleFunc("POST /api/ops/bch/flink/jobs/{id}/chat", s.requireRbacOrGatewayToken("", s.handleBchChatFlinkJob))
 	s.mux.HandleFunc("GET /api/ops/bch/spark/jobs", s.requireRbacOrGatewayToken("", s.handleBchListSparkJobs))
 	s.mux.HandleFunc("POST /api/ops/bch/spark/jobs/{id}/tune", s.requireRbacOrGatewayToken("", s.handleBchTuneSparkJob))
 	s.mux.HandleFunc("GET /api/ops/bch/hdfs/fsimage", s.requireRbacOrGatewayToken("", s.handleBchGetHdfsFsImage))

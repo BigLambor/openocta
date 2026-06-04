@@ -61,8 +61,8 @@ describe("BCH ecosystem ops scenarios tests", () => {
         return new Response(JSON.stringify([
           {
             id: "cluster-prod-a",
-            name: "北京 BCH 生产集群 A (prod-a)",
-            region: "北京",
+            name: "哈池 BCH 生产集群 A (prod-a)",
+            region: "哈池",
             status: "healthy",
             score: 98,
             nodeCount: 120,
@@ -75,6 +75,9 @@ describe("BCH ecosystem ops scenarios tests", () => {
         ]));
       }
       if (url.includes("/api/ops/bch/flink/jobs")) {
+        if (url.includes("/chat")) {
+          return new Response(JSON.stringify({ reply: "Mock AI response" }));
+        }
         return new Response(JSON.stringify([
           {
             id: "job_tx_core",

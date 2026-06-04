@@ -17,8 +17,8 @@ func (s *MockBchService) GetClustersHealth() ([]BchClusterHealth, error) {
 	return []BchClusterHealth{
 		{
 			ID:             "cluster-prod-a",
-			Name:           "北京 BCH 生产集群 A (prod-a)",
-			Region:         "北京",
+			Name:           "哈池 BCH 生产集群 A (prod-a)",
+			Region:         "哈池",
 			Status:         "healthy",
 			Score:          98,
 			NodeCount:      120,
@@ -35,8 +35,8 @@ func (s *MockBchService) GetClustersHealth() ([]BchClusterHealth, error) {
 		},
 		{
 			ID:             "cluster-prod-b",
-			Name:           "上海 BCH 生产集群 B (prod-b)",
-			Region:         "上海",
+			Name:           "呼池 BCH 生产集群 A (prod-b)",
+			Region:         "呼池",
 			Status:         "warning",
 			Score:          82,
 			NodeCount:      80,
@@ -491,8 +491,8 @@ func (s *MockBchService) ListEmployees() ([]BchEmployee, error) {
 			Skills:      []string{"Hadoop 定时自动巡检 SOP", "HDFS 小文件风险诊断", "JVM 堆内存溢出预警"},
 			Tools:       []string{"query_vm_metrics", "query_hadoop_jmx"},
 			RecentTasks: []BchEmployeeTask{
-				{"2小时前", "对北京 BCH 生产集群执行例行深度巡检", "成功生成巡检报告，得分 98分"},
-				{"14小时前", "对上海 BCH 备份集群执行例行深度巡检", "巡检完成，发现 2 项警告，得分 82分"},
+				{"2小时前", "对哈池 BCH 生产集群执行例行深度巡检", "成功生成巡检报告，得分 98分"},
+				{"14小时前", "对呼池 BCH 生产集群执行例行深度巡检", "巡检完成，发现 2 项警告，得分 82分"},
 			},
 		},
 		{

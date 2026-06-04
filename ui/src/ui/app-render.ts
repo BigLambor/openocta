@@ -3385,7 +3385,7 @@ export function renderApp(state: AppViewState) {
                   domainClusters,
                 );
                 const clientHost = {
-                  gatewayHttpUrl: state.settings?.gatewayUrl ?? "",
+                  gatewayHttpUrl: state.gatewayHttpUrl,
                   rbacToken: state.rbacUser?.token ?? null,
                   settings: { token: state.settings?.token ?? "" },
                 };
