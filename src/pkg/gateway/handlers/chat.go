@@ -52,6 +52,184 @@ var resetCommandRe = regexp.MustCompile(`(?i)^(?:/|!)(?:new|reset)(?:\s+([\s\S]*
 // Aligns with openclaw BARE_SESSION_RESET_PROMPT: greet user and ask what they want to do.
 const BARE_SESSION_RESET_PROMPT = "当前已通过 /new 或 /reset 开启新会话。请以你配置的人设（如有）向用户打招呼，保持你的语气、风格和情绪。用 1～3 句话问候并询问用户想做什么。若当前运行模型与系统提示中的 default_model 不同，可简要说明。不要提及内部步骤、文件、工具或推理过程。"
 
+type chatOpsContext struct {
+	Domain            string
+	Capability        string
+	WorkflowType      string
+	ObjectType        string
+	ObjectID          string
+	Severity          string
+	Service           string
+	Cluster           string
+	Summary           string
+	AssistantTemplate string
+}
+
+type resolvedChatTemplate struct {
+	ID          string
+	Name        string
+	Prompt      string
+	SkillIDs    []string
+	RunbookRefs []string
+}
+
+func parseChatOpsContext(params map[string]interface{}) chatOpsContext {
+	var out chatOpsContext
+	if raw, ok := params["assistantTemplate"].(string); ok {
+		out.AssistantTemplate = strings.TrimSpace(raw)
+	}
+	rawCtx, ok := params["context"].(map[string]interface{})
+	if !ok || rawCtx == nil {
+		return out
+	}
+	get := func(key string) string {
+		if v, ok := rawCtx[key].(string); ok {
+			return strings.TrimSpace(v)
+		}
+		return ""
+	}
+	out.Domain = employees.NormalizeDomainKey(get("domain"))
+	out.Capability = employees.NormalizeCapabilityKey(get("capability"))
+	out.WorkflowType = strings.ToLower(get("workflowType"))
+	out.ObjectType = strings.ToLower(get("objectType"))
+	out.ObjectID = get("objectId")
+	out.Severity = strings.ToLower(get("severity"))
+	out.Service = get("service")
+	out.Cluster = get("cluster")
+	out.Summary = get("summary")
+	if v := get("assistantTemplate"); v != "" {
+		out.AssistantTemplate = v
+	}
+	if out.Capability == employees.CapabilityObservabilityAlert && (out.WorkflowType != "" || out.ObjectType != "") {
+		out.Capability = inferCapabilityFromChatContext(out)
+	}
+	return out
+}
+
+func inferCapabilityFromChatContext(ctx chatOpsContext) string {
+	raw := strings.ToLower(strings.TrimSpace(ctx.Capability + " " + ctx.WorkflowType + " " + ctx.ObjectType))
+	switch {
+	case strings.Contains(raw, "inspection") || strings.Contains(raw, "health") || strings.Contains(raw, "巡检"):
+		return employees.CapabilityHealthInspection
+	case strings.Contains(raw, "diagnosis") || strings.Contains(raw, "incident") || strings.Contains(raw, "rootcause"):
+		return employees.CapabilityDiagnosisIncident
+	case strings.Contains(raw, "governance") || strings.Contains(raw, "optimization"):
+		return employees.CapabilityGovernanceOptimization
+	case strings.Contains(raw, "capacity") || strings.Contains(raw, "performance") || strings.Contains(raw, "cost"):
+		return employees.CapabilityCapacityPerformanceCost
+	case strings.Contains(raw, "change") || strings.Contains(raw, "config") || strings.Contains(raw, "compliance"):
+		return employees.CapabilityChangeConfigCompliance
+	default:
+		return employees.CapabilityObservabilityAlert
+	}
+}
+
+func resolveChatTemplate(ctx chatOpsContext, env func(string) string) resolvedChatTemplate {
+	if strings.TrimSpace(ctx.AssistantTemplate) != "" {
+		if m, err := employees.LoadManifest(ctx.AssistantTemplate, env); err == nil && m != nil {
+			return resolvedChatTemplate{
+				ID:          strings.TrimSpace(m.ID),
+				Name:        strings.TrimSpace(m.Name),
+				Prompt:      strings.TrimSpace(m.Prompt),
+				SkillIDs:    append([]string(nil), m.SkillIDs...),
+				RunbookRefs: append([]string(nil), m.RunbookRefs...),
+			}
+		}
+	}
+	summaries, err := employees.ListSummaries(env)
+	if err == nil {
+		bestScore := 0
+		var best employees.Summary
+		for _, s := range summaries {
+			if !s.Enabled {
+				continue
+			}
+			score := 0
+			for _, d := range s.DomainKeys {
+				if employees.NormalizeDomainKey(d) == ctx.Domain && ctx.Domain != "" {
+					score += 4
+				}
+			}
+			for _, c := range s.CapabilityKeys {
+				if employees.NormalizeCapabilityKey(c) == ctx.Capability && ctx.Capability != "" {
+					score += 4
+				}
+			}
+			if ctx.ObjectType == "alert" && strings.EqualFold(s.RoleType, "oncall") {
+				score += 2
+			}
+			if score > bestScore {
+				bestScore = score
+				best = s
+			}
+		}
+		if bestScore > 0 {
+			return resolvedChatTemplate{
+				ID:          strings.TrimSpace(best.ID),
+				Name:        strings.TrimSpace(best.Name),
+				Prompt:      strings.TrimSpace(best.Prompt),
+				SkillIDs:    append([]string(nil), best.SkillIDs...),
+				RunbookRefs: append([]string(nil), best.RunbookRefs...),
+			}
+		}
+	}
+	if ctx.Domain == employees.DomainHadoop &&
+		(ctx.Capability == employees.CapabilityObservabilityAlert ||
+			ctx.Capability == employees.CapabilityDiagnosisIncident ||
+			ctx.ObjectType == "alert") {
+		return resolvedChatTemplate{
+			ID:   "builtin-bch-oncall",
+			Name: "BCH 值班数字员工",
+			Prompt: strings.Join([]string{
+				"你是 BCH/Hadoop 运维值班数字员工，具备告警收敛、根因分析、处置建议和变更风险识别能力。",
+				"你应先基于告警对象、集群、服务、严重级别和现象做因果判断，再给出可验证的排查步骤。",
+				"输出要面向运维工程师，避免泛泛建议；涉及执行动作时区分只读排查、需要审批的变更和高风险操作。",
+			}, "\n"),
+			SkillIDs:    []string{"alert-triage", "root-cause-analysis", "runbook-recommendation"},
+			RunbookRefs: []string{"BCH 告警处置 Runbook"},
+		}
+	}
+	return resolvedChatTemplate{}
+}
+
+func buildContextualChatPrompt(message string, ctx chatOpsContext, tmpl resolvedChatTemplate) string {
+	if ctx.Domain == "" && ctx.WorkflowType == "" && ctx.ObjectType == "" && tmpl.ID == "" {
+		return message
+	}
+	lines := []string{"[OpenOcta 运维上下文]"}
+	add := func(label, value string) {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			lines = append(lines, label+": "+value)
+		}
+	}
+	add("技术域", ctx.Domain)
+	add("能力域", ctx.Capability)
+	add("工作流", ctx.WorkflowType)
+	add("对象类型", ctx.ObjectType)
+	add("对象ID", ctx.ObjectID)
+	add("严重级别", ctx.Severity)
+	add("服务", ctx.Service)
+	add("集群", ctx.Cluster)
+	add("对象摘要", ctx.Summary)
+	if tmpl.ID != "" || tmpl.Name != "" {
+		add("数字员工模板", strings.TrimSpace(tmpl.Name+" ("+tmpl.ID+")"))
+	}
+	if len(tmpl.SkillIDs) > 0 {
+		add("技能包", strings.Join(tmpl.SkillIDs, ", "))
+	}
+	if len(tmpl.RunbookRefs) > 0 {
+		add("Runbook", strings.Join(tmpl.RunbookRefs, ", "))
+	}
+	if tmpl.Prompt != "" {
+		lines = append(lines, "人设说明:")
+		lines = append(lines, tmpl.Prompt)
+	}
+	lines = append(lines, "输出要求: 先说明判断结论，再给可验证依据和下一步动作；高风险动作必须标注需要审批。")
+	lines = append(lines, "[/OpenOcta 运维上下文]", "", message)
+	return strings.Join(lines, "\n")
+}
+
 // agentRunSeqMu protects Context.AgentRunSeq from concurrent access.
 // Chat runs are executed in goroutines and broadcast functions call nextChatSeq
 // concurrently; plain Go maps would panic ("concurrent map writes") without a lock.
@@ -1225,6 +1403,8 @@ func ChatSendHandler(opts HandlerOpts) error {
 	}
 
 	env := func(k string) string { return os.Getenv(k) }
+	opsContext := parseChatOpsContext(opts.Params)
+	chatTemplate := resolveChatTemplate(opsContext, env)
 
 	// Extract idempotencyKey (use as runId)
 	idempotencyKey, _ := opts.Params["idempotencyKey"].(string)
@@ -1402,9 +1582,9 @@ func ChatSendHandler(opts HandlerOpts) error {
 			// NOTE: Do NOT use "/think" prefix - agentsdk-go parses lines starting with "/"
 			// as slash commands. If "think" is not registered in .claude/commands/, it
 			// returns "commands: unknown command". Use a non-command format instead.
-			prompt := message
+			prompt := buildContextualChatPrompt(message, opsContext, chatTemplate)
 			if thinking != "" && !strings.HasPrefix(message, "/") {
-				prompt = "[思考级别: " + thinking + "]\n\n" + message
+				prompt = "[思考级别: " + thinking + "]\n\n" + prompt
 			}
 
 			// Create runtime with model factory from config

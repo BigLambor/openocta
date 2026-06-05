@@ -67,6 +67,7 @@ export async function sendChatMessage(
   message: string,
   attachments?: ChatAttachment[],
   modelRef?: string | null,
+  extraParams?: Record<string, unknown>,
 ): Promise<string | null> {
   if (!state.client || !state.connected) {
     return null;
@@ -146,6 +147,7 @@ export async function sendChatMessage(
       idempotencyKey: runId,
       attachments: apiAttachments,
       modelRef: modelRef ?? undefined,
+      ...(extraParams ?? {}),
     });
     return runId;
   } catch (err) {

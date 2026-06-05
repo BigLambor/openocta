@@ -7,7 +7,7 @@ import { refreshChatAvatar } from "./app-chat.ts";
 import { syncUrlWithSessionKey } from "./app-settings.ts";
 import { renderChatControls, renderTab } from "./app-render.helpers.ts";
 import { loadChannels } from "./controllers/channels.ts";
-import { loadChatHistory } from "./controllers/chat.ts";
+import { loadChatHistory, sendChatMessage } from "./controllers/chat.ts";
 import { loadDigitalEmployees } from "./controllers/digital-employees.ts";
 import { applyConfig, loadConfig, runUpdate, saveConfig, saveConfigPatch, updateConfigFormValue, removeConfigFormValue } from "./controllers/config.ts";
 import {
@@ -71,6 +71,15 @@ import {
 } from "./navigation.ts";
 import { renderProductTour } from "./views/product-tour.ts";
 import { nativeAlert, nativeConfirm, nativePrompt } from "./native-dialog-bridge.ts";
+import {
+  canAccessOpsDomain,
+  effectiveOpsDomain,
+  firstAccessibleOpsDomain,
+  normalizeOpsDomain,
+  opsDomainLabel,
+  renderDomainFilter,
+  type OpsDomainKey,
+} from "./components/domain-filter.ts";
 import { t } from "./strings.js";
 
 /** 从 session key 提取数字员工 ID，如 agent:main:employee:xxx:run:uuid -> xxx */
@@ -356,7 +365,7 @@ import { installFromSite } from "./controllers/remote-market.ts";
 import { renderEmployeeMarket } from "./views/employee-market.ts";
 import { renderEmployeeCenter } from "./views/employee-center.ts";
 import { renderEmployeeOperations } from "./views/employee-operations.ts";
-import { loadEmployeeTasks, loadEmployeeEffectiveness, rateEmployeeTask, deleteEmployeeTask } from "./controllers/employee-tasks.ts";
+import { createEmployeeTask, loadEmployeeTasks, loadEmployeeEffectiveness, rateEmployeeTask, deleteEmployeeTask } from "./controllers/employee-tasks.ts";
 import "./components/category-tree-sidebar.ts";
 import { renderExecApprovalPrompt } from "./views/exec-approval.ts";
 import { renderGatewayUrlConfirmation } from "./views/gateway-url-confirmation.ts";
@@ -364,6 +373,8 @@ import { renderNativeDialogOverlay } from "./views/native-dialog-overlay.ts";
 import { renderLogs } from "./views/logs.ts";
 import { renderNodes } from "./views/nodes.ts";
 import { renderOverview } from "./views/overview.ts";
+import { renderWorkbench } from "./views/workbench.ts";
+import { renderAssetsView } from "./views/assets-view.ts";
 import { renderOpsCapabilityCenter } from "./views/ops-capability-center.ts";
 import { renderTechOpsHub } from "./views/tech-ops-hub.ts";
 import { renderTechOpsDomain } from "./views/tech-ops-domain.ts";
@@ -666,6 +677,7 @@ export function renderApp(state: AppViewState) {
   const isMessagePage = state.tab === "message";
   const isAgentSwarmPage = state.tab === "agentSwarm";
   const isDigitalEmployeeArea =
+    state.tab === "automation" ||
     state.tab === "employeeCenter" ||
     state.tab === "employeeMarket" ||
     state.tab === "digitalEmployee" ||
@@ -696,18 +708,32 @@ export function renderApp(state: AppViewState) {
     state.tab === "gbase" ||
     state.tab === "governance" ||
     state.tab === "dataapps";
-  const hasAnyOpsDomainPermission =
-    Boolean(state.rbacUser) &&
-    (state.rbacUser.roleName === "admin" ||
-      ["hadoop", "fi", "gbase", "governance", "dataapps"].some((tab) =>
-        state.rbacUser!.permissions.includes(`menu:${tab}`),
-      ));
   const isOpsShellPage =
     isOpsDomainPage ||
     state.tab === "techDomains" ||
     state.tab === "overview" ||
+    state.tab === "workbench" ||
+    state.tab === "assets" ||
     state.tab === "opsCapabilities" ||
     state.tab === "assetManagement";
+  const selectedOpsDomain = normalizeOpsDomain(state.settings.opsDomain);
+  const effectiveWorkbenchDomain = effectiveOpsDomain(selectedOpsDomain);
+  const userCanAccessAnyOpsDomain = canAccessOpsDomain(state.rbacUser, "all");
+  const setGlobalOpsDomain = (domain: OpsDomainKey) => {
+    const nextDomain = canAccessOpsDomain(state.rbacUser, domain)
+      ? domain
+      : firstAccessibleOpsDomain(state.rbacUser);
+    state.applySettings({ ...state.settings, opsDomain: nextDomain });
+    if (typeof window !== "undefined" && (state.tab === "overview" || state.tab === "workbench" || state.tab === "assets")) {
+      const url = new URL(window.location.href);
+      if (nextDomain === "all") {
+        url.searchParams.delete("domain");
+      } else {
+        url.searchParams.set("domain", nextDomain);
+      }
+      window.history.replaceState({}, "", url.toString());
+    }
+  };
   const isCollapsibleNavPage = isMessagePage || isScheduledTasks || isConfigArea;
   const isSideNavCollapsed = isCollapsibleNavPage && state.settings.navCollapsed;
   const renderNavCollapseFooter = html`
@@ -803,23 +829,16 @@ export function renderApp(state: AppViewState) {
           ${[
             { tab: "message", label: "AI 运维助手" },
             { tab: "overview", label: "运维驾驶舱" },
-            { tab: "opsCapabilities", label: "运维能力中心" },
-            { tab: "techDomains", label: "技术域运维" },
-            { tab: "employeeCenter", label: "数字员工中心" },
+            { tab: "workbench", label: "运维工作台" },
+            { tab: "assets", label: "服务与资产" },
           ].filter((item) => {
             if (!state.rbacUser) return false;
-            const restrictedTabs = ["overview", "techDomains", "employeeCenter", "config"];
+            if (item.tab === "workbench" || item.tab === "assets") {
+              return userCanAccessAnyOpsDomain;
+            }
+            const restrictedTabs = ["overview", "config"];
             if (restrictedTabs.includes(item.tab)) {
               if (state.rbacUser.roleName === "admin") return true;
-              if (item.tab === "techDomains") {
-                return hasAnyOpsDomainPermission;
-              }
-              if (item.tab === "employeeCenter") {
-                return (
-                  state.rbacUser.permissions.includes("menu:employeeCenter") ||
-                  state.rbacUser.permissions.includes("menu:employeeMarket")
-                );
-              }
               return state.rbacUser.permissions.includes(`menu:${item.tab}`);
             }
             return true;
@@ -834,6 +853,8 @@ export function renderApp(state: AppViewState) {
                     ? isOpsDomainPage || state.tab === "techDomains"
                   : tab === "employeeCenter"
                     ? isDigitalEmployeeArea
+                  : tab === "assets"
+                    ? state.tab === "assets" || state.tab === "assetManagement"
                   : Boolean(tab && state.tab === tab && !(item as any).href);
             const iconName = tab ? iconForTab(tab, active) : "globe";
             const iconEl = html`<span class="nav-item__icon" aria-hidden="true">${icons[iconName]}</span>`;
@@ -886,16 +907,31 @@ export function renderApp(state: AppViewState) {
             </button>
             <div class="dropdown-menu-content">
                ${[
-                 { tab: "assetManagement", label: "集群资产管理" },
-                 { tab: "channels", label: "通道配置" },
+                 { tab: "automation", label: "自动化配置", adminOnly: true },
+                 { tab: "employeeMarket", label: "助手模板库", adminOnly: true },
+                 { tab: "digitalEmployee", label: "我的助手", adminOnly: true },
+                 { tab: "agentSwarm", label: "工作流编排", adminOnly: true },
+                 { tab: "employeeTasks", label: "执行记录" },
+                 { tab: "employeeEffectiveness", label: "自动化效果" },
+                 { tab: "channels", label: "通道配置", permission: "menu:channels" },
                  { tab: "scheduledTasks", label: "定时任务" },
                  { tab: "skillLibrary", label: "技能库" },
                  { tab: "toolLibrary", label: "工具库" },
                  { tab: "modelLibrary", label: "模型" },
                  { tab: "tutorials", label: "教程" },
-                 { tab: "config", label: "系统配置" },
-                 { tab: "sandbox", label: "安全策略" },
-               ].map(item => {
+                 { tab: "config", label: "系统配置", permission: "menu:config" },
+                 { tab: "sandbox", label: "安全策略", permission: "menu:config" },
+               ].filter((item) => {
+                 if (!state.rbacUser) return false;
+                 if ((item as any).adminOnly) {
+                   return state.rbacUser.roleName === "admin";
+                 }
+                 const permission = (item as any).permission;
+                 if (permission && state.rbacUser.roleName !== "admin") {
+                   return state.rbacUser.permissions.includes(permission);
+                 }
+                 return true;
+               }).map(item => {
                  const active =
                    state.tab === item.tab ||
                    (item.tab === "scheduledTasks" && isScheduledTasks);
@@ -1288,7 +1324,8 @@ export function renderApp(state: AppViewState) {
                     </div>
                     ${renderNavCollapseFooter}
                   `
-              : state.tab === "employeeCenter" ||
+              : state.tab === "automation" ||
+                  state.tab === "employeeCenter" ||
                   state.tab === "employeeMarket" ||
                   state.tab === "digitalEmployee" ||
                   state.tab === "employeeTasks" ||
@@ -1297,10 +1334,10 @@ export function renderApp(state: AppViewState) {
                     <div class="nav-group-list">
                       <div class="nav-group">
                         <button class="nav-label nav-label--static" type="button">
-                          <span class="nav-label__text">数字员工中心</span>
+                          <span class="nav-label__text">自动化配置</span>
                         </button>
                         <div class="nav-group__items">
-                          ${renderTab(state, "employeeCenter")}
+                          ${renderTab(state, "automation")}
                           ${renderTab(state, "employeeMarket")}
                           ${renderTab(state, "digitalEmployee")}
                           ${renderTab(state, "agentSwarm")}
@@ -1460,6 +1497,245 @@ export function renderApp(state: AppViewState) {
                 onRunGlobalInspection: () => state.runGlobalInspectionFromDashboard(),
                 onOpenPendingAlerts: () => state.openPendingAlertsFromDashboard(),
                 canInspect: canRunInspection(state.rbacUser),
+              })
+            : nothing
+        }
+
+        ${
+          state.tab === "workbench"
+            ? (() => {
+                const domain = effectiveWorkbenchDomain;
+                if (
+                  !state.opsAlertsLoading?.[domain] &&
+                  state.opsAlertsByDomain?.[domain] === undefined &&
+                  !(state as any)._loadingWorkbenchAlerts
+                ) {
+                  (state as any)._loadingWorkbenchAlerts = true;
+                  state.loadOpsDomainAlerts(domain).finally(() => {
+                    (state as any)._loadingWorkbenchAlerts = false;
+                  });
+                }
+                const selectedId = state.opsSelectedAlertGroupIds[domain] || null;
+                const aiModeRaw = state.opsSelectedEntityIds?.workbenchAiMode;
+                const aiMode =
+                  aiModeRaw === "similar" || aiModeRaw === "action" || aiModeRaw === "root-cause"
+                    ? aiModeRaw
+                    : "root-cause";
+                const alertGroups = state.opsAlertsByDomain?.[domain] ?? [];
+                const recordAiDecision = async (
+                  id: string,
+                  decision: "accepted" | "rejected",
+                ) => {
+                  const alert = alertGroups.find((g) => g.id === id);
+                  if (!alert) return;
+                  const isAccepted = decision === "accepted";
+                  const note = await nativePrompt(
+                    isAccepted ? "确认 AI 建议，请填写处理备注：" : "驳回 AI 建议，请填写驳回原因：",
+                    isAccepted ? "已确认建议，按只读检查和 Runbook 处置。" : "建议不采纳，需要人工继续排查。",
+                  );
+                  if (note === null) return;
+                  const trimmedNote = note.trim();
+                  if (!trimmedNote) {
+                    await nativeAlert("必须填写处理备注或驳回原因。");
+                    return;
+                  }
+                  try {
+                    const { patchOpsAlertGroup } = await import("./controllers/ops-alerts.ts");
+                    if (isAccepted) {
+                      await patchOpsAlertGroup(state, id, {
+                        status: "resolved",
+                        ackNote: trimmedNote,
+                        resolvedReason: "accepted_ai_suggestion",
+                      });
+                    } else {
+                      await patchOpsAlertGroup(state, id, {
+                        status: "active",
+                        ackNote: trimmedNote,
+                      });
+                    }
+                    const conclusion =
+                      aiMode === "similar"
+                        ? `相似告警聚合建议${isAccepted ? "已确认" : "已驳回"}：${trimmedNote}`
+                        : aiMode === "action"
+                          ? `处置建议${isAccepted ? "已确认" : "已驳回"}：${trimmedNote}`
+                          : `根因分析建议${isAccepted ? "已确认" : "已驳回"}：${trimmedNote}`;
+                    const taskId = await createEmployeeTask(state, {
+                      employeeId: "builtin-bch-oncall",
+                      domainKey: domain,
+                      capabilityKey: "observability-alert",
+                      scenarioKey: `bch-alert-${aiMode}`,
+                      objectRef: id,
+                      triggerType: "alert",
+                      executionStatus: "succeeded",
+                      workflowStatus: isAccepted ? "closed" : "rejected",
+                      input: [
+                        `告警组: ${alert.title}`,
+                        `严重级别: ${alert.severity}`,
+                        `原始告警数: ${alert.originalCount}`,
+                        `降噪后: ${alert.reducedTo}`,
+                      ].join("\n"),
+                      output: [
+                        alert.rootCause ? `根因候选: ${alert.rootCause}` : "",
+                        alert.impact ? `影响范围: ${alert.impact}` : "",
+                        `处理备注: ${trimmedNote}`,
+                      ]
+                        .filter(Boolean)
+                        .join("\n"),
+                      conclusion,
+                      operator: state.rbacUser?.username ?? "operator",
+                      evaluation: decision,
+                      artifacts: [`ops-alert-group:${id}`, `workbench-mode:${aiMode}`],
+                      metrics: {
+                        rawAlertCount: alert.originalCount,
+                        reducedAlertCount: alert.reducedTo,
+                        savedHours: Math.max(0, (alert.originalCount - alert.reducedTo) * 0.08),
+                      },
+                    });
+                    await state.loadOpsDomainAlerts(domain);
+                    state.opsSelectedEntityIds = {
+                      ...state.opsSelectedEntityIds,
+                      workbenchAiPanel: "closed",
+                      lastWorkbenchTaskId: taskId ?? "",
+                    };
+                    await nativeAlert(
+                      taskId
+                        ? isAccepted
+                          ? "建议已确认，并已写入执行记录。"
+                          : "建议已驳回，并已写入执行记录。"
+                        : "告警状态已更新，但执行记录写入失败，请到执行记录页检查。",
+                    );
+                  } catch (err) {
+                    await nativeAlert(err instanceof Error ? err.message : String(err));
+                  }
+                };
+                return renderWorkbench({
+                  domainName: opsDomainLabel(domain),
+                  domainFilter: renderDomainFilter({
+                    selectedDomain: selectedOpsDomain,
+                    user: state.rbacUser,
+                    includeAll: true,
+                    onChange: setGlobalOpsDomain,
+                  }),
+                  alertsLoading: state.opsAlertsLoading?.[domain] ?? false,
+                  alertsError: state.opsAlertsError?.[domain] ?? null,
+                  alertGroups,
+                  selectedAlertGroupId: selectedId,
+                  aiPanelOpen: state.opsSelectedEntityIds?.workbenchAiPanel === "open",
+                  aiPanelMode: aiMode,
+                  onRefreshAlerts: () => state.loadOpsDomainAlerts(domain),
+                  onSelectAlertGroup: (id) => {
+                    state.opsSelectedAlertGroupIds = {
+                      ...state.opsSelectedAlertGroupIds,
+                      [domain]: id,
+                    };
+                  },
+                  onOpenAiPanel: (mode) => {
+                    state.opsSelectedEntityIds = {
+                      ...state.opsSelectedEntityIds,
+                      workbenchAiPanel: "open",
+                      workbenchAiMode: mode,
+                    };
+                  },
+                  onCloseAiPanel: () => {
+                    state.opsSelectedEntityIds = {
+                      ...state.opsSelectedEntityIds,
+                      workbenchAiPanel: "closed",
+                    };
+                  },
+                  onSendToCopilot: async (id, mode) => {
+                    const alert = alertGroups.find((g) => g.id === id);
+                    if (!alert) return;
+                    state.sessionKey = "main";
+                    state.setTab("message");
+                    const question =
+                      mode === "action"
+                        ? `请基于当前 BCH 告警组给出处置建议：${alert.title}`
+                        : mode === "similar"
+                          ? `请分析当前 BCH 告警组的相似告警聚合逻辑，并判断是否还需要继续降噪：${alert.title}`
+                          : `请基于当前 BCH 告警组分析根因，并给出验证步骤：${alert.title}`;
+                    state.chatMessage = question;
+                    await loadChatHistory(state);
+                    const runId = await sendChatMessage(state, question, [], state.chatModelRef ?? null, {
+                      context: {
+                        domain,
+                        capability: "observability-alert",
+                        workflowType: mode === "action" ? "incident" : "diagnosis",
+                        objectType: "alert",
+                        objectId: alert.id,
+                        severity: alert.severity,
+                        service: "BCH",
+                        cluster: "BCH 生态",
+                        summary: [
+                          alert.title,
+                          alert.rootCause ? `根因候选: ${alert.rootCause}` : "",
+                          alert.impact ? `影响范围: ${alert.impact}` : "",
+                          alert.analysisMarkdown ? `分析材料: ${alert.analysisMarkdown}` : "",
+                        ]
+                          .filter(Boolean)
+                          .join("\n"),
+                      },
+                    });
+                    if (runId) {
+                      state.chatMessage = "";
+                    }
+                  },
+                  onAcceptSuggestion: (id) => void recordAiDecision(id, "accepted"),
+                  onRejectSuggestion: (id) => void recordAiDecision(id, "rejected"),
+                  onOpenTasks: (id) => {
+                    state.employeeTaskFilterQuery = id;
+                    state.setTab("employeeTasks");
+                    void loadEmployeeTasks(state);
+                  },
+                });
+              })()
+            : nothing
+        }
+
+        ${
+          state.tab === "assets"
+            ? renderAssetsView({
+                clusters: state.opsClusters,
+                loading: state.opsClustersLoading,
+                error: state.opsClustersError,
+                cmdbSyncing: state.opsCmdbSyncing,
+                cmdbSyncHint: state.opsCmdbSyncMessage,
+                selectedDomain: selectedOpsDomain,
+                user: state.rbacUser,
+                canManage:
+                  state.rbacUser?.roleName === "admin" ||
+                  (state.rbacUser?.permissions?.includes("menu:config") ?? false),
+                onRefresh: () => (state as any).loadOpsClusters(),
+                onDomainChange: (domain) => setGlobalOpsDomain(normalizeOpsDomain(domain)),
+                onSyncCmdb:
+                  state.rbacUser?.roleName === "admin" ||
+                  (state.rbacUser?.permissions?.includes("menu:config") ?? false)
+                    ? () => (state as any).syncOpsClustersFromCMDB()
+                    : undefined,
+                onOpenSettings: () => state.setTab("config"),
+                onAddCluster: async (payload) => {
+                  const { createOpsCluster } = await import("./controllers/ops-clusters.ts");
+                  await createOpsCluster(state as any, {
+                    name: payload.name,
+                    domain: payload.domain,
+                    region: payload.region,
+                    nodeCount: payload.nodeCount,
+                    components: payload.components
+                      .split(",")
+                      .map((s) => s.trim())
+                      .filter(Boolean),
+                    owner: payload.owner,
+                    status: payload.status,
+                    monitorLabels: payload.monitorLabels,
+                    vmUrlRef: payload.vmUrlRef,
+                    metricsBaseUrl: payload.metricsBaseUrl,
+                    jmxUrl: payload.jmxUrl,
+                    fiManagerUrl: payload.fiManagerUrl,
+                    gbaseDsnRef: payload.gbaseDsnRef,
+                    credentialsRef: payload.credentialsRef,
+                  });
+                  await (state as any).loadOpsClusters();
+                  await (state as any).loadOpsDashboard();
+                },
               })
             : nothing
         }
@@ -1967,7 +2243,7 @@ export function renderApp(state: AppViewState) {
         }
 
         ${
-          state.tab === "employeeCenter"
+          state.tab === "automation" || state.tab === "employeeCenter"
             ? (() => {
                 if (!state.digitalEmployeesLoading && (state.digitalEmployees?.length ?? 0) === 0) {
                   queueMicrotask(() => void loadDigitalEmployees(state));

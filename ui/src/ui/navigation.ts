@@ -29,6 +29,9 @@ export type Tab =
   | "community"
   | "agents"
   | "overview"
+  | "workbench"
+  | "assets"
+  | "automation"
   | "techDomains"
   | "opsCapabilities"
   | "channels"
@@ -74,6 +77,9 @@ const TAB_PATHS: Record<Tab, string> = {
   community: "/community",
   agents: "/agents",
   overview: "/overview",
+  workbench: "/workbench",
+  assets: "/assets",
+  automation: "/automation",
   techDomains: "/tech-domains",
   opsCapabilities: "/ops-capabilities",
   channels: "/channels",
@@ -104,6 +110,13 @@ const TAB_PATHS: Record<Tab, string> = {
 };
 
 const PATH_TO_TAB = new Map(Object.entries(TAB_PATHS).map(([tab, path]) => [path, tab as Tab]));
+
+const LEGACY_PATH_TO_TAB = new Map<string, Tab>([
+  ["/employee-center", "automation"],
+  ["/ops-capabilities", "workbench"],
+  ["/tech-domains", "assets"],
+  ["/asset-management", "assets"],
+]);
 
 const ACTIVE_TOP_TAB_ICONS: Partial<Record<Tab, IconName>> = {
   message: "messageSquareActive",
@@ -170,6 +183,10 @@ export function tabFromPath(pathname: string, basePath = ""): Tab | null {
   }
   if (normalized === "/") {
     return "message";
+  }
+  const legacy = LEGACY_PATH_TO_TAB.get(normalized);
+  if (legacy) {
+    return legacy;
   }
   return PATH_TO_TAB.get(normalized) ?? null;
 }
@@ -243,6 +260,12 @@ export function iconForTab(tab: Tab, active = false): IconName {
       return "brain";
     case "assetManagement":
       return "server";
+    case "workbench":
+      return "layout";
+    case "assets":
+      return "server";
+    case "automation":
+      return "zap";
     case "overview":
       return "overviewGrid";
     case "techDomains":
@@ -295,19 +318,19 @@ export function iconForTab(tab: Tab, active = false): IconName {
 export function titleForTab(tab: Tab) {
   switch (tab) {
     case "message":
-      return "消息";
+      return "AI 运维助手";
     case "scheduledTasks":
       return "定时任务";
     case "cronHistory":
       return "运行历史";
     case "employeeCenter":
-      return "数字员工中心";
+      return "自动化配置";
     case "employeeMarket":
-      return "员工市场";
+      return "助手模板库";
     case "employeeTasks":
-      return "任务记录";
+      return "执行记录";
     case "employeeEffectiveness":
-      return "效能评估";
+      return "自动化效果";
     case "skillLibrary":
       return "技能库";
     case "toolLibrary":
@@ -328,6 +351,12 @@ export function titleForTab(tab: Tab) {
       return t("navTitleChat");
     case "overview":
       return "运维驾驶舱";
+    case "workbench":
+      return "运维工作台";
+    case "assets":
+      return "服务与资产";
+    case "automation":
+      return "自动化配置";
     case "techDomains":
       return "技术域运维";
     case "opsCapabilities":
@@ -365,9 +394,9 @@ export function titleForTab(tab: Tab) {
     case "dataapps":
       return "数据 App 运维";
     case "digitalEmployee":
-      return "我的员工";
+      return "我的助手";
     case "agentSwarm":
-      return "员工编排";
+      return "工作流编排";
     default:
       return t("navTitleControl");
   }

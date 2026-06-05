@@ -50,6 +50,55 @@ export type EmployeeEffectiveness = {
   domainBreakdown: Record<string, number>;
 };
 
+export type CreateEmployeeTaskInput = {
+  employeeId: string;
+  domainKey: string;
+  capabilityKey: string;
+  scenarioKey: string;
+  objectRef: string;
+  triggerType: string;
+  executionStatus: string;
+  workflowStatus: string;
+  input: string;
+  output: string;
+  conclusion: string;
+  operator?: string;
+  evaluation?: "unrated" | "accepted" | "rejected";
+  artifacts?: string[];
+  metrics?: {
+    rawAlertCount?: number;
+    reducedAlertCount?: number;
+    savedHours?: number;
+    costUsd?: number;
+    mttaMs?: number;
+    mttrMs?: number;
+  };
+};
+
+export async function createEmployeeTask(
+  state: AppViewState,
+  input: CreateEmployeeTaskInput,
+): Promise<string | null> {
+  if (!state.client || !state.connected) {
+    return null;
+  }
+  try {
+    const now = Date.now();
+    const res = await state.client.request<{ id?: string }>("employee.tasks.create", {
+      ...input,
+      startedAt: now,
+      finishedAt: now,
+      metrics: input.metrics,
+    });
+    void loadEmployeeTasks(state);
+    void loadEmployeeEffectiveness(state);
+    return res?.id ?? null;
+  } catch (err) {
+    state.employeeTasksError = "创建执行记录失败: " + String(err);
+    return null;
+  }
+}
+
 export async function loadEmployeeTasks(state: AppViewState) {
   if (!state.client || !state.connected) {
     return;

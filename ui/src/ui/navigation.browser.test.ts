@@ -101,19 +101,19 @@ describe("control UI routing", () => {
     }
     content.scrollTop = 320;
 
-    const link = app.querySelector<HTMLButtonElement>('button[data-tour-tab="techDomains"]');
+    const link = app.querySelector<HTMLButtonElement>('button[data-tour-tab="workbench"]');
     expect(link).not.toBeNull();
     link?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 }));
 
     await app.updateComplete;
-    expect(app.tab).toBe("techDomains");
-    expect(window.location.pathname).toBe("/tech-domains");
+    expect(app.tab).toBe("workbench");
+    expect(window.location.pathname).toBe("/workbench");
     expect(app.querySelector<HTMLElement>(".content")?.scrollTop).toBe(0);
   });
 
   it("highlights the active top tab for catalog routes", async () => {
     const cases = [
-      ["/employee-market", "数字员工中心"],
+      ["/employee-market", "助手模板库"],
       ["/skill-library", "技能库"],
       ["/tool-library", "工具库"],
       ["/model-library", "模型"],
@@ -129,6 +129,14 @@ describe("control UI routing", () => {
       expect(activeTab?.textContent).toContain(expected);
       expect(window.location.pathname).toBe(pathname);
     }
+  });
+
+  it("normalizes legacy employee center routes", async () => {
+    const app = mountApp("/employee-center");
+    await app.updateComplete;
+
+    expect(app.tab).toBe("automation");
+    expect(window.location.pathname).toBe("/automation");
   });
 
   it("renders the model tab before tutorials and removes the community tab", async () => {

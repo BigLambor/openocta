@@ -39,6 +39,7 @@ import {
   type Tab,
 } from "./navigation.ts";
 import { saveSettings, type UiSettings } from "./storage.ts";
+import { normalizeOpsDomain } from "./components/domain-filter.ts";
 import { applyOpsDeepLinkFromUrl } from "./ops/deeplink.ts";
 import { isOpsDomainTab } from "./ops/entity-config.ts";
 import { ensureDefaultOpsCapabilityTab } from "./ops/navigation.ts";
@@ -79,6 +80,27 @@ function scrollContentToTop(host: SettingsHost) {
     return;
   }
   content.scrollTop = 0;
+}
+
+function canOpenTab(host: SettingsHost, tab: Tab): boolean {
+  if (!host.rbacUser) {
+    return true;
+  }
+  if (host.rbacUser.roleName === "admin") {
+    return true;
+  }
+  if (tab === "automation" || tab === "employeeCenter" || tab === "employeeMarket" || tab === "digitalEmployee" || tab === "agentSwarm") {
+    return false;
+  }
+  if (tab === "workbench" || tab === "assets" || tab === "techDomains" || tab === "opsCapabilities") {
+    return ["hadoop", "fi", "gbase", "governance", "dataapps"].some((key) =>
+      host.rbacUser.permissions?.includes(`menu:${key}`),
+    );
+  }
+  if (["overview", "hadoop", "fi", "gbase", "governance", "dataapps", "config"].includes(tab)) {
+    return host.rbacUser.permissions?.includes(`menu:${tab}`);
+  }
+  return true;
 }
 
 export function applySettings(host: SettingsHost, next: UiSettings) {
@@ -153,6 +175,12 @@ export function applySettingsFromUrl(host: SettingsHost) {
     shouldCleanUrl = true;
   }
 
+  const domainRaw = params.get("domain");
+  if (domainRaw != null) {
+    const domain = normalizeOpsDomain(domainRaw);
+    applySettings(host, { ...host.settings, opsDomain: domain });
+  }
+
   if (!shouldCleanUrl) {
     return;
   }
@@ -165,13 +193,8 @@ export function setTab(host: SettingsHost, next: Tab) {
   const nextTab =
     next === "chat" && (host.sessionKey?.trim() ?? "") ? ("message" as Tab) : next;
 
-  if (host.rbacUser && host.rbacUser.roleName !== "admin") {
-    const permission = `menu:${nextTab}`;
-    if (["overview", "hadoop", "fi", "gbase", "governance", "dataapps", "config"].includes(nextTab)) {
-      if (!host.rbacUser.permissions.includes(permission)) {
-        return;
-      }
-    }
+  if (!canOpenTab(host, nextTab)) {
+    return;
   }
 
   const tabChanged = host.tab !== nextTab;
@@ -256,7 +279,12 @@ export async function refreshActiveTab(host: SettingsHost) {
       await app.loadOpsDashboard();
     }
   }
-  if (host.tab === "assetManagement") {
+  if (host.tab === "workbench") {
+    const app = host as unknown as { loadOpsDomainAlerts?: (d: string) => Promise<void> };
+    const domain = normalizeOpsDomain(host.settings.opsDomain);
+    await app.loadOpsDomainAlerts?.(domain === "all" ? "hadoop" : domain);
+  }
+  if (host.tab === "assets" || host.tab === "assetManagement") {
     const app = host as unknown as { loadOpsClusters?: () => Promise<void> };
     if (app.loadOpsClusters) {
       await app.loadOpsClusters();
@@ -493,6 +521,7 @@ export function onPopState(host: SettingsHost) {
 
   const url = new URL(window.location.href);
   const session = url.searchParams.get("session")?.trim();
+  const domain = url.searchParams.get("domain");
   if (session) {
     host.sessionKey = session;
     applySettings(host, {
@@ -501,18 +530,16 @@ export function onPopState(host: SettingsHost) {
       lastActiveSessionKey: session,
     });
   }
+  if (domain != null) {
+    applySettings(host, { ...host.settings, opsDomain: normalizeOpsDomain(domain) });
+  }
 
   setTabFromRoute(host, resolved);
 }
 
 export function setTabFromRoute(host: SettingsHost, next: Tab) {
-  if (host.rbacUser && host.rbacUser.roleName !== "admin") {
-    const permission = `menu:${next}`;
-    if (["overview", "hadoop", "fi", "gbase", "governance", "dataapps", "config"].includes(next)) {
-      if (!host.rbacUser.permissions.includes(permission)) {
-        return;
-      }
-    }
+  if (!canOpenTab(host, next)) {
+    return;
   }
 
   const tabChanged = host.tab !== next;
@@ -557,6 +584,17 @@ export function syncUrlWithTab(host: SettingsHost, tab: Tab, replace: boolean) {
     url.searchParams.set("session", host.sessionKey);
   } else {
     url.searchParams.delete("session");
+  }
+
+  if (tab === "overview" || tab === "workbench" || tab === "assets") {
+    const domain = normalizeOpsDomain(host.settings.opsDomain);
+    if (domain === "all") {
+      url.searchParams.delete("domain");
+    } else {
+      url.searchParams.set("domain", domain);
+    }
+  } else {
+    url.searchParams.delete("domain");
   }
 
   if (currentPath !== targetPath) {
