@@ -451,6 +451,13 @@ export class OpenClawApp extends LitElement implements NativeDialogInvoker {
   @state() opsBchScenarioSummaryError: string | null = null;
   @state() opsGlobalInspecting = false;
   @state() opsDashboardToast: string | null = null;
+  @state() opsDashboardFeedLoading = false;
+  @state() opsDashboardFeedError: string | null = null;
+  @state() opsDashboardAlertHighlights: import("./controllers/ops-dashboard-feed.ts").DashboardAlertHighlight[] =
+    [];
+  @state() opsDashboardDomainPendingAlerts: Record<string, number> = {};
+  @state() opsDashboardRecentInspections: import("./controllers/ops-dashboard-feed.ts").DashboardInspectionRun[] =
+    [];
 
   @state() agentsLoading = false;
   @state() agentsList: AgentsListResult | null = null;
@@ -952,11 +959,49 @@ export class OpenClawApp extends LitElement implements NativeDialogInvoker {
     try {
       const { fetchOpsDashboardSummary } = await import("./controllers/ops-clusters.ts");
       this.opsDashboardSummary = await fetchOpsDashboardSummary(this);
+      void this.loadOpsDashboardFeed();
     } catch (err) {
       this.opsDashboardError = err instanceof Error ? err.message : String(err);
       this.opsDashboardSummary = null;
+      this.opsDashboardAlertHighlights = [];
+      this.opsDashboardDomainPendingAlerts = {};
+      this.opsDashboardRecentInspections = [];
+      this.opsDashboardFeedError = null;
     } finally {
       this.opsDashboardLoading = false;
+    }
+  }
+
+  async loadOpsDashboardFeed() {
+    if (this.opsDashboardFeedLoading) {
+      return;
+    }
+    const summary = this.opsDashboardSummary;
+    if (!summary) {
+      this.opsDashboardAlertHighlights = [];
+      this.opsDashboardDomainPendingAlerts = {};
+      this.opsDashboardRecentInspections = [];
+      this.opsDashboardFeedError = null;
+      return;
+    }
+    this.opsDashboardFeedLoading = true;
+    this.opsDashboardFeedError = null;
+    try {
+      const { loadOpsDashboardFeed } = await import("./controllers/ops-dashboard-feed.ts");
+      const managedDomains = summary.domains
+        .filter((d) => d.clusterCount > 0)
+        .map((d) => d.domain);
+      const feed = await loadOpsDashboardFeed(this, managedDomains);
+      this.opsDashboardAlertHighlights = feed.highlights;
+      this.opsDashboardDomainPendingAlerts = feed.pendingByDomain;
+      this.opsDashboardRecentInspections = feed.inspections;
+    } catch (err) {
+      this.opsDashboardFeedError = err instanceof Error ? err.message : String(err);
+      this.opsDashboardAlertHighlights = [];
+      this.opsDashboardDomainPendingAlerts = {};
+      this.opsDashboardRecentInspections = [];
+    } finally {
+      this.opsDashboardFeedLoading = false;
     }
   }
 
@@ -1005,11 +1050,21 @@ export class OpenClawApp extends LitElement implements NativeDialogInvoker {
           : `已并行启动 ${started} 个业务域深度巡检。`;
       this.setOpsDashboardToast(msg);
       void this.setTab("scheduledTasks");
+      void this.loadOpsDashboardFeed();
     } catch (err) {
       this.setOpsDashboardToast(err instanceof Error ? err.message : String(err));
     } finally {
       this.opsGlobalInspecting = false;
     }
+  }
+
+  async openDomainAlertsFromDashboard(domain: string) {
+    const tab = domain as import("./navigation.ts").Tab;
+    this.opsActiveSubTabs = { ...this.opsActiveSubTabs, [tab]: "observability" };
+    void this.setTab(tab);
+    void this.loadOpsDomainAlerts(domain);
+    const { opsDomainLabel } = await import("./components/domain-filter.ts");
+    this.setOpsDashboardToast(`已打开 ${opsDomainLabel(domain)} 告警列表`);
   }
 
   async ackOpsAlertGroup(domain: string, groupId: string) {

@@ -21,7 +21,8 @@ func TestSyncClustersFromCMDBBody(t *testing.T) {
 			"domain":     DomainHadoop,
 			"nodeCount":  5,
 			"components": json.RawMessage(`"HDFS,YARN"`),
-			"status":     "healthy",
+			"status":        "healthy",
+			"monitorLabels": `job="hadoop-prod"`,
 		},
 	}
 	res, err := SyncClustersFromCMDB(context.Background(), rows, "upsert", nil)
@@ -56,7 +57,7 @@ func TestSyncClustersFromCMDBWebhook(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"clusters": []map[string]interface{}{
-				{"name": "Webhook-B", "domain": DomainFI, "nodeCount": 3, "status": "unknown"},
+				{"name": "Webhook-B", "domain": DomainFI, "nodeCount": 3, "status": "unknown", "monitorLabels": `job="fi-prod"`},
 			},
 		})
 	}))
@@ -108,6 +109,7 @@ func TestSyncClustersMappingAndStrategy(t *testing.T) {
 			"ext_owner":        "Bob",
 			"ext_status":       "healthy",
 			"ext_desc":         "mapped correctly",
+			"monitorLabels":    `job="gbase-prod"`,
 		},
 	}
 
@@ -136,6 +138,7 @@ func TestSyncClustersMappingAndStrategy(t *testing.T) {
 			"ext_cluster_name": "Mapped-Cluster-2",
 			"ext_domain":       DomainGBase,
 			"ext_status":       "healthy",
+			"monitorLabels":    `job="gbase-prod"`,
 		},
 	}
 
@@ -165,6 +168,7 @@ func TestSyncClustersMappingAndStrategy(t *testing.T) {
 		"ext_cluster_name": "Mapped-Cluster-3",
 		"ext_domain":       DomainGBase,
 		"ext_status":       "healthy",
+		"monitorLabels":    `job="gbase-prod"`,
 	})
 	res3, err := SyncClustersFromCMDB(context.Background(), rows3, "delete", &customMapping)
 	if err != nil {
@@ -216,7 +220,8 @@ func TestSyncClustersFromCMDBDryRunDoesNotMutateStore(t *testing.T) {
 			"name":      "Preview-Only",
 			"domain":    DomainHadoop,
 			"nodeCount": 5,
-			"status":    "healthy",
+			"status":        "healthy",
+			"monitorLabels": `job="hadoop-prod"`,
 		},
 	}
 	res, err := SyncClustersFromCMDB(context.Background(), rows, "dry-run", nil)

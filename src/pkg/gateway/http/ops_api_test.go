@@ -42,21 +42,23 @@ func TestOpsAPIPermissionIsolation(t *testing.T) {
 
 	// Seed test clusters
 	c1, err := ops.CreateCluster(ops.ClusterCreate{
-		Name:      "Hadoop Prod",
-		Domain:    "hadoop",
-		Region:    "region-1",
-		NodeCount: 100,
-		Status:    "healthy",
+		Name:          "Hadoop Prod",
+		Domain:        "hadoop",
+		Region:        "region-1",
+		NodeCount:     100,
+		Status:        "healthy",
+		MonitorLabels: `job="hadoop-prod"`,
 	})
 	if err != nil {
 		t.Fatalf("Create Hadoop cluster: %v", err)
 	}
 	c2, err := ops.CreateCluster(ops.ClusterCreate{
-		Name:      "GBase Prod",
-		Domain:    "gbase",
-		Region:    "region-1",
-		NodeCount: 10,
-		Status:    "healthy",
+		Name:          "GBase Prod",
+		Domain:        "gbase",
+		Region:        "region-1",
+		NodeCount:     10,
+		Status:        "healthy",
+		MonitorLabels: `job="gbase-prod"`,
 	})
 	if err != nil {
 		t.Fatalf("Create GBase cluster: %v", err)

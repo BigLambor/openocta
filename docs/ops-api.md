@@ -58,7 +58,7 @@
 
 | 字段 | 说明 |
 |------|------|
-| `monitorLabels` | 注入 PromQL 的标签片段，例如 `cluster="prod-a",env="prod"` |
+| `monitorLabels` | 注入 PromQL 的标签片段，例如 `cluster="prod-a",env="prod"`。**非 inactive 集群必填**；须与 VM 时序标签一致，详见 [monitorLabels 对齐检查清单](./ops-monitor-labels-checklist.md) |
 | `vmUrlRef` | VictoriaMetrics/Prometheus URL 的环境变量引用名 |
 | `metricsBaseUrl` | 直接配置的指标查询地址；优先级高于 `vmUrlRef` |
 | `jmxUrl` | Hadoop JMX 查询地址 |

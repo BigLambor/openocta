@@ -39,7 +39,8 @@ type CMDBMapping struct {
 	Components  string `json:"components"`
 	Owner       string `json:"owner"`
 	Status      string `json:"status"`
-	Description string `json:"description"`
+	Description    string `json:"description"`
+	MonitorLabels  string `json:"monitorLabels"`
 }
 
 // DefaultMapping is the default fallback mapping configuration.
@@ -51,7 +52,8 @@ var DefaultMapping = CMDBMapping{
 	Components:  "components",
 	Owner:       "owner",
 	Status:      "status",
-	Description: "description",
+	Description:    "description",
+	MonitorLabels:  "monitorLabels",
 }
 
 // LoadCMDBMappingFromEnv loads mapping properties from individual environment overrides or JSON.
@@ -84,6 +86,9 @@ func LoadCMDBMappingFromEnv() CMDBMapping {
 	if v := os.Getenv("OPS_CMDB_MAPPING_DESCRIPTION"); v != "" {
 		m.Description = v
 	}
+	if v := os.Getenv("OPS_CMDB_MAPPING_MONITOR_LABELS"); v != "" {
+		m.MonitorLabels = v
+	}
 	return m
 }
 
@@ -96,7 +101,8 @@ type CMDBClusterImport struct {
 	Components  json.RawMessage `json:"components"`
 	Owner       string          `json:"owner"`
 	Status      string          `json:"status"`
-	Description string          `json:"description"`
+	Description    string          `json:"description"`
+	MonitorLabels  string          `json:"monitorLabels"`
 }
 
 func parseComponentsField(raw json.RawMessage) []string {
@@ -127,7 +133,8 @@ func (r CMDBClusterImport) toCreate() (ClusterCreate, error) {
 		Components:  parseComponentsField(r.Components),
 		Owner:       r.Owner,
 		Status:      r.Status,
-		Description: r.Description,
+		Description:   r.Description,
+		MonitorLabels: r.MonitorLabels,
 	}, nil
 }
 
@@ -154,6 +161,7 @@ func applyCMDBMapping(raw map[string]interface{}, mapping CMDBMapping) CMDBClust
 	row.Owner = getStr(mapping.Owner, "owner")
 	row.Status = getStr(mapping.Status, "status")
 	row.Description = getStr(mapping.Description, "description")
+	row.MonitorLabels = getStr(mapping.MonitorLabels, "monitorLabels")
 
 	nodeKey := "nodeCount"
 	if mapping.NodeCount != "" {
@@ -401,7 +409,11 @@ func validateClusterCreate(in ClusterCreate) error {
 	if in.NodeCount < 0 {
 		return fmt.Errorf("节点数不能为负数")
 	}
-	return nil
+	status := strings.TrimSpace(in.Status)
+	if status == "" {
+		status = "unknown"
+	}
+	return ValidateMonitorLabelsForCluster(in.Domain, status, in.MonitorLabels)
 }
 
 func findClusterByDomainName(domain, name string) (Cluster, bool) {

@@ -154,6 +154,13 @@ func CreateCluster(in ClusterCreate) (Cluster, error) {
 	if in.NodeCount < 0 {
 		return Cluster{}, fmt.Errorf("节点数不能为负数")
 	}
+	if err := ValidateMonitorLabelsForCluster(domain, status, in.MonitorLabels); err != nil {
+		return Cluster{}, err
+	}
+	normalizedLabels, err := NormalizeMonitorLabels(strings.TrimSpace(in.MonitorLabels))
+	if err != nil {
+		return Cluster{}, err
+	}
 
 	components := normalizeComponents(in.Components)
 	now := nowMs()
@@ -169,7 +176,7 @@ func CreateCluster(in ClusterCreate) (Cluster, error) {
 		Description:    strings.TrimSpace(in.Description),
 		CreatedAtMs:    now,
 		UpdatedAtMs:    now,
-		MonitorLabels:  strings.TrimSpace(in.MonitorLabels),
+		MonitorLabels:  normalizedLabels,
 		VMUrlRef:       strings.TrimSpace(in.VMUrlRef),
 		MetricsBaseUrl: strings.TrimSpace(in.MetricsBaseUrl),
 		JMXUrl:         strings.TrimSpace(in.JMXUrl),
@@ -275,6 +282,16 @@ func PatchCluster(id string, patch ClusterPatch) (Cluster, error) {
 	}
 	if patch.CredentialsRef != nil {
 		c.CredentialsRef = strings.TrimSpace(*patch.CredentialsRef)
+	}
+	if err := ValidateMonitorLabelsForCluster(c.Domain, c.Status, c.MonitorLabels); err != nil {
+		return Cluster{}, err
+	}
+	if c.MonitorLabels != "" {
+		normalized, err := NormalizeMonitorLabels(c.MonitorLabels)
+		if err != nil {
+			return Cluster{}, err
+		}
+		c.MonitorLabels = normalized
 	}
 	c.UpdatedAtMs = nowMs()
 	clusters[idx] = c

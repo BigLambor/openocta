@@ -774,6 +774,16 @@ export function renderApp(state: AppViewState) {
       window.history.replaceState({}, "", url.toString());
     }
   };
+  const openClusterAssetManagement = (domain?: string) => {
+    if (domain) {
+      setGlobalOpsDomain(normalizeOpsDomain(domain));
+    }
+    state.opsSelectedEntityIds = {
+      ...state.opsSelectedEntityIds,
+      assetsView: "clusters",
+    };
+    void state.setTab("assets");
+  };
   const isCollapsibleNavPage = isMessagePage || isScheduledTasks || isConfigArea;
   const isSideNavCollapsed = isCollapsibleNavPage && state.settings.navCollapsed;
   const renderNavCollapseFooter = html`
@@ -895,6 +905,8 @@ export function renderApp(state: AppViewState) {
                     ? isDigitalEmployeeArea
                   : tab === "assets"
                     ? state.tab === "assets" || state.tab === "assetManagement"
+                  : tab === "overview"
+                    ? state.tab === "overview" || state.tab === "domainInsight"
                   : Boolean(tab && state.tab === tab && !(item as any).href);
             const iconName = tab ? iconForTab(tab, active) : "globe";
             const iconEl = html`<span class="nav-item__icon" aria-hidden="true">${icons[iconName]}</span>`;
@@ -1530,19 +1542,23 @@ export function renderApp(state: AppViewState) {
                 dashboardError: state.opsDashboardError,
                 globalInspecting: state.opsGlobalInspecting,
                 dashboardToast: state.opsDashboardToast,
-                onOpenAssets: () => state.setTab("assets"),
+                feedLoading: state.opsDashboardFeedLoading,
+                feedError: state.opsDashboardFeedError,
+                alertHighlights: state.opsDashboardAlertHighlights,
+                domainPendingAlerts: state.opsDashboardDomainPendingAlerts,
+                recentInspections: state.opsDashboardRecentInspections,
+                onOpenAssets: () => openClusterAssetManagement(),
                 onOpenConfig: () => state.setTab("config"),
                 onNavigateDomain: (tab) => {
                   setGlobalOpsDomain(normalizeOpsDomain(tab));
                   state.setTab("domainInsight");
                 },
-                onOpenDomainAssets: (tab) => {
-                  setGlobalOpsDomain(normalizeOpsDomain(tab));
-                  state.setTab("assets");
-                },
+                onOpenDomainAssets: (tab) => openClusterAssetManagement(tab),
                 onOpenScheduledTasks: () => state.setTab("scheduledTasks"),
                 onRunGlobalInspection: () => state.runGlobalInspectionFromDashboard(),
                 onOpenPendingAlerts: () => state.openPendingAlertsFromDashboard(),
+                onOpenDomainAlerts: (domain) => state.openDomainAlertsFromDashboard(domain),
+                onReloadFeed: () => state.loadOpsDashboardFeed(),
                 canInspect: canRunInspection(state.rbacUser),
               })
             : nothing
@@ -1563,7 +1579,19 @@ export function renderApp(state: AppViewState) {
                 const domainSummary = state.opsDashboardSummary?.domains?.find((d: any) => d.domain === domain) ?? null;
                 const score = domainSummary?.healthScore != null ? Math.round(domainSummary.healthScore) : undefined;
                 const clusterCount = domainSummary?.clusterCount ?? 0;
-                
+                if (
+                  !state.opsDomainClustersLoading?.[domain] &&
+                  state.opsDomainClusters?.[domain] === undefined
+                ) {
+                  void (state as any).loadOpsDomainClusters?.(domain);
+                }
+                if (
+                  !state.opsAlertsLoading?.[domain] &&
+                  state.opsAlertsByDomain?.[domain] === undefined
+                ) {
+                  void (state as any).loadOpsDomainAlerts?.(domain);
+                }
+
                 const inspectionJobId = `job-inspect-${domain}`;
                 if (
                   state.cronRunsJobId !== inspectionJobId &&
@@ -1587,7 +1615,12 @@ export function renderApp(state: AppViewState) {
                   loading: state.opsDashboardLoading,
                   score,
                   clusterCount,
-                  alertCount: alertGroups.length,
+                  healthyCount: domainSummary?.healthyCount ?? 0,
+                  warningCount: domainSummary?.warningCount ?? 0,
+                  criticalCount: domainSummary?.criticalCount ?? 0,
+                  clusters: state.opsDomainClusters?.[domain] ?? [],
+                  clustersLoading: state.opsDomainClustersLoading?.[domain] ?? false,
+                  alertCount: alertGroups.filter((g: { status?: string }) => g.status !== "resolved").length,
                   inspections,
                   alertGroups,
                   scenarioSummary: domain === "hadoop" ? state.opsBchScenarioSummary : null,

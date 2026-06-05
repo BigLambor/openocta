@@ -2,6 +2,9 @@ import { html, nothing } from "lit";
 import { icons } from "../icons.ts";
 import type { OpsClusterRecord } from "../controllers/ops-clusters.ts";
 import { renderOpsEmpty, renderOpsError, renderOpsSkeleton } from "../components/ops-status.ts";
+import type { OpsMonitorLabelsField } from "../components/ops-monitor-labels-field.ts";
+import { monitorLinkStatus } from "../utils/monitor-labels.ts";
+import "../components/ops-monitor-labels-field.ts";
 
 export type AssetManagementProps = {
   /** 嵌入「服务与资产」页时隐藏重复标题与工具栏 */
@@ -46,6 +49,20 @@ const DOMAIN_LABEL: Record<string, string> = Object.fromEntries(
   DOMAIN_OPTIONS.map((o) => [o.value, o.label]),
 );
 
+function monitorLinkLabel(domain: string, status: string, monitorLabels?: string) {
+  const link = monitorLinkStatus(domain, status, monitorLabels);
+  switch (link) {
+    case "linked":
+      return "已关联 VM";
+    case "missing":
+      return "未配置标签";
+    case "na":
+      return "已下线";
+    default:
+      return "标签待修正";
+  }
+}
+
 function statusLabel(status: string) {
   switch (status) {
     case "healthy":
@@ -88,6 +105,13 @@ export function renderAssetManagement(props: AssetManagementProps = {}) {
                 @submit=${async (e: Event) => {
                   e.preventDefault();
                   const form = e.target as HTMLFormElement;
+                  const labelsField = form.querySelector(
+                    "ops-monitor-labels-field",
+                  ) as OpsMonitorLabelsField | null;
+                  if (labelsField && !labelsField.checkValidity()) {
+                    labelsField.focus();
+                    return;
+                  }
                   const fd = new FormData(form);
                   await props.onAddCluster?.({
                     name: String(fd.get("name") ?? "").trim(),
@@ -97,7 +121,7 @@ export function renderAssetManagement(props: AssetManagementProps = {}) {
                     components: String(fd.get("components") ?? "").trim(),
                     owner: String(fd.get("owner") ?? "").trim(),
                     status: String(fd.get("status") ?? "unknown"),
-                    monitorLabels: String(fd.get("monitorLabels") ?? "").trim(),
+                    monitorLabels: labelsField?.inputValue ?? "",
                     vmUrlRef: String(fd.get("vmUrlRef") ?? "").trim(),
                     metricsBaseUrl: String(fd.get("metricsBaseUrl") ?? "").trim(),
                     jmxUrl: String(fd.get("jmxUrl") ?? "").trim(),
@@ -115,7 +139,16 @@ export function renderAssetManagement(props: AssetManagementProps = {}) {
                 <label class="asset-form__field">
                   <span>业务域</span>
                   <span class="select">
-                    <select name="domain">
+                    <select
+                      name="domain"
+                      @change=${(e: Event) => {
+                        const select = e.target as HTMLSelectElement;
+                        const field = select.form?.querySelector(
+                          "ops-monitor-labels-field",
+                        ) as OpsMonitorLabelsField | null;
+                        if (field) field.domain = select.value;
+                      }}
+                    >
                       ${DOMAIN_OPTIONS.map(
                         (o) => html`<option value=${o.value}>${o.label}</option>`,
                       )}
@@ -141,19 +174,27 @@ export function renderAssetManagement(props: AssetManagementProps = {}) {
                 <label class="asset-form__field">
                   <span>纳管状态</span>
                   <span class="select">
-                    <select name="status">
+                    <select
+                      name="status"
+                      @change=${(e: Event) => {
+                        const select = e.target as HTMLSelectElement;
+                        const field = select.form?.querySelector(
+                          "ops-monitor-labels-field",
+                        ) as OpsMonitorLabelsField | null;
+                        if (field) field.status = select.value;
+                      }}
+                    >
                       <option value="healthy">健康</option>
                       <option value="warning">亚健康</option>
                       <option value="critical">异常</option>
-                      <option value="unknown">未知</option>
+                      <option value="unknown" selected>未知</option>
                       <option value="inactive">已下线</option>
                     </select>
                   </span>
                 </label>
-                <label class="asset-form__field span-2">
-                  <span>监控标签 (JSON)</span>
-                  <input name="monitorLabels" class="asset-form__input" placeholder='{"env":"prod","cluster":"bch"}' />
-                </label>
+                <div class="asset-form__field span-2">
+                  <ops-monitor-labels-field domain="hadoop" status="unknown"></ops-monitor-labels-field>
+                </div>
                 <label class="asset-form__field span-2">
                   <span>VictoriaMetrics/Prometheus 引用 URL</span>
                   <input name="vmUrlRef" class="asset-form__input" placeholder="例如：http://victoria-metrics:8428" />
@@ -215,6 +256,7 @@ export function renderAssetManagement(props: AssetManagementProps = {}) {
                       <th>节点规模</th>
                       <th>核心组件</th>
                       <th>纳管状态</th>
+                      <th>监控关联</th>
                       <th>负责人</th>
                       <th>操作</th>
                     </tr>
@@ -231,6 +273,14 @@ export function renderAssetManagement(props: AssetManagementProps = {}) {
                           <td>
                             <span class="asset-status asset-status--${row.status}">
                               ${statusLabel(row.status)}
+                            </span>
+                          </td>
+                          <td>
+                            <span
+                              class="asset-monitor-link asset-monitor-link--${monitorLinkStatus(row.domain, row.status, row.monitorLabels)}"
+                              title=${row.monitorLabels || "未配置 monitorLabels"}
+                            >
+                              ${monitorLinkLabel(row.domain, row.status, row.monitorLabels)}
                             </span>
                           </td>
                           <td>${row.owner || "—"}</td>
@@ -343,6 +393,32 @@ export function renderAssetManagement(props: AssetManagementProps = {}) {
         color: #94a3b8;
         border: 1px solid rgba(148, 163, 184, 0.24);
       }
+      .asset-monitor-link {
+        font-size: 12px;
+        padding: 2px 8px;
+        border-radius: 12px;
+        border: 1px solid var(--border);
+      }
+      .asset-monitor-link--linked {
+        color: #10b981;
+        border-color: rgba(16, 185, 129, 0.3);
+        background: rgba(16, 185, 129, 0.08);
+      }
+      .asset-monitor-link--missing {
+        color: #f59e0b;
+        border-color: rgba(245, 158, 11, 0.3);
+        background: rgba(245, 158, 11, 0.08);
+      }
+      .asset-monitor-link--invalid {
+        color: #ef4444;
+        border-color: rgba(239, 68, 68, 0.3);
+        background: rgba(239, 68, 68, 0.08);
+      }
+      .asset-monitor-link--na {
+        color: var(--text-muted);
+        border-color: var(--border);
+        background: transparent;
+      }
     </style>
   `;
 
@@ -355,7 +431,11 @@ export function renderAssetManagement(props: AssetManagementProps = {}) {
       <div class="ops-page-header">
         <div>
           <h1>集群资产管理</h1>
-          <p>登记各业务域集群，供运维大屏汇总与上下文选择器使用。</p>
+          <p>
+            登记各业务域集群，供运维大屏汇总与上下文选择器使用。监控关联依赖
+            <code>monitorLabels</code>（非资产 id），详见仓库文档
+            <code>docs/ops-monitor-labels-checklist.md</code>。
+          </p>
         </div>
         <div class="ops-toolbar">
           ${props.onSyncCmdb

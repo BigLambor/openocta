@@ -12,12 +12,13 @@ func TestClusterCRUD(t *testing.T) {
 	}
 
 	created, err := CreateCluster(ClusterCreate{
-		Name:       "北京生产",
-		Domain:     DomainHadoop,
-		NodeCount:  10,
-		Components: []string{"HDFS", "YARN"},
-		Status:     "healthy",
-		Owner:      "ops-a",
+		Name:          "北京生产",
+		Domain:        DomainHadoop,
+		NodeCount:     10,
+		Components:    []string{"HDFS", "YARN"},
+		Status:        "healthy",
+		Owner:         "ops-a",
+		MonitorLabels: `job="hadoop-prod"`,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -51,7 +52,7 @@ func TestClusterCRUD(t *testing.T) {
 	if err := InitStore(dir); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := CreateCluster(ClusterCreate{Name: "x", Domain: DomainFI, Status: "unknown"}); err != nil {
+	if _, err := CreateCluster(ClusterCreate{Name: "x", Domain: DomainFI, Status: "unknown", MonitorLabels: `job="fi-prod"`}); err != nil {
 		t.Fatal(err)
 	}
 	if err := InitStore(dir); err != nil {
@@ -68,8 +69,8 @@ func TestBuildDashboardSummary(t *testing.T) {
 	if err := InitStore(dir); err != nil {
 		t.Fatal(err)
 	}
-	_, _ = CreateCluster(ClusterCreate{Name: "a", Domain: DomainHadoop, Status: "healthy"})
-	_, _ = CreateCluster(ClusterCreate{Name: "b", Domain: DomainHadoop, Status: "warning"})
+	_, _ = CreateCluster(ClusterCreate{Name: "a", Domain: DomainHadoop, Status: "healthy", MonitorLabels: `job="hadoop-prod"`})
+	_, _ = CreateCluster(ClusterCreate{Name: "b", Domain: DomainHadoop, Status: "warning", MonitorLabels: `job="hadoop-prod"`})
 
 	s := BuildDashboardSummary()
 	if s.TotalClusters != 2 || s.HealthyClusters != 1 || s.WarningClusters != 1 {
