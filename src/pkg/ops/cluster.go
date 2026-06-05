@@ -104,15 +104,19 @@ type DashboardSummary struct {
 
 // DomainHealthSummary is per-domain rollup on the dashboard.
 type DomainHealthSummary struct {
-	Domain            string `json:"domain"`
-	ClusterCount      int    `json:"clusterCount"`
-	HealthyCount      int    `json:"healthyCount"`
-	WarningCount      int    `json:"warningCount"`
-	CriticalCount     int    `json:"criticalCount"`
-	HealthScore       *int   `json:"healthScore,omitempty"`
-	HealthScoreSource string `json:"healthScoreSource,omitempty"`
-	HealthScoreNote   string `json:"healthScoreNote,omitempty"`
-	Note              string `json:"note,omitempty"`
+	Domain            string   `json:"domain"`
+	ClusterCount      int      `json:"clusterCount"`
+	HealthyCount      int      `json:"healthyCount"`
+	WarningCount      int      `json:"warningCount"`
+	CriticalCount     int      `json:"criticalCount"`
+	HealthScore       *int     `json:"healthScore,omitempty"`
+	HealthScoreSource string   `json:"healthScoreSource,omitempty"`
+	HealthScoreNote   string   `json:"healthScoreNote,omitempty"`
+	ScoreStatus       string   `json:"scoreStatus,omitempty"`
+	Coverage          *float64 `json:"coverage,omitempty"`
+	MissingSources    []string `json:"missingSources,omitempty"`
+	PresentSources    []string `json:"presentSources,omitempty"`
+	Note              string   `json:"note,omitempty"`
 }
 
 func NormalizeDomain(domain string) (string, error) {

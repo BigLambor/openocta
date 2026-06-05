@@ -39,4 +39,42 @@ describe("runDomainInspectionWithPoll", () => {
     expect(state.opsSelectedInspectionIds.hadoop).toBe("session-1");
     expect(state.opsIsInspecting.hadoop).toBe(false);
   });
+
+  it("passes the GBase health scenario key to cron.run", async () => {
+    const requests: Array<{ method: string; params: unknown }> = [];
+    const state = {
+      tab: "gbase",
+      connected: true,
+      client: {
+        request: vi.fn(async (method: string, params: unknown) => {
+          requests.push({ method, params });
+          if (method === "cron.runs") {
+            return { entries: [{ status: "ok", sessionId: "session-gbase" }] };
+          }
+          return { ok: true };
+        }),
+      },
+      cronRuns: [],
+      opsIsInspecting: {},
+      opsSelectedInspectionIds: {},
+      opsSelectedEntityIds: {
+        gbase: "gbase-cluster-1",
+      },
+    } as OpsInspectionRunHost & { connected: boolean; opsSelectedEntityIds: Record<string, string> };
+
+    await runDomainInspectionWithPoll(state, "job-inspect-gbase");
+
+    expect(requests[0]).toEqual({
+      method: "cron.run",
+      params: {
+        id: "job-inspect-gbase",
+        mode: "force",
+        domain: "gbase",
+        clusterId: "gbase-cluster-1",
+        component: "",
+        scenarioKey: "ops-gbase-health",
+      },
+    });
+    expect(state.opsSelectedInspectionIds.gbase).toBe("session-gbase");
+  });
 });

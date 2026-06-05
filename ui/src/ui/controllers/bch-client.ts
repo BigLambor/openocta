@@ -4,6 +4,11 @@ export interface BchClusterHealth {
   region: string;
   status: "healthy" | "warning" | "critical";
   score: number;
+  scoreStatus: "ok" | "degraded" | "warning" | "partial" | "critical" | "unknown";
+  coverage: number;
+  freshness: "ok" | "expired" | "unknown";
+  presentSources: string[];
+  missingSources: string[];
   nodeCount: number;
   activeAlerts: number;
   cpuUsedPercent: number;

@@ -54,25 +54,30 @@ func DeliverCronResultIfNeeded(ctx *Context, sessionKey, summary, status string)
 	// Fallback/Automatic routing for inspection jobs
 	isInspectionJob := strings.HasPrefix(jobID, "job-inspect-")
 	var isCritical bool
+	var isDegraded bool
 	var scoreText string = "未知"
+	var res ops.InspectionResult
+
 	if isInspectionJob {
-		res := ops.ParseInspectionResult("", jobID, summary, status, 0, 0)
+		res = ops.ParseInspectionResult("", jobID, summary, status, 0, 0)
 		if res.Score != nil {
 			scoreVal := *res.Score
 			scoreText = fmt.Sprintf("%d", scoreVal)
-			if scoreVal < 85 {
+			if scoreVal < 85 && res.ScoreStatus != "degraded" && res.ScoreStatus != "unknown" {
 				isCritical = true
 			}
-		} else {
-			if res.ScoreStatus == "degraded" || status != "ok" || len(res.Errors) > 0 {
-				isCritical = true
-			}
-		}
-		if len(res.Errors) > 0 {
+		} 
+		
+		// If score is absent or degraded, it's not a normal low-score critical alert,
+		// but rather a degraded exception.
+		if res.ScoreStatus == "degraded" || res.ScoreStatus == "unknown" || len(res.MissingSources) > 0 {
+			isDegraded = true
+		} else if status != "ok" || len(res.Errors) > 0 {
+			// Other fatal errors
 			isCritical = true
 		}
 
-		if isCritical && (job.Delivery == nil || job.Delivery.Mode == "none" || job.Delivery.Mode == "") {
+		if (isCritical || isDegraded) && (job.Delivery == nil || job.Delivery.Mode == "none" || job.Delivery.Mode == "") {
 			// Try to find an enabled channel to send the alert
 			var targetChannel string
 			if ctx.Config != nil && ctx.Config.Channels != nil {
@@ -96,7 +101,11 @@ func DeliverCronResultIfNeeded(ctx *Context, sessionKey, summary, status string)
 					link = ops.BuildUIDeepLink(domain + "?opsSubTab=inspections")
 				}
 				var alertMessage string
-				if res.Score != nil {
+				
+				if isDegraded {
+					header = "巡检降级告警 · " + job.Name
+					alertMessage = fmt.Sprintf("由于缺失核心数据源，巡检任务【%s】触发降级状态 (ScoreStatus: %s)。\n缺失来源: %s\n详情查看: %s", job.Name, res.ScoreStatus, strings.Join(res.MissingSources, ", "), link)
+				} else if res.Score != nil {
 					alertMessage = ops.FormatInspectionAlertCard(job.Name, *res.Score, summary, link)
 				} else {
 					alertMessage = fmt.Sprintf("巡检任务【%s】执行异常，未生成健康度得分。\n错误详情：%s\n查看报告：%s", job.Name, strings.Join(res.Errors, ", "), link)
@@ -108,8 +117,8 @@ func DeliverCronResultIfNeeded(ctx *Context, sessionKey, summary, status string)
 					"header":  header,
 				}
 				_, _, _ = ctx.InvokeMethod("send", params)
-			} else if isCritical {
-				slog.Warn("inspection alert skipped: no IM channel enabled", "jobId", jobID, "score", scoreText)
+			} else if isCritical || isDegraded {
+				slog.Warn("inspection alert skipped: no IM channel enabled", "jobId", jobID, "score", scoreText, "isDegraded", isDegraded)
 			}
 		}
 	}

@@ -29,6 +29,10 @@ func InitStore(stateDir string) error {
 		return err
 	}
 	clusters = store.Clusters
+	for i := range clusters {
+		clusters[i].MetricsBaseUrl = normalizeMetricsBaseURL(clusters[i].MetricsBaseUrl)
+		clusters[i].VMUrlRef = strings.TrimSpace(clusters[i].VMUrlRef)
+	}
 
 	if len(clusters) == 0 && flag.Lookup("test.v") == nil {
 		clusters = []Cluster{
@@ -44,7 +48,7 @@ func InitStore(stateDir string) error {
 				CreatedAtMs:    nowMs(),
 				UpdatedAtMs:    nowMs(),
 				MonitorLabels:  "job=hadoop-prod",
-				MetricsBaseUrl: "http://127.0.0.1:18900/api/v1/query",
+				MetricsBaseUrl: "http://127.0.0.1:18900",
 			},
 			{
 				ID:             "cluster-gbase-prod",
@@ -58,7 +62,7 @@ func InitStore(stateDir string) error {
 				CreatedAtMs:    nowMs(),
 				UpdatedAtMs:    nowMs(),
 				MonitorLabels:  "job=gbase-prod",
-				MetricsBaseUrl: "http://127.0.0.1:18900/api/v1/query",
+				MetricsBaseUrl: "http://127.0.0.1:18900",
 			},
 			{
 				ID:             "cluster-fi-prod",
@@ -72,7 +76,7 @@ func InitStore(stateDir string) error {
 				CreatedAtMs:    nowMs(),
 				UpdatedAtMs:    nowMs(),
 				MonitorLabels:  "job=fi-prod",
-				MetricsBaseUrl: "http://127.0.0.1:18900/api/v1/query",
+				MetricsBaseUrl: "http://127.0.0.1:18900",
 			},
 			{
 				ID:             "cluster-gov-platform",
@@ -86,7 +90,7 @@ func InitStore(stateDir string) error {
 				CreatedAtMs:    nowMs(),
 				UpdatedAtMs:    nowMs(),
 				MonitorLabels:  "job=gov-platform",
-				MetricsBaseUrl: "http://127.0.0.1:18900/api/v1/query",
+				MetricsBaseUrl: "http://127.0.0.1:18900",
 			},
 			{
 				ID:             "cluster-dataapp-scheduler",
@@ -100,7 +104,7 @@ func InitStore(stateDir string) error {
 				CreatedAtMs:    nowMs(),
 				UpdatedAtMs:    nowMs(),
 				MonitorLabels:  "job=dataapp-scheduler",
-				MetricsBaseUrl: "http://127.0.0.1:18900/api/v1/query",
+				MetricsBaseUrl: "http://127.0.0.1:18900",
 			},
 		}
 		_ = SaveStore(storePath, &storeFile{Version: 1, Clusters: clusters})
@@ -178,7 +182,7 @@ func CreateCluster(in ClusterCreate) (Cluster, error) {
 		UpdatedAtMs:    now,
 		MonitorLabels:  normalizedLabels,
 		VMUrlRef:       strings.TrimSpace(in.VMUrlRef),
-		MetricsBaseUrl: strings.TrimSpace(in.MetricsBaseUrl),
+		MetricsBaseUrl: normalizeMetricsBaseURL(in.MetricsBaseUrl),
 		JMXUrl:         strings.TrimSpace(in.JMXUrl),
 		FIManagerUrl:   strings.TrimSpace(in.FIManagerUrl),
 		GBaseDsnRef:    strings.TrimSpace(in.GBaseDsnRef),
@@ -269,7 +273,7 @@ func PatchCluster(id string, patch ClusterPatch) (Cluster, error) {
 		c.VMUrlRef = strings.TrimSpace(*patch.VMUrlRef)
 	}
 	if patch.MetricsBaseUrl != nil {
-		c.MetricsBaseUrl = strings.TrimSpace(*patch.MetricsBaseUrl)
+		c.MetricsBaseUrl = normalizeMetricsBaseURL(*patch.MetricsBaseUrl)
 	}
 	if patch.JMXUrl != nil {
 		c.JMXUrl = strings.TrimSpace(*patch.JMXUrl)
@@ -384,12 +388,82 @@ func buildDashboardSummary(ctx context.Context) DashboardSummary {
 		}
 		summary.Domains = append(summary.Domains, *dh)
 	}
+
+	if snapshots, err := refreshClusterHealthFacts(clusters); err == nil {
+		applySnapshotHealthToSummary(&summary, snapshots)
+	}
 	summary.PendingAlerts = CountPendingAlerts()
 
 	vmCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
 	defer cancel()
 	enrichDashboardVMHealth(vmCtx, &summary)
 	return summary
+}
+
+func applySnapshotHealthToSummary(summary *DashboardSummary, snapshots []HealthSnapshot) {
+	if len(snapshots) == 0 {
+		return
+	}
+	byDomain := map[string][]HealthSnapshot{}
+	for _, s := range snapshots {
+		byDomain[s.Domain] = append(byDomain[s.Domain], s)
+	}
+	for i := range summary.Domains {
+		d := &summary.Domains[i]
+		items := byDomain[d.Domain]
+		if len(items) == 0 {
+			continue
+		}
+
+		var totalScore, scoreCount int
+		var totalCoverage float64
+		var degradedCount, partialCount int
+		missing := map[string]struct{}{}
+		present := map[string]struct{}{}
+
+		for _, s := range items {
+			totalCoverage += s.Coverage
+			if s.Score != nil {
+				totalScore += *s.Score
+				scoreCount++
+			}
+			switch s.ScoreStatus {
+			case ScoreStatusDegraded:
+				degradedCount++
+			case ScoreStatusPartial:
+				partialCount++
+			}
+			for _, src := range s.MissingSources {
+				missing[src] = struct{}{}
+			}
+			for _, src := range s.PresentSources {
+				present[src] = struct{}{}
+			}
+		}
+
+		coverage := totalCoverage / float64(len(items))
+		d.Coverage = &coverage
+		d.HealthScoreSource = "composite"
+		d.MissingSources = sortedKeys(missing)
+		d.PresentSources = sortedKeys(present)
+		if scoreCount > 0 {
+			score := totalScore / scoreCount
+			d.HealthScore = &score
+			d.ScoreStatus = scoreStatusFromScore(score)
+			d.HealthScoreNote = fmt.Sprintf("L3 Facts 综合分，覆盖度 %.0f%%", coverage*100)
+			continue
+		}
+		if degradedCount > 0 {
+			d.ScoreStatus = ScoreStatusDegraded
+			d.HealthScoreNote = fmt.Sprintf("%d 个对象必需源缺失或失败，覆盖度 %.0f%%", degradedCount, coverage*100)
+		} else if partialCount > 0 {
+			d.ScoreStatus = ScoreStatusPartial
+			d.HealthScoreNote = fmt.Sprintf("%d 个对象覆盖不足，覆盖度 %.0f%%", partialCount, coverage*100)
+		} else {
+			d.ScoreStatus = ScoreStatusUnknown
+			d.HealthScoreNote = "L3 Facts 暂无可用综合分"
+		}
+	}
 }
 
 func persistLocked() error {

@@ -58,6 +58,7 @@ func ListSummaries(env func(string) string) ([]Summary, error) {
 					CreatedAt:        m.CreatedAt,
 					Builtin:          m.Builtin,
 					SkillIDs:         append([]string(nil), m.SkillIDs...),
+					ScenarioKeys:     append([]string(nil), m.ScenarioKeys...),
 					SkillNames:       skillNames,
 					McpServerKeys:    mcpKeys,
 					Type:             typeVal,

@@ -21,6 +21,8 @@ type Manifest struct {
 	Builtin bool `json:"builtin"`
 	// SkillIDs 是与该员工关联的全局 skill 名称（可来自 ~/.openocta/skills 或 workspace skills）。
 	SkillIDs []string `json:"skillIds,omitempty"`
+	// ScenarioKeys 是与该员工关联的 Scenario 名称（可直接在运行时挂载这些场景能力）。
+	ScenarioKeys []string `json:"scenarioKeys,omitempty"`
 	// McpServers 为该员工专属的 MCP 服务器配置，与会话时与全局 mcp.servers 合并（同 key 时员工覆盖全局）。
 	McpServers map[string]config.McpServerEntry `json:"mcpServers,omitempty"`
 	// Type 表示员工所属类型/分类；空表示「其它」。自建员工创建时为空；从官网下载时写入其 category。
@@ -59,6 +61,7 @@ type Summary struct {
 	CreatedAt        int64    `json:"createdAt,omitempty"`
 	Builtin          bool     `json:"builtin"`
 	SkillIDs         []string `json:"skillIds,omitempty"`
+	ScenarioKeys     []string `json:"scenarioKeys,omitempty"`
 	SkillNames       []string `json:"skillNames,omitempty"`    // 展示用：manifest.skillIds + employee_skills 目录名
 	McpServerKeys    []string `json:"mcpServerKeys,omitempty"` // 展示用：manifest.mcpServers 的 key 列表
 	Type             string   `json:"type,omitempty"`          // 所属类型/分类，空表示「其它」

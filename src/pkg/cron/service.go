@@ -1,6 +1,7 @@
 package cron
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -36,20 +37,21 @@ func normalizeDigitalEmployeeID(raw string) string {
 
 // cronRunLogEntry mirrors the TS CronRunLogEntry used by the control UI run history.
 type cronRunLogEntry struct {
-	Ts          int64  `json:"ts"`
-	JobID       string `json:"jobId"`
-	Action      string `json:"action"`
-	Status      string `json:"status,omitempty"`
-	Error       string `json:"error,omitempty"`
-	Summary     string `json:"summary,omitempty"`
-	SessionID   string `json:"sessionId,omitempty"`
-	SessionKey  string `json:"sessionKey,omitempty"`
-	RunAtMs     *int64 `json:"runAtMs,omitempty"`
-	DurationMs  *int64 `json:"durationMs,omitempty"`
-	NextRunAtMs *int64 `json:"nextRunAtMs,omitempty"`
-	Domain      string              `json:"domain,omitempty"`
-	ClusterID   string              `json:"clusterId,omitempty"`
-	Component   string              `json:"component,omitempty"`
+	Ts          int64                 `json:"ts"`
+	JobID       string                `json:"jobId"`
+	Action      string                `json:"action"`
+	Status      string                `json:"status,omitempty"`
+	Error       string                `json:"error,omitempty"`
+	Summary     string                `json:"summary,omitempty"`
+	SessionID   string                `json:"sessionId,omitempty"`
+	SessionKey  string                `json:"sessionKey,omitempty"`
+	RunAtMs     *int64                `json:"runAtMs,omitempty"`
+	DurationMs  *int64                `json:"durationMs,omitempty"`
+	NextRunAtMs *int64                `json:"nextRunAtMs,omitempty"`
+	Domain      string                `json:"domain,omitempty"`
+	ClusterID   string                `json:"clusterId,omitempty"`
+	Component   string                `json:"component,omitempty"`
+	ScenarioKey string                `json:"scenarioKey,omitempty"`
 	Result      *ops.InspectionResult `json:"result,omitempty"`
 }
 
@@ -60,7 +62,7 @@ func (s *Service) resolveRunLogPath(jobID string) string {
 }
 
 // appendRunLogEntry appends one finished-action entry to the job's run log.
-func (s *Service) appendRunLogEntry(job CronJob, status, errMsg, summary, sessionKey string, runAtMs, durationMs, nextRunAtMs *int64, domain, clusterID, component string, result *ops.InspectionResult) {
+func (s *Service) appendRunLogEntry(job CronJob, status, errMsg, summary, sessionKey string, runAtMs, durationMs, nextRunAtMs *int64, domain, clusterID, component, scenarioKey string, result *ops.InspectionResult) {
 	entry := cronRunLogEntry{
 		Ts:          time.Now().UnixMilli(),
 		JobID:       job.ID,
@@ -75,6 +77,7 @@ func (s *Service) appendRunLogEntry(job CronJob, status, errMsg, summary, sessio
 		Domain:      domain,
 		ClusterID:   clusterID,
 		Component:   component,
+		ScenarioKey: scenarioKey,
 		Result:      result,
 	}
 	data, err := json.Marshal(entry)
@@ -276,7 +279,7 @@ func (s *Service) Remove(id string) error {
 }
 
 // Run runs a job by ID. mode is "due" or "force".
-func (s *Service) Run(id string, mode string, domain, clusterId, component string) error {
+func (s *Service) Run(id string, mode string, domain, clusterId, component, scenarioKey string) error {
 	startMs := time.Now().UnixMilli()
 
 	// Snapshot job and deps under lock so we can safely execute without holding the mutex.
@@ -299,6 +302,13 @@ func (s *Service) Run(id string, mode string, domain, clusterId, component strin
 	status := "ok"
 	errMsg := ""
 	var sessionKey, cronSessionID string
+	scenarioKey = strings.TrimSpace(scenarioKey)
+	if scenarioKey == "" {
+		scenarioKey = ops.ScenarioKeyForInspection(ops.InspectionReport{
+			JobID:  id,
+			Domain: strings.TrimSpace(domain),
+		})
+	}
 
 	// Validate payload/sessionTarget combinations (mirrors TS semantics).
 	if jobCopy.SessionTarget == "main" {
@@ -336,9 +346,23 @@ func (s *Service) Run(id string, mode string, domain, clusterId, component strin
 
 	// Execute side effects when not skipped and deps are available.
 	if status != "skipped" {
+		_, hasNativeScenario := ops.GetOpsScenario(scenarioKey)
 		if deps == nil {
 			status = "error"
 			errMsg = "cron deps not configured"
+		} else if hasNativeScenario {
+			// Run native OpsScenario
+			ctx := context.Background() // TODO: use context with timeout
+			runID := uuid.New().String()
+			_, err := ops.RunScenario(ctx, scenarioKey, clusterId, ops.RunOpts{
+				SessionID:  cronSessionID,
+				RunID:      runID,
+				EmployeeID: jobCopy.DigitalEmployeeID,
+			})
+			if err != nil {
+				status = "error"
+				errMsg = err.Error()
+			}
 		} else if jobCopy.SessionTarget == "main" && jobCopy.Payload.Kind == "systemEvent" {
 			if deps.EnqueueSystemEvent != nil {
 				deps.EnqueueSystemEvent(jobCopy.Payload.Text)
@@ -400,7 +424,7 @@ func (s *Service) Run(id string, mode string, domain, clusterId, component strin
 
 	// Append run log entry without holding the lock.
 	runAt := startMs
-	s.appendRunLogEntry(jobCopy, status, errMsg, "", sessionKey, &runAt, &durationMs, nextRunAtMs, domain, clusterId, component, nil)
+	s.appendRunLogEntry(jobCopy, status, errMsg, "", sessionKey, &runAt, &durationMs, nextRunAtMs, domain, clusterId, component, scenarioKey, nil)
 
 	return nil
 }
@@ -488,7 +512,7 @@ func (s *Service) Start() {
 			nowMs = time.Now().UnixMilli()
 			dueIds := s.dueJobIDs(nowMs)
 			for _, id := range dueIds {
-				_ = s.Run(id, "due", "", "", "")
+				_ = s.Run(id, "due", "", "", "", "")
 			}
 			// 仅在有任务实际执行时重算下次运行时间，避免覆盖「即将到期」任务的 NextRunAtMs
 			// （例如因时钟偏差未命中 dueJobIDs，RecomputeNextRuns 会错误跳过该次执行）
@@ -554,7 +578,7 @@ func (s *Service) ensureDefaultJobs() error {
 - GBase 活跃连接数：sum(gbase_active_connections)
 - 慢 SQL 数量：sum(gbase_slow_queries_total)
 - QPS (每秒查询数) 或 TPS (每秒事务数)：rate(gbase_queries_total[5m])
-评估数据库运行健康度，给出 0-100 的健康得分（格式如：健康得分：XX），编写结构化的中文巡检报告，包括慢 SQL 诊断、资源占用情况与调优建议。`,
+评估数据库运行健康度，并在最终回答中优先输出一个 JSON 代码块，字段包括 domain、clusterId、score、scoreStatus、toolRuns、metricsEvidence、errors、reportMarkdown；随后可补充中文说明。不要只写自然语言“健康得分”。`,
 		},
 		{
 			ID:          "job-inspect-governance",

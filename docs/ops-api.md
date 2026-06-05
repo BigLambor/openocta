@@ -177,7 +177,122 @@
 }
 ```
 
-**健康分（P1-5）**：当环境变量 `VICTORIAMETRICS_URL`（或 `PROMETHEUS_URL`）已配置且该域有纳管集群时，服务端对各业务域执行 instant PromQL（以 `avg(up{…})` 为主、回退 `avg(up)`），将采样值归一化到 0–100 写入 `healthScore`。未配置或查询无数据时省略 `healthScore`，`healthScoreNote` 说明原因（前端不得再用集群状态估算 85/98 分）。
+**健康分（L3 Facts）**：服务端优先读取 `HealthSnapshot`。当某域存在 L3 快照时，`healthScoreSource` 为 `composite`，并通过 `scoreStatus`、`coverage`、`missingSources`、`presentSources` 说明综合分、覆盖度与缺失源。仅当 `scoreStatus` 为 `ok` / `warning` / `critical` 且 `healthScore` 存在时，前端展示数字分。
+
+**临时 fallback**：Phase 1 期间，尚未接入 L3 policy 的域仍可回退到 VictoriaMetrics / Prometheus 同步查询。Phase 2 完成后应移除该 fallback。
+
+### `GET /api/ops/health/signals`
+
+查询 L3 原子健康信号。
+
+查询参数：
+
+| 参数 | 说明 |
+|------|------|
+| `domain` | 可选，按技术域过滤 |
+| `objectType` | 可选，例如 `cluster` |
+| `objectId` | 可选，对象 ID；cluster 场景下等于 `clusterId` |
+
+响应：
+
+```json
+{
+  "signals": [
+    {
+      "schemaVersion": "1",
+      "id": "sig-...",
+      "runId": "collector-alerts-...",
+      "scenarioKey": "system:collector",
+      "objectType": "cluster",
+      "objectId": "cluster-gbase-prod",
+      "clusterId": "cluster-gbase-prod",
+      "domain": "gbase",
+      "type": "alerts",
+      "status": "critical",
+      "score": 85,
+      "confidence": "high",
+      "source": "collector:alerts",
+      "sourceKind": "collector",
+      "evidence": { "activeCount": 1 },
+      "observedAt": "2026-06-05T10:00:00Z",
+      "ttlSec": 300,
+      "freshness": "ok"
+    }
+  ],
+  "total": 1
+}
+```
+
+### `GET /api/ops/health/snapshots`
+
+查询 L3 聚合健康快照。
+
+查询参数同 `/api/ops/health/signals`。
+
+响应：
+
+```json
+{
+  "snapshots": [
+    {
+      "schemaVersion": "1",
+      "aggregationPolicyVersion": "gbase:1",
+      "objectType": "cluster",
+      "objectId": "cluster-gbase-prod",
+      "clusterId": "cluster-gbase-prod",
+      "domain": "gbase",
+      "scoreStatus": "degraded",
+      "source": "composite",
+      "coverage": 0.5,
+      "missingSources": ["gbase_sql"],
+      "presentSources": ["alerts", "asset_status"],
+      "observedAt": "2026-06-05T10:00:00Z"
+    }
+  ],
+  "total": 1
+}
+```
+
+状态语义：
+
+| `scoreStatus` | 含义 |
+|---------------|------|
+| `ok` / `warning` / `critical` | 满足 composite 条件，可展示数字分 |
+| `partial` | 可选源覆盖不足，不展示数字分 |
+| `degraded` | 必需源缺失或失败，不展示数字分 |
+| `unknown` | 无任何有效信号 |
+
+### `GET /api/ops/scenarios`
+
+查询运维 Scenario 注册表。
+
+查询参数：
+
+| 参数 | 说明 |
+|------|------|
+| `domain` | 可选，按技术域过滤 |
+
+响应：
+
+```json
+{
+  "scenarios": [
+    {
+      "key": "ops-gbase-health",
+      "domainKey": "gbase",
+      "capabilityKey": "health-inspection",
+      "objectType": "cluster",
+      "skillIds": ["ops-gbase-health"],
+      "platformToolKeys": ["query_gbase_slow_sql", "query_vm_metrics"],
+      "requiredSources": ["gbase_sql"],
+      "optionalSources": ["metrics", "alerts", "inspection"],
+      "outputSchema": "InspectionReport",
+      "triggerTypes": ["manual", "cron", "chat_intent"]
+    }
+  ],
+  "total": 1
+}
+```
 
 ## 前端调用
 

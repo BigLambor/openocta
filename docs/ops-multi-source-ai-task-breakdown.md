@@ -54,17 +54,17 @@
 
 | ID | 任务 | 交付物 | 验收标准 | 状态 | 备注 |
 |----|------|--------|----------|------|------|
-| P1-1 | 定义 `HealthSignal` schema v1 | `src/pkg/ops/health_signal.go` 或等价文件 | 字段包含 `schemaVersion/id/runId/scenarioKey/objectType/objectId/domain/type/status/score/confidence/source/sourceKind/evidence/error/observedAt/ttlSec` | ⬜ 待开始 | |
-| P1-2 | 定义 `HealthSnapshot` schema v1 | `src/pkg/ops/health_snapshot.go` 或等价文件 | 字段包含 `aggregationPolicyVersion/objectType/objectId/domain/score/scoreStatus/coverage/missingSources/presentSources/signals/observedAt` | ⬜ 待开始 | |
-| P1-3 | 抽象 `HealthSignalStore` | Store interface + JSON 实现 | 业务逻辑依赖接口，不直接绑死 JSON 文件 | ⬜ 待开始 | Phase 1 JSON MVP |
-| P1-4 | 新增 L3 JSON 存储 | `stateDir/ops/health_signals.json`、`health_snapshots.json` | 启动后可加载；写入后可持久化；空文件不崩溃 | ⬜ 待开始 | |
-| P1-5 | 定义 `DomainHealthPolicy` | `config/ops/domain_health_policy.yaml` 或内置默认配置 | GBase policy 含 `requiredAnyOf: [gbase_sql]`、weights、`minCoverageForScore`、`coverageScope: configured` | ⬜ 待开始 | |
-| P1-6 | 实现 Snapshot 聚合器 | `AggregateHealthSnapshot` | 必需源缺失输出 `degraded`；coverage 不足输出 `partial`；满足条件才输出数字分 | ⬜ 待开始 | |
-| P1-7 | 实现 alerts collector | `collectAlertSignal` | `active/analyzing` 告警参与惩罚；`resolved` 不降分；无法归属 cluster 的告警不写 cluster Signal | ⬜ 待开始 | |
-| P1-8 | 实现 asset_status collector | `collectAssetStatusSignal` | 资产状态可生成低权重 Signal；不得单独冒充 composite 分 | ⬜ 待开始 | |
-| P1-9 | metricsBaseUrl 规范化 | normalize 函数 + 种子数据修正 | 已带 `/api/v1/query` 的旧值会被 strip，避免双拼路径 | ⬜ 待开始 | |
-| P1-10 | 驾驶舱读 Snapshot 优先 | Dashboard API / UI | 有 Snapshot 时展示 `composite/partial/degraded`；无 Snapshot 时可走临时 fallback | ⬜ 待开始 | fallback Phase 2 移除 |
-| P1-11 | 更新 API 文档 | `docs/ops-api.md` | 新增 L3 查询 API、字段说明、状态语义 | ⬜ 待开始 | |
+| P1-1 | 定义 `HealthSignal` schema v1 | `src/pkg/ops/health_facts.go` | 字段包含 `schemaVersion/id/runId/scenarioKey/objectType/objectId/domain/type/status/score/confidence/source/sourceKind/evidence/error/observedAt/ttlSec` | ✅ 已完成 | |
+| P1-2 | 定义 `HealthSnapshot` schema v1 | `src/pkg/ops/health_facts.go` | 字段包含 `aggregationPolicyVersion/objectType/objectId/domain/score/scoreStatus/coverage/missingSources/presentSources/signals/observedAt` | ✅ 已完成 | |
+| P1-3 | 抽象 `HealthSignalStore` | `src/pkg/ops/health_store.go` | 业务逻辑依赖接口，不直接绑死 JSON 文件 | ✅ 已完成 | Phase 1 JSON MVP |
+| P1-4 | 新增 L3 JSON 存储 | `stateDir/ops/health_signals.json`、`health_snapshots.json` | 启动后可加载；写入后可持久化；空文件不崩溃 | ✅ 已完成 | |
+| P1-5 | 定义 `DomainHealthPolicy` | `defaultDomainHealthPolicy` | GBase policy 含 `requiredAnyOf: [gbase_sql]`、weights、`minCoverageForScore`、`coverageScope: configured` | ✅ 已完成 | Phase 1 以内置默认配置落地 |
+| P1-6 | 实现 Snapshot 聚合器 | `AggregateHealthSnapshot` | 必需源缺失输出 `degraded`；coverage 不足输出 `partial`；满足条件才输出数字分 | ✅ 已完成 | 已有 Go 测试 |
+| P1-7 | 实现 alerts collector | `collectAlertSignal` | `active/analyzing` 告警参与惩罚；`resolved` 不降分；无法归属 cluster 的告警不写 cluster Signal | ✅ 已完成 | 已有 Go 测试覆盖去重与扣分 |
+| P1-8 | 实现 asset_status collector | `collectAssetStatusSignal` | 资产状态可生成低权重 Signal；不得单独冒充 composite 分 | ✅ 已完成 | |
+| P1-9 | metricsBaseUrl 规范化 | `normalizeMetricsBaseURL` + 种子数据修正 | 已带 `/api/v1/query` 的旧值会被 strip，避免双拼路径 | ✅ 已完成 | 已有 Go 测试 |
+| P1-10 | 驾驶舱读 Snapshot 优先 | Dashboard API / UI | 有 Snapshot 时展示 `composite/partial/degraded`；无 Snapshot 时可走临时 fallback | ✅ 已完成 | UI 已展示综合/部分覆盖/降级、coverage 与缺失源 |
+| P1-11 | 更新 API 文档 | `docs/ops-api.md` | 新增 L3 查询 API、字段说明、状态语义 | ✅ 已完成 | |
 
 ### Phase 1 验收场景
 
@@ -84,14 +84,14 @@
 
 | ID | 任务 | 交付物 | 验收标准 | 状态 | 备注 |
 |----|------|--------|----------|------|------|
-| P2-1 | 新增 `ops-gbase-health` Scenario | Scenario YAML/JSON 或代码注册 | 声明 `requiredSources: [gbase_sql]`、`optionalSources: [metrics, alerts, inspection]`、tool keys、output schema | ⬜ 待开始 | |
-| P2-2 | 新增 `ops-gbase-health` Skill | `skills/ops-gbase-health/SKILL.md` | 明确无 DSN 终止并报错、慢 SQL/连接错误判读、结构化输出要求 | ⬜ 待开始 | |
-| P2-3 | Tool evidence 结构化 | `query_gbase_slow_sql` 等 ToolResult 扩展 | Tool 返回原始证据 + 建议解析字段，可被 Normalize 生成 Signal | ⬜ 待开始 | |
-| P2-4 | 新增 `InspectionReport` schema | Go model + API 文档 | 包含 `score/status/evidence/toolRuns/errors/reportMarkdown` 等结构化字段 | ⬜ 待开始 | |
-| P2-5 | Scenario 执行写 Report | Cron/按钮触发链路 | 执行后落库 `InspectionReport`，并可衍生 `gbase_sql` / `inspection` Signal | ⬜ 待开始 | |
-| P2-6 | 退役巡检正则抽分 | `inspection.go` 修改 | 不再依赖 transcript 正则解析健康分；旧路径仅作为兼容或删除 | ⬜ 待开始 | |
-| P2-7 | 对话触发同一 Scenario | Chat / 工作台入口 | 对话可触发 Scenario，但默认只产草稿 Report，不自动写 HealthSignal | ⬜ 待开始 | |
-| P2-8 | 驾驶舱展示 GBase composite | UI + API | Scenario 跑完后驾驶舱可显示 composite 分、来源、coverage、freshness | ⬜ 待开始 | |
+| P2-1 | 新增 `ops-gbase-health` Scenario | `src/pkg/ops/scenario.go` + `/api/ops/scenarios` | 声明 `requiredSources: [gbase_sql]`、`optionalSources: [metrics, alerts, inspection]`、tool keys、output schema | ✅ 已完成 | Phase 2 先以内置注册表落地 |
+| P2-2 | 新增 `ops-gbase-health` Skill | `skills/ops-gbase-health/SKILL.md` | 明确无 DSN 终止并报错、慢 SQL/连接错误判读、结构化输出要求 | ✅ 已完成 | |
+| P2-3 | Tool evidence 结构化 | `query_gbase_slow_sql` ToolResult `Data` + JSON envelope | Tool 返回原始证据 + 建议解析字段，可被 Normalize 生成 Signal | ✅ 已完成 | 已覆盖 GBase slow SQL；其他 Tool 后续按同一格式扩展 |
+| P2-4 | 新增 `InspectionReport` schema | `InspectionReport` alias + `InspectionResult` 结构 | 包含 `score/status/evidence/toolRuns/errors/reportMarkdown` 等结构化字段 | ✅ 已完成 | 复用现有巡检结果结构 |
+| P2-5 | Scenario 执行写 Report | `PersistInspectionFacts` + cron/chat 完成回调 | 执行后落库 `InspectionReport`，并可衍生 `gbase_sql` / `inspection` Signal | ✅ 已完成 | 已实现 `ops.RunScenario` 并对接 Cron |
+| P2-6 | 退役巡检正则抽分 | `inspection.go` 修改 | 不再依赖 transcript 正则解析健康分；旧路径仅作为兼容或删除 | ✅ 已完成 | 已改为结构化 JSON 优先，正则仅兼容旧文本；结果带 `scoreSource` |
+| P2-7 | 对话触发同一 Scenario | Chat / 工作台入口 | 对话可触发 Scenario，但默认只产草稿 Report，不自动写 HealthSignal | ✅ 已完成 | 已在 chat.go 实现 Chat 草稿准入并落库 draft_reports.jsonl |
+| P2-8 | 驾驶舱展示 GBase composite | UI + API | Scenario 跑完后驾驶舱可显示 composite 分、来源、coverage、freshness | 🟡 进行中 | 驾驶舱已展示 composite/coverage；freshness 与端到端验收待补 |
 
 ### Phase 2 验收场景
 
@@ -112,9 +112,9 @@
 | ID | 任务 | 交付物 | 验收标准 | 状态 | 备注 |
 |----|------|--------|----------|------|------|
 | P3-1 | Scenario 绑定 MCP | Scenario 配置支持 `mcpServerKeys` | Scenario 能声明可选 MCP，不影响无 MCP 的 GBase 样板运行 | ⬜ 待开始 | |
-| P3-2 | 员工绑定 Scenario | DigitalEmployee model/UI | 员工支持 `scenarioKeys`，样板期可每 Scenario 绑定员工 | ⬜ 待开始 | |
-| P3-3 | 工具冲突策略实现 | Tool registry / runtime | Platform Tool 与 MCP 同名时 Platform Tool 优先 | ⬜ 待开始 | |
-| P3-4 | 必需/可选源运行时校验 | Scenario runner | 必需源失败为 `degraded`；可选源失败降低 coverage | ⬜ 待开始 | |
+| P3-2 | 员工绑定 Scenario | DigitalEmployee model/UI | 员工支持 `scenarioKeys`，样板期可每 Scenario 绑定员工 | ✅ 已完成 | 已在 `model.go` 的 `Manifest` 中新增字段 |
+| P3-3 | 工具冲突策略实现 | Tool registry / runtime | Platform Tool 与 MCP 同名时 Platform Tool 优先 | ✅ 已完成 | `scenario_runner.go` 优先调用 PlatformTools |
+| P3-4 | 必需/可选源运行时校验 | Scenario runner | 必需源失败为 `degraded`；可选源失败降低 coverage | ✅ 已完成 | `scenario_runner.go` 已实现校验并阻断组合分数 |
 | P3-5 | Prometheus MCP 试点 | Prometheus MCP 配置示例 | `metrics` 可由 Platform Tool 或 MCP 采集，并统一 Normalize 为 Signal | ⬜ 待开始 | |
 | P3-6 | MCP 失败审计 | Run audit | 记录 `mcpCalled[]`、错误、耗时、missingSources | ⬜ 待开始 | |
 
@@ -158,7 +158,7 @@
 
 | ID | 任务 | 交付物 | 验收标准 | 状态 | 备注 |
 |----|------|--------|----------|------|------|
-| X-1 | Run audit | run store / 日志 | 记录 `runId/scenarioKey/employeeId/objectId/toolsCalled/mcpCalled/signalsWritten/missingSources/durationMs/operator` | ⬜ 待开始 | |
+| X-1 | Run audit | run store / 日志 | 记录 `runId/scenarioKey/employeeId/objectId/toolsCalled/mcpCalled/signalsWritten/missingSources/durationMs/operator` | ✅ 已完成 | 已实现 `ops.RecordRunAudit` 和 `run_audit.jsonl` |
 | X-2 | RBAC 校验 | API + Scenario runner | L4 读 Facts 按域过滤；L2 触发按 `ops:inspect/ops:diagnose`；L1 按员工权限与 cluster 范围 | ⬜ 待开始 | |
 | X-3 | UI 来源与新鲜度展示 | 驾驶舱/域详情组件 | 展示 `source`、`coverage`、`freshness`、`missingSources`，过期清晰标注 | ⬜ 待开始 | |
 | X-4 | IM 低分推送改造 | Notify 逻辑 | 仅基于结构化 `score` 触发；`partial/degraded/unknown` 不按数字分推送 | ⬜ 待开始 | |
@@ -185,4 +185,11 @@
 | 日期 | 记录 | 结果 | 下一步 |
 |------|------|------|--------|
 | 2026-06-05 | 生成任务分解与验收跟踪文档 | 建立推进基线 | 确认 Scenario 注册位置与 Phase 1 开工 |
-
+| 2026-06-05 | Phase 1 L3 Facts 骨架首轮实现 | 完成 schema、JSON store、GBase policy、alerts/asset collectors、Snapshot 聚合、API 文档；`go test ./pkg/ops` 通过 | 补 UI coverage/missingSources 展示，并跑 HTTP/API 测试 |
+| 2026-06-05 | Phase 1 驾驶舱 L3 展示接入 | Overview 域卡片/表格支持 `composite`、`partial`、`degraded`、coverage、missingSources；`npm run build` 通过 | 推进 Phase 1 验收场景复验 |
+| 2026-06-05 | Phase 2 GBase Scenario/Skill 与巡检 Facts 写入首轮实现 | 新增 `ops-gbase-health` Scenario、Skill、Scenario API、`InspectionReport` 写 L3，GBase slow SQL ToolRun 可衍生 `gbase_sql` Signal | 完善 ToolResult evidence 标准化并逐步退役正则抽分 |
+| 2026-06-05 | GBase Tool evidence 标准化 | `query_gbase_slow_sql` 输出 JSON envelope 与 `ToolResult.Data`，Facts 解析兼容 envelope/旧裸数组 | 继续推进结构化输出替代正则抽分 |
+| 2026-06-05 | 巡检结果结构化优先解析 | `ParseInspectionResult` 优先解析 JSON / fenced JSON `InspectionReport`，正则抽分降级为 legacy fallback | 推进 Chat/按钮显式触发 Scenario |
+| 2026-06-05 | GBase Scenario 标识透传 | GBase 巡检按钮向 `cron.run` 传 `scenarioKey=ops-gbase-health`；cron run-log、`InspectionResult`、L3 Facts 保留场景标识 | 补 Chat 草稿准入与 Run audit 完整字段 |
+| 2026-06-05 | Chat 草稿准入与 Run Audit | 在 chat.go 结束时落库 Draft Report，在 ops.PersistInspectionFacts 校验来源；实现 RunAudit 结构与持久化 | 推进 Scenario Runner/Manager 或剩余横向能力 |
+| 2026-06-05 | 完整 Scenario Runner | 实现原生 Go `ops.RunScenario`，对接 Cron，实现 P3 MCP 装配（工具冲突优先、必需/可选源降级） | 测试验收 |

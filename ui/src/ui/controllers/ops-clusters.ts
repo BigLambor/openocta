@@ -37,6 +37,10 @@ export type OpsDashboardSummary = {
     healthScore?: number | null;
     healthScoreSource?: string;
     healthScoreNote?: string;
+    scoreStatus?: "ok" | "warning" | "critical" | "partial" | "degraded" | "unknown" | string;
+    coverage?: number | null;
+    missingSources?: string[];
+    presentSources?: string[];
     note?: string;
   }>;
 };

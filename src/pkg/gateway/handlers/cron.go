@@ -9,8 +9,8 @@ import (
 	"strings"
 
 	"github.com/openocta/openocta/pkg/cron"
-	"github.com/openocta/openocta/pkg/ops"
 	"github.com/openocta/openocta/pkg/gateway/protocol"
+	"github.com/openocta/openocta/pkg/ops"
 )
 
 // getJobID returns id or jobId from params (id takes precedence). Used by cron.update/remove/run/runs.
@@ -357,7 +357,7 @@ func CronRunHandler(opts HandlerOpts) error {
 		return nil
 	}
 	svc, ok := ctx.CronService.(interface {
-		Run(string, string, string, string, string) error
+		Run(string, string, string, string, string, string) error
 	})
 	if !ok {
 		opts.Respond(false, nil, &protocol.ErrorShape{
@@ -381,7 +381,8 @@ func CronRunHandler(opts HandlerOpts) error {
 	domain, _ := opts.Params["domain"].(string)
 	clusterID, _ := opts.Params["clusterId"].(string)
 	component, _ := opts.Params["component"].(string)
-	err := svc.Run(jobID, mode, domain, clusterID, component)
+	scenarioKey, _ := opts.Params["scenarioKey"].(string)
+	err := svc.Run(jobID, mode, domain, clusterID, component, scenarioKey)
 	if err != nil {
 		opts.Respond(false, nil, &protocol.ErrorShape{
 			Code:    protocol.ErrCodeInternal,
@@ -395,20 +396,21 @@ func CronRunHandler(opts HandlerOpts) error {
 
 // cronRunLogEntry matches TS CronRunLogEntry (action=finished).
 type cronRunLogEntry struct {
-	Ts          int64  `json:"ts"`
-	JobID       string `json:"jobId"`
-	Action      string `json:"action"`
-	Status      string `json:"status,omitempty"`
-	Error       string `json:"error,omitempty"`
-	Summary     string `json:"summary,omitempty"`
-	SessionID   string `json:"sessionId,omitempty"`
-	SessionKey  string `json:"sessionKey,omitempty"`
-	RunAtMs     *int64 `json:"runAtMs,omitempty"`
-	DurationMs  *int64 `json:"durationMs,omitempty"`
-	NextRunAtMs *int64 `json:"nextRunAtMs,omitempty"`
-	Domain      string               `json:"domain,omitempty"`
-	ClusterID   string               `json:"clusterId,omitempty"`
-	Component   string               `json:"component,omitempty"`
+	Ts          int64                 `json:"ts"`
+	JobID       string                `json:"jobId"`
+	Action      string                `json:"action"`
+	Status      string                `json:"status,omitempty"`
+	Error       string                `json:"error,omitempty"`
+	Summary     string                `json:"summary,omitempty"`
+	SessionID   string                `json:"sessionId,omitempty"`
+	SessionKey  string                `json:"sessionKey,omitempty"`
+	RunAtMs     *int64                `json:"runAtMs,omitempty"`
+	DurationMs  *int64                `json:"durationMs,omitempty"`
+	NextRunAtMs *int64                `json:"nextRunAtMs,omitempty"`
+	Domain      string                `json:"domain,omitempty"`
+	ClusterID   string                `json:"clusterId,omitempty"`
+	Component   string                `json:"component,omitempty"`
+	ScenarioKey string                `json:"scenarioKey,omitempty"`
 	Result      *ops.InspectionResult `json:"result,omitempty"`
 }
 
@@ -502,6 +504,9 @@ func readCronRunLogEntries(logPath string, jobID string, limit int) ([]cronRunLo
 		}
 		if v, ok := raw["component"].(string); ok {
 			e.Component = v
+		}
+		if v, ok := raw["scenarioKey"].(string); ok {
+			e.ScenarioKey = v
 		}
 		if rMap, ok := raw["result"].(map[string]interface{}); ok {
 			var rObj ops.InspectionResult

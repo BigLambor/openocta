@@ -571,21 +571,25 @@ func writeCronSessionResult(sessionKey, sessionID, summary, status string, runAt
 	resultSessionKey := fmt.Sprintf("agent:main:cron:%s:run:%s", jobID, sessionID)
 
 	res := ops.ParseInspectionResult(sessionID, jobID, summary, status, runAtMs, durationMs)
+	if err := ops.PersistInspectionFacts(res); err != nil {
+		chatLog.Warn("cron: failed to persist inspection facts jobId=%s err=%v", jobID, err)
+	}
 
 	doc := map[string]interface{}{
-		"ts":         nowMs,
-		"jobId":      jobID,
-		"action":     "finished",
-		"status":     status,
-		"summary":    summary,
-		"sessionId":  sessionID,
-		"sessionKey": resultSessionKey,
-		"runAtMs":    runAtMs,
-		"durationMs": durationMs,
-		"domain":     res.Domain,
-		"clusterId":  res.ClusterID,
-		"component":  res.Component,
-		"result":     res,
+		"ts":          nowMs,
+		"jobId":       jobID,
+		"action":      "finished",
+		"status":      status,
+		"summary":     summary,
+		"sessionId":   sessionID,
+		"sessionKey":  resultSessionKey,
+		"runAtMs":     runAtMs,
+		"durationMs":  durationMs,
+		"domain":      res.Domain,
+		"clusterId":   res.ClusterID,
+		"component":   res.Component,
+		"scenarioKey": res.ScenarioKey,
+		"result":      res,
 	}
 	data, err := json.Marshal(doc)
 	if err != nil {
@@ -2240,10 +2244,17 @@ func ChatSendHandler(opts HandlerOpts) error {
 						cronSummary = output
 					}
 					deliverAssistantToIM(ctxForBroadcast, deliverForGoroutine, cronSummary)
+					runAtMs := runStart.UnixMilli()
 					if cronSession {
-						runAtMs := runStart.UnixMilli()
 						writeCronSessionResult(sessionKey, sessionID, cronSummary, "ok", runAtMs, durationMs)
 						DeliverCronResultIfNeeded(ctxForBroadcast, sessionKey, cronSummary, "ok")
+					} else {
+						res := ops.ParseInspectionResult(sessionID, "chat-"+runId, cronSummary, "ok", runAtMs, durationMs)
+						res.SourceKind = "chat"
+						res.TriggerType = "chat_intent"
+						if err := ops.PersistInspectionFacts(res); err != nil {
+							chatLog.Warn("chat: failed to persist draft inspection facts runId=%s err=%v", runId, err)
+						}
 					}
 				}
 			}

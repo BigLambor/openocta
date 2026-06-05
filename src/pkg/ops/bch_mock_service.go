@@ -14,22 +14,27 @@ func NewMockBchService() BchService {
 }
 
 func (s *MockBchService) GetClustersHealth() ([]BchClusterHealth, error) {
-	return []BchClusterHealth{
+	clusters := []BchClusterHealth{
 		{
 			ID:             "cluster-prod-a",
 			Name:           "哈池 BCH 生产集群 A (prod-a)",
 			Region:         "哈池",
 			Status:         "healthy",
 			Score:          98,
+			ScoreStatus:    "ok",
+			Coverage:       1.0,
+			Freshness:      "ok",
+			PresentSources: []string{"gbase_sql", "metrics"},
+			MissingSources: []string{},
 			NodeCount:      120,
 			ActiveAlerts:   0,
 			CpuUsedPercent: 62.5,
 			MemUsedPercent: 78.2,
 			DfsUsedPercent: 54.1,
 			Metrics: map[string]interface{}{
-				"activeNodes":   120,
-				"decommission":  0,
-				"totalBlocks":   91699026,
+				"activeNodes":      120,
+				"decommission":     0,
+				"totalBlocks":      91699026,
 				"activeContainers": 1840,
 			},
 		},
@@ -39,20 +44,62 @@ func (s *MockBchService) GetClustersHealth() ([]BchClusterHealth, error) {
 			Region:         "呼池",
 			Status:         "warning",
 			Score:          82,
+			ScoreStatus:    "warning",
+			Coverage:       1.0,
+			Freshness:      "ok",
+			PresentSources: []string{"gbase_sql", "metrics"},
+			MissingSources: []string{},
 			NodeCount:      80,
 			ActiveAlerts:   2,
 			CpuUsedPercent: 88.0,
 			MemUsedPercent: 91.5,
 			DfsUsedPercent: 81.3,
 			Metrics: map[string]interface{}{
-				"activeNodes":   78,
-				"decommission":  2,
-				"totalBlocks":   131486447,
+				"activeNodes":      78,
+				"decommission":     2,
+				"totalBlocks":      131486447,
 				"activeContainers": 2560,
 			},
 		},
-	}, nil
+	}
+
+	// Augment with real HealthSnapshot if available
+	for i, c := range clusters {
+		if snap, ok := GetHealthSnapshot(c.ID); ok {
+			if snap.Score != nil {
+				clusters[i].Score = *snap.Score
+			}
+			clusters[i].ScoreStatus = snap.ScoreStatus
+			clusters[i].Coverage = snap.Coverage
+			clusters[i].MissingSources = snap.MissingSources
+			clusters[i].PresentSources = snap.PresentSources
+
+			// If the snapshot has signals, we can compute freshness overall
+			// For simplicity, we just use the global snapshot freshness check
+			freshness := "ok"
+			for _, sig := range snap.Signals {
+				if sig.Freshness == "expired" {
+					freshness = "expired"
+					break
+				}
+			}
+			clusters[i].Freshness = freshness
+
+			// map status to our UI logic
+			switch snap.ScoreStatus {
+			case ScoreStatusCritical, ScoreStatusDegraded:
+				clusters[i].Status = "critical"
+			case ScoreStatusWarning, ScoreStatusPartial:
+				clusters[i].Status = "warning"
+			case ScoreStatusOK:
+				clusters[i].Status = "healthy"
+			}
+		}
+	}
+
+	return clusters, nil
 }
+
 
 // Internal helper to calculate scores for Flink Jobs (matching JS engine in flink_doctor.html)
 func computeFlinkJobAnalysis(id, name, owner, cluster string, lagTrend int, maxLag, avgLag int64, isBP bool, cpuMax, cpuAvg, heapMax, fullGc, restarts int) FlinkJob {

@@ -22,6 +22,12 @@ export type OverviewDomainCard = {
   name: string;
   icon: "network" | "building" | "database" | "layout" | "activity";
   score?: number;
+  healthScoreSource?: string;
+  healthScoreNote?: string;
+  scoreStatus?: string;
+  coverage?: number | null;
+  missingSources?: string[];
+  presentSources?: string[];
   clusterCount?: number;
   healthyCount?: number;
   warningCount?: number;
@@ -114,6 +120,12 @@ function summaryToCards(summary: OpsDashboardSummary): {
         name: DOMAIN_DISPLAY_NAME[tab] ?? d.domain,
         icon: DOMAIN_ICON[d.domain] ?? "network",
         score,
+        healthScoreSource: d.healthScoreSource,
+        healthScoreNote: d.healthScoreNote,
+        scoreStatus: d.scoreStatus,
+        coverage: d.coverage,
+        missingSources: d.missingSources ?? [],
+        presentSources: d.presentSources ?? [],
         clusterCount: d.clusterCount,
         healthyCount: d.healthyCount,
         warningCount: d.warningCount,
@@ -147,10 +159,13 @@ function domainDistribution(d: OverviewDomainCard): HealthDistribution {
 
 function effectiveDomainScore(d: OverviewDomainCard): {
   value: number | null;
-  source: "vm" | "rollup" | "none";
+  source: "composite" | "vm" | "rollup" | "none";
 } {
   if (d.score != null) {
-    return { value: d.score, source: "vm" };
+    return { value: d.score, source: d.healthScoreSource === "composite" ? "composite" : "vm" };
+  }
+  if (d.healthScoreSource === "composite") {
+    return { value: null, source: "composite" };
   }
   const rollup = computeRollupHealthScore(domainDistribution(d));
   if (rollup != null) {
@@ -169,6 +184,12 @@ function domainStatusTone(
   if ((d.warningCount ?? 0) > 0) {
     return "warning";
   }
+  if (d.scoreStatus === "degraded") {
+    return "critical";
+  }
+  if (d.scoreStatus === "partial") {
+    return "warning";
+  }
   const { value } = effectiveDomainScore(d);
   if (value != null && value < 75) {
     return "critical";
@@ -182,24 +203,88 @@ function domainStatusTone(
 function renderDomainScore(d: OverviewDomainCard) {
   const { value, source } = effectiveDomainScore(d);
   const cls = scoreClass(value);
+  if (source === "composite" && value == null) {
+    const status = d.scoreStatus || "unknown";
+    const label = status === "degraded" ? "降级" : status === "partial" ? "部分覆盖" : "待评分";
+    return html`
+      <div class="domain-score-block" title=${l3HealthTitle(d)}>
+        <span class="domain-score ${status === "degraded" ? "critical" : "warning"}">${label}</span>
+        ${renderCoverageBadge(d)}
+      </div>
+    `;
+  }
   if (value == null) {
     return html`
       <span class="domain-score domain-score--muted" title="尚未纳管集群或未返回健康分">待评分</span>
     `;
   }
   return html`
-    <div class="domain-score-block" title=${source === "vm" ? "VictoriaMetrics 监控健康分" : "按集群资产状态聚合估算"}>
+    <div class="domain-score-block" title=${scoreSourceTitle(source)}>
       <span class="domain-score ${cls}">${value}分</span>
       <span class="domain-score__source domain-score__source--${source}">
-        ${source === "vm" ? "监控" : "资产"}
+        ${scoreSourceLabel(source)}
       </span>
+      ${source === "composite" ? renderCoverageBadge(d) : nothing}
     </div>
   `;
+}
+
+function scoreSourceLabel(source: "composite" | "vm" | "rollup" | "none"): string {
+  switch (source) {
+    case "composite":
+      return "综合";
+    case "vm":
+      return "监控";
+    case "rollup":
+      return "资产";
+    default:
+      return "";
+  }
+}
+
+function scoreSourceTitle(source: "composite" | "vm" | "rollup" | "none"): string {
+  switch (source) {
+    case "composite":
+      return "L3 Facts 多源综合健康分";
+    case "vm":
+      return "VictoriaMetrics / Prometheus 监控健康分";
+    case "rollup":
+      return "按集群资产状态聚合估算";
+    default:
+      return "";
+  }
+}
+
+function renderCoverageBadge(d: OverviewDomainCard) {
+  if (d.coverage == null || !Number.isFinite(d.coverage)) {
+    return nothing;
+  }
+  return html`<span class="domain-score__source domain-score__source--coverage">${Math.round(d.coverage * 100)}%</span>`;
+}
+
+function l3HealthTitle(d: OverviewDomainCard): string {
+  const parts: string[] = [];
+  if (d.healthScoreNote) {
+    parts.push(d.healthScoreNote);
+  }
+  if (d.missingSources?.length) {
+    parts.push(`缺失源: ${d.missingSources.join(", ")}`);
+  }
+  if (d.presentSources?.length) {
+    parts.push(`已有源: ${d.presentSources.join(", ")}`);
+  }
+  return parts.join("；") || "L3 Facts 暂无完整综合分";
 }
 
 function domainStatusLabel(d: OverviewDomainCard): string {
   if ((d.clusterCount ?? 0) === 0) {
     return "尚未纳管";
+  }
+  if (d.healthScoreSource === "composite" && d.scoreStatus === "degraded") {
+    return d.missingSources?.length ? `必需源缺失：${d.missingSources.join(", ")}` : "必需源缺失或失败";
+  }
+  if (d.healthScoreSource === "composite" && d.scoreStatus === "partial") {
+    return d.missingSources?.length ? `覆盖不足：缺 ${d.missingSources.join(", ")}` : "覆盖不足";
   }
   if (d.note) {
     return d.note;
@@ -241,6 +326,8 @@ function partitionDomains(domains: OverviewDomainCard[]): {
     return (
       (d.warningCount ?? 0) > 0 ||
       (d.criticalCount ?? 0) > 0 ||
+      d.scoreStatus === "degraded" ||
+      d.scoreStatus === "partial" ||
       (value != null && value < 85)
     );
   });
@@ -301,10 +388,21 @@ function renderDomainTable(
                     ? html`
                         <span class="domain-score ${cls}">${display.value}分</span>
                         <span class="domain-score__source domain-score__source--${display.source}">
-                          ${display.source === "vm" ? "监控" : "资产"}
+                          ${scoreSourceLabel(display.source)}
                         </span>
+                        ${display.source === "composite" ? renderCoverageBadge(d) : nothing}
                       `
-                    : html`<span class="domain-score domain-score--muted">待评分</span>`}
+                    : display.source === "composite"
+                      ? html`
+                          <span
+                            class="domain-score ${d.scoreStatus === "degraded" ? "critical" : "warning"}"
+                            title=${l3HealthTitle(d)}
+                          >
+                            ${d.scoreStatus === "degraded" ? "降级" : d.scoreStatus === "partial" ? "部分覆盖" : "待评分"}
+                          </span>
+                          ${renderCoverageBadge(d)}
+                        `
+                      : html`<span class="domain-score domain-score--muted">待评分</span>`}
                 </td>
                 <td>${formatClusterCount(d.clusterCount ?? 0)}</td>
                 <td class="domain-table__dist-col">

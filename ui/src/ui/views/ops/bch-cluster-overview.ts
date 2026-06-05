@@ -210,6 +210,36 @@ export class BchClusterOverview extends LitElement {
       border: 1px solid rgba(16, 185, 129, 0.15);
     }
 
+    .health-meta-row {
+      display: flex;
+      gap: 12px;
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 8px;
+    }
+
+    .health-meta-tag {
+      background: var(--bg-hover, rgba(0,0,0,0.03));
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+
+    .tag-expired {
+      color: #ef4444;
+      background: rgba(239, 68, 68, 0.1);
+      border: 1px solid rgba(239, 68, 68, 0.2);
+    }
+
+    .ops-card.expired {
+      opacity: 0.85;
+      filter: grayscale(20%);
+    }
+
+    .degraded-alert {
+      border-left: 3px solid #f59e0b;
+    }
+
+
     .loading-container {
       display: flex;
       flex-direction: column;
@@ -281,17 +311,25 @@ export class BchClusterOverview extends LitElement {
 
       <div class="stats-grid">
         ${this.clusters.map((c) => {
-          const scoreClass = c.score >= 90 ? "healthy" : c.score >= 70 ? "warning" : "critical";
+          // 如果数据降级，分数使用 warning 颜色
+          const isDegraded = c.scoreStatus === "degraded" || (c.missingSources && c.missingSources.length > 0);
+          const scoreClass = isDegraded ? "warning" : c.score >= 90 ? "healthy" : c.score >= 70 ? "warning" : "critical";
           const alertClass = c.activeAlerts > 0 ? "warning" : "healthy";
+          const isExpired = c.freshness === "expired";
+          
           return html`
-            <div class="ops-card">
+            <div class="ops-card ${isExpired ? "expired" : ""}">
               <div class="card-header">
                 <div>
                   <div class="cluster-name">${c.name}</div>
                   <div class="cluster-region">${c.region}区域</div>
+                  <div class="health-meta-row">
+                    ${c.coverage !== undefined ? html`<span class="health-meta-tag">覆盖率: ${Math.round(c.coverage * 100)}%</span>` : ""}
+                    ${isExpired ? html`<span class="health-meta-tag tag-expired">数据已过期</span>` : html`<span class="health-meta-tag">实时</span>`}
+                  </div>
                 </div>
                 <div class="health-score-badge ${scoreClass}">
-                  <div>${c.score}</div>
+                  <div>${c.score !== undefined ? c.score : "-"}</div>
                   <div class="score-label">健康度</div>
                 </div>
               </div>
@@ -358,6 +396,15 @@ export class BchClusterOverview extends LitElement {
                   ${c.activeAlerts > 0 ? `当前活动告警: ${c.activeAlerts} 条` : "当前集群无活动告警，处于稳定状态"}
                 </span>
               </div>
+              
+              ${isDegraded ? html`
+              <div class="alert-banner warning degraded-alert">
+                <span style="font-size: 14px;">⚠️</span>
+                <span>
+                  <strong>数据源降级</strong>: 缺少核心来源 [${(c.missingSources || []).join(", ")}]，当前得分为降级展示。
+                </span>
+              </div>
+              ` : ""}
             </div>
           `;
         })}

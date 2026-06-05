@@ -44,12 +44,42 @@ type vmClient struct {
 
 func resolveVMBaseURL() string {
 	if u := strings.TrimSpace(os.Getenv("VICTORIAMETRICS_URL")); u != "" {
-		return strings.TrimSuffix(u, "/")
+		return normalizeMetricsBaseURL(u)
 	}
 	if u := strings.TrimSpace(os.Getenv("PROMETHEUS_URL")); u != "" {
-		return strings.TrimSuffix(u, "/")
+		return normalizeMetricsBaseURL(u)
 	}
 	return ""
+}
+
+func normalizeMetricsBaseURL(u string) string {
+	u = strings.TrimSpace(u)
+	u = strings.TrimSuffix(u, "/")
+	for {
+		switch {
+		case strings.HasSuffix(u, "/api/v1/query"):
+			u = strings.TrimSuffix(u, "/api/v1/query")
+		case strings.HasSuffix(u, "/api/v1"):
+			u = strings.TrimSuffix(u, "/api/v1")
+		default:
+			return strings.TrimSuffix(u, "/")
+		}
+		u = strings.TrimSuffix(u, "/")
+	}
+}
+
+func resolveClusterMetricsBaseURL(c Cluster) string {
+	if c.MetricsBaseUrl != "" {
+		return normalizeMetricsBaseURL(c.MetricsBaseUrl)
+	}
+	ref := strings.TrimSpace(c.VMUrlRef)
+	if ref == "" {
+		return ""
+	}
+	if strings.HasPrefix(ref, "http://") || strings.HasPrefix(ref, "https://") {
+		return normalizeMetricsBaseURL(ref)
+	}
+	return normalizeMetricsBaseURL(os.Getenv(ref))
 }
 
 func newVMClient() *vmClient {
@@ -188,17 +218,10 @@ func domainHealthScore(ctx context.Context, client *vmClient, domain string) (*i
 		}
 
 		clusterClient := client
-		if c.MetricsBaseUrl != "" || c.VMUrlRef != "" {
-			u := c.MetricsBaseUrl
-			if u == "" {
-				u = c.VMUrlRef
-			}
-			u = strings.TrimSpace(u)
-			if u != "" {
-				clusterClient = &vmClient{
-					baseURL: strings.TrimSuffix(u, "/"),
-					http:    client.http,
-				}
+		if u := resolveClusterMetricsBaseURL(c); u != "" {
+			clusterClient = &vmClient{
+				baseURL: u,
+				http:    client.http,
 			}
 		}
 
@@ -254,6 +277,9 @@ func enrichDashboardVMHealth(ctx context.Context, summary *DashboardSummary) {
 	for i := range summary.Domains {
 		d := &summary.Domains[i]
 		if d.ClusterCount == 0 {
+			continue
+		}
+		if d.HealthScoreSource == "composite" {
 			continue
 		}
 		score, note := domainHealthScore(ctx, client, d.Domain)

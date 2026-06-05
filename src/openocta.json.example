@@ -17,5 +17,15 @@
   "gateway": {
     "port": 18900,
     "bind": "loopback"
+  },
+  "mcp": {
+    "servers": {
+      "prometheus": {
+        "enabled": true,
+        "service": "prometheus",
+        "serviceUrl": "http://localhost:9090",
+        "toolPrefix": "prom"
+      }
+    }
   }
 }

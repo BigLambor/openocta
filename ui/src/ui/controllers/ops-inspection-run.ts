@@ -32,17 +32,26 @@ export async function runDomainInspectionWithPoll(
       clusterId = parts[0] ?? "";
       component = parts[1] ? decodeURIComponent(parts[1]) : "";
     }
+    const scenarioKey = scenarioKeyForInspection(domainKey, jobId);
     await state.client.request("cron.run", {
       id: jobId,
       mode: "force",
       domain: domainKey,
       clusterId,
       component,
+      ...(scenarioKey ? { scenarioKey } : {}),
     });
     await pollInspectionRuns(state, jobId);
   } finally {
     state.opsIsInspecting = { ...state.opsIsInspecting, [domainKey]: false };
   }
+}
+
+function scenarioKeyForInspection(domainKey: string, jobId: string): string | undefined {
+  if (domainKey === "gbase" || jobId === "job-inspect-gbase") {
+    return "ops-gbase-health";
+  }
+  return undefined;
 }
 
 export async function pollInspectionRuns(

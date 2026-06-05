@@ -19,6 +19,14 @@ import (
 // GBaseSlowSqlTool queries slow SQL logs from GBase database.
 type GBaseSlowSqlTool struct{}
 
+type gbaseSlowSQLEvidence struct {
+	Type         string                   `json:"type"`
+	Status       string                   `json:"status"`
+	SlowSQLCount int                      `json:"slowSqlCount"`
+	Rows         []map[string]interface{} `json:"rows,omitempty"`
+	Error        string                   `json:"error,omitempty"`
+}
+
 // Name returns the tool name.
 func (GBaseSlowSqlTool) Name() string {
 	return "query_gbase_slow_sql"
@@ -78,22 +86,19 @@ func (GBaseSlowSqlTool) Execute(ctx context.Context, params map[string]interface
 		dsn = strings.TrimSpace(os.Getenv("GBASE_DSN"))
 	}
 	if dsn == "" {
-		return &tool.ToolResult{
-			Success: false,
-			Output:  "GBASE_DSN 未配置：请在环境变量中设置 GBase 连接串，或通过 db_url 参数传入。不会返回模拟慢 SQL 数据。",
-		}, nil
+		return gbaseSlowSQLToolResult(false, nil, "GBASE_DSN 未配置：请在环境变量中设置 GBase 连接串，或通过 db_url 参数传入。不会返回模拟慢 SQL 数据。"), nil
 	}
 
 	db, err := sql.Open("mysql", dsn)
 	if err != nil {
-		return &tool.ToolResult{Success: false, Output: fmt.Sprintf("无法连接 GBase: %v", err)}, nil
+		return gbaseSlowSQLToolResult(false, nil, fmt.Sprintf("无法连接 GBase: %v", err)), nil
 	}
 	defer db.Close()
 
 	qctx, cancel := context.WithTimeout(ctx, 12*time.Second)
 	defer cancel()
 	if err := db.PingContext(qctx); err != nil {
-		return &tool.ToolResult{Success: false, Output: fmt.Sprintf("GBase 连接失败: %v", err)}, nil
+		return gbaseSlowSQLToolResult(false, nil, fmt.Sprintf("GBase 连接失败: %v", err)), nil
 	}
 
 	// Generic slow-query probe; adjust table/view via GBASE_SLOW_SQL_QUERY if needed.
@@ -107,10 +112,7 @@ LIMIT ?`
 
 	rows, err := db.QueryContext(qctx, querySQL, limit)
 	if err != nil {
-		return &tool.ToolResult{
-			Success: false,
-			Output:  fmt.Sprintf("慢 SQL 查询失败: %v（可通过 GBASE_SLOW_SQL_QUERY 自定义 SQL）", err),
-		}, nil
+		return gbaseSlowSQLToolResult(false, nil, fmt.Sprintf("慢 SQL 查询失败: %v（可通过 GBASE_SLOW_SQL_QUERY 自定义 SQL）", err)), nil
 	}
 	defer rows.Close()
 
@@ -136,14 +138,32 @@ LIMIT ?`
 		}
 		out = append(out, row)
 	}
-	if len(out) == 0 {
-		return &tool.ToolResult{Success: true, Output: "[]"}, nil
+	return gbaseSlowSQLToolResult(true, out, ""), nil
+}
+
+func gbaseSlowSQLToolResult(success bool, rows []map[string]interface{}, errText string) *tool.ToolResult {
+	status := "healthy"
+	if !success {
+		status = "critical"
+	} else if len(rows) > 0 {
+		status = "warning"
 	}
-	b, err := json.Marshal(out)
+	evidence := gbaseSlowSQLEvidence{
+		Type:         "gbase_sql",
+		Status:       status,
+		SlowSQLCount: len(rows),
+		Rows:         rows,
+		Error:        strings.TrimSpace(errText),
+	}
+	out, err := json.Marshal(evidence)
 	if err != nil {
-		return &tool.ToolResult{Success: false, Output: err.Error()}, nil
+		out = []byte(errText)
 	}
-	return &tool.ToolResult{Success: true, Output: string(b)}, nil
+	return &tool.ToolResult{
+		Success: success,
+		Output:  string(out),
+		Data:    evidence,
+	}
 }
 
 var _ tool.Tool = GBaseSlowSqlTool{}

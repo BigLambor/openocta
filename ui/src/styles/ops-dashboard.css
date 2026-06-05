@@ -373,6 +373,16 @@
   background: color-mix(in srgb, var(--text-secondary) 10%, var(--bg));
 }
 
+.ops-dashboard .domain-score__source--composite {
+  color: var(--ops-health-ok, #10b981);
+  background: color-mix(in srgb, var(--ops-health-ok, #10b981) 10%, var(--bg));
+}
+
+.ops-dashboard .domain-score__source--coverage {
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--text-secondary) 8%, var(--bg));
+}
+
 .ops-dashboard .health-bar-container {
   height: 4px;
   background: var(--border);

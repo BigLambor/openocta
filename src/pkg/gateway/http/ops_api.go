@@ -245,6 +245,127 @@ func (s *Server) handleOpsDashboardSummary(w http.ResponseWriter, r *http.Reques
 	opsWriteJSON(w, http.StatusOK, summary)
 }
 
+func (s *Server) handleOpsHealthSignals(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	domain := strings.TrimSpace(r.URL.Query().Get("domain"))
+	objectType := strings.TrimSpace(r.URL.Query().Get("objectType"))
+	objectID := strings.TrimSpace(r.URL.Query().Get("objectId"))
+	if domain == "all" {
+		domain = ""
+	}
+
+	session := GetUserSession(r)
+	if session != nil && session.RoleName != "admin" && domain != "" && !userHasDomainPermission(session, domain) {
+		opsWriteError(w, http.StatusForbidden, "没有该技术域的访问权限")
+		return
+	}
+
+	signals, err := ops.ListHealthSignals()
+	if err != nil {
+		opsWriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	filtered := make([]ops.HealthSignal, 0, len(signals))
+	for _, sig := range signals {
+		if domain != "" && sig.Domain != domain {
+			continue
+		}
+		if objectType != "" && sig.ObjectType != objectType {
+			continue
+		}
+		if objectID != "" && sig.ObjectID != objectID {
+			continue
+		}
+		if session != nil && session.RoleName != "admin" && !userHasDomainPermission(session, sig.Domain) {
+			continue
+		}
+		filtered = append(filtered, sig)
+	}
+	opsWriteJSON(w, http.StatusOK, map[string]interface{}{
+		"signals": filtered,
+		"total":   len(filtered),
+	})
+}
+
+func (s *Server) handleOpsHealthSnapshots(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	domain := strings.TrimSpace(r.URL.Query().Get("domain"))
+	objectType := strings.TrimSpace(r.URL.Query().Get("objectType"))
+	objectID := strings.TrimSpace(r.URL.Query().Get("objectId"))
+	if domain == "all" {
+		domain = ""
+	}
+
+	session := GetUserSession(r)
+	if session != nil && session.RoleName != "admin" && domain != "" && !userHasDomainPermission(session, domain) {
+		opsWriteError(w, http.StatusForbidden, "没有该技术域的访问权限")
+		return
+	}
+
+	snapshots, err := ops.ListHealthSnapshots()
+	if err != nil {
+		opsWriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	filtered := make([]ops.HealthSnapshot, 0, len(snapshots))
+	for _, snap := range snapshots {
+		if domain != "" && snap.Domain != domain {
+			continue
+		}
+		if objectType != "" && snap.ObjectType != objectType {
+			continue
+		}
+		if objectID != "" && snap.ObjectID != objectID {
+			continue
+		}
+		if session != nil && session.RoleName != "admin" && !userHasDomainPermission(session, snap.Domain) {
+			continue
+		}
+		filtered = append(filtered, snap)
+	}
+	opsWriteJSON(w, http.StatusOK, map[string]interface{}{
+		"snapshots": filtered,
+		"total":     len(filtered),
+	})
+}
+
+func (s *Server) handleOpsScenarios(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	domain := strings.TrimSpace(r.URL.Query().Get("domain"))
+	if domain == "all" {
+		domain = ""
+	}
+	session := GetUserSession(r)
+	if session != nil && session.RoleName != "admin" && domain != "" && !userHasDomainPermission(session, domain) {
+		opsWriteError(w, http.StatusForbidden, "没有该技术域的访问权限")
+		return
+	}
+	all := ops.ListOpsScenarios()
+	scenarios := make([]ops.OpsScenario, 0, len(all))
+	for _, scenario := range all {
+		if domain != "" && scenario.DomainKey != domain {
+			continue
+		}
+		if session != nil && session.RoleName != "admin" && !userHasDomainPermission(session, scenario.DomainKey) {
+			continue
+		}
+		scenarios = append(scenarios, scenario)
+	}
+	opsWriteJSON(w, http.StatusOK, map[string]interface{}{
+		"scenarios": scenarios,
+		"total":     len(scenarios),
+	})
+}
+
 func (s *Server) handleOpsListAlertGroups(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)

@@ -732,6 +732,19 @@ export type CronRunLogEntry = {
   summary?: string;
   sessionId?: string;
   sessionKey?: string;
+  domain?: string;
+  clusterId?: string;
+  component?: string;
+  scenarioKey?: string;
+  result?: {
+    domain?: string;
+    clusterId?: string;
+    component?: string;
+    scenarioKey?: string;
+    score?: number;
+    scoreStatus?: string;
+    reportMarkdown?: string;
+  };
 };
 
 export type SkillsStatusConfigCheck = {

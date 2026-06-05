@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/openocta/openocta/embed"
 	"github.com/openocta/openocta/pkg/acp/mcp"
+	"github.com/openocta/openocta/pkg/agent/tools"
 	"github.com/openocta/openocta/pkg/channels"
 	"github.com/openocta/openocta/pkg/channels/builtin"
 	"github.com/openocta/openocta/pkg/channels/dingtalk"
@@ -25,10 +26,9 @@ import (
 	"github.com/openocta/openocta/pkg/gateway/ws"
 	initpkg "github.com/openocta/openocta/pkg/init"
 	"github.com/openocta/openocta/pkg/logging"
+	"github.com/openocta/openocta/pkg/ops"
 	"github.com/openocta/openocta/pkg/outbound"
 	"github.com/openocta/openocta/pkg/paths"
-	"github.com/openocta/openocta/pkg/agent/tools"
-	"github.com/openocta/openocta/pkg/ops"
 	"github.com/openocta/openocta/pkg/rbac"
 	"github.com/stellarlinkco/agentsdk-go/pkg/middleware"
 	"io"
@@ -113,6 +113,9 @@ func NewServer(addr string, version string) *Server {
 	}
 	if err := ops.InitAlertsStore(stateDir); err != nil {
 		slog.Error("Failed to initialize ops alerts store", "error", err)
+	}
+	if err := ops.InitHealthStore(stateDir); err != nil {
+		slog.Error("Failed to initialize ops health facts store", "error", err)
 	}
 
 	// Wire tools hooks to prevent circular dependency
@@ -519,6 +522,9 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("PATCH /api/ops/clusters/{id}", s.requireRbacOrGatewayToken("menu:config", s.handleOpsPatchCluster))
 	s.mux.HandleFunc("DELETE /api/ops/clusters/{id}", s.requireRbacOrGatewayToken("menu:config", s.handleOpsDeleteCluster))
 	s.mux.HandleFunc("GET /api/ops/dashboard/summary", s.requireRbacOrGatewayToken("", s.handleOpsDashboardSummary))
+	s.mux.HandleFunc("GET /api/ops/scenarios", s.requireRbacOrGatewayToken("", s.handleOpsScenarios))
+	s.mux.HandleFunc("GET /api/ops/health/signals", s.requireRbacOrGatewayToken("", s.handleOpsHealthSignals))
+	s.mux.HandleFunc("GET /api/ops/health/snapshots", s.requireRbacOrGatewayToken("", s.handleOpsHealthSnapshots))
 	s.mux.HandleFunc("GET /api/ops/alerts/groups", s.requireRbacOrGatewayToken("", s.handleOpsListAlertGroups))
 	s.mux.HandleFunc("GET /api/ops/alerts/groups/{id}", s.requireRbacOrGatewayToken("", s.handleOpsGetAlertGroup))
 	s.mux.HandleFunc("PATCH /api/ops/alerts/groups/{id}", s.requireRbacOrGatewayToken("ops:ack", s.handleOpsPatchAlertGroup))

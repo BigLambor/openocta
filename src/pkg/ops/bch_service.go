@@ -7,6 +7,11 @@ type BchClusterHealth struct {
 	Region         string                 `json:"region"`
 	Status         string                 `json:"status"` // healthy, warning, critical
 	Score          int                    `json:"score"`
+	ScoreStatus    string                 `json:"scoreStatus"`
+	Coverage       float64                `json:"coverage"`
+	Freshness      string                 `json:"freshness"`
+	PresentSources []string               `json:"presentSources"`
+	MissingSources []string               `json:"missingSources"`
 	NodeCount      int                    `json:"nodeCount"`
 	ActiveAlerts   int                    `json:"activeAlerts"`
 	CpuUsedPercent float64                `json:"cpuUsedPercent"`
@@ -14,6 +19,7 @@ type BchClusterHealth struct {
 	DfsUsedPercent float64                `json:"dfsUsedPercent"`
 	Metrics        map[string]interface{} `json:"metrics"`
 }
+
 
 // FlinkJobMetric represents metrics for a Flink Job
 type FlinkJobMetric struct {
