@@ -16,11 +16,12 @@ export type OpsInspectionRunHost = CronState & {
 export async function runDomainInspectionWithPoll(
   state: OpsInspectionRunHost,
   jobId: string,
+  domainKeyOverride?: string,
 ): Promise<void> {
   if (!state.client) {
     throw new Error("网关未连接");
   }
-  const domainKey = state.tab;
+  const domainKey = domainKeyOverride || state.tab;
   state.opsIsInspecting = { ...state.opsIsInspecting, [domainKey]: true };
   try {
     const entityId = (state as any).opsSelectedEntityIds?.[domainKey] ?? "all";

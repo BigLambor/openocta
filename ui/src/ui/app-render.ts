@@ -98,6 +98,44 @@ function extractEmployeeIdFromSessionKey(key: string): string | null {
   return null;
 }
 
+function formatOpsTime(ms?: number | string): string {
+  const value = typeof ms === "string" ? Date.parse(ms) : ms;
+  const d = new Date(value && Number.isFinite(value) ? value : Date.now());
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+function mapCronRunsToWorkbenchInspections(domain: string, runs: any[]): WorkbenchInspection[] {
+  return runs.map((entry, idx) => {
+    const score =
+      entry?.result?.score !== undefined && entry?.result?.score !== null
+        ? Number(entry.result.score)
+        : null;
+    let status: WorkbenchInspection["status"] = "unknown";
+    if (score !== null && Number.isFinite(score)) {
+      status = score >= 90 ? "healthy" : score >= 75 ? "warning" : "critical";
+    } else if (entry?.error) {
+      status = "critical";
+    }
+    const rawReport = entry?.result?.reportMarkdown || entry?.summary || "";
+    const summary = String(rawReport)
+      .replace(/[#*`\-]/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    return {
+      id: entry?.sessionId || `inspection-${domain}-${idx}`,
+      time: formatOpsTime(entry?.runAtMs || entry?.ts),
+      score: score !== null && Number.isFinite(score) ? score : null,
+      status,
+      reportSummary:
+        summary.length > 150
+          ? `${summary.slice(0, 150)}...`
+          : summary || (entry?.error ? `巡检执行失败: ${entry.error}` : "巡检记录暂无摘要。"),
+      reportMarkdown: String(rawReport || (entry?.error ? `巡检失败：${entry.error}` : "")),
+    };
+  });
+}
+
 function normalizeDigitalEmployeeId(raw: string): string {
   const t = (raw ?? "").trim().toLowerCase();
   return t || "default";
@@ -373,7 +411,7 @@ import { renderNativeDialogOverlay } from "./views/native-dialog-overlay.ts";
 import { renderLogs } from "./views/logs.ts";
 import { renderNodes } from "./views/nodes.ts";
 import { renderOverview } from "./views/overview.ts";
-import { renderWorkbench } from "./views/workbench.ts";
+import { renderWorkbench, type WorkbenchInspection, type WorkbenchView } from "./views/workbench.ts";
 import { renderAssetsView } from "./views/assets-view.ts";
 import { renderOpsCapabilityCenter } from "./views/ops-capability-center.ts";
 import { renderTechOpsHub } from "./views/tech-ops-hub.ts";
@@ -1521,6 +1559,40 @@ export function renderApp(state: AppViewState) {
                   aiModeRaw === "similar" || aiModeRaw === "action" || aiModeRaw === "root-cause"
                     ? aiModeRaw
                     : "root-cause";
+                const workbenchViewRaw = state.opsSelectedEntityIds?.workbenchView;
+                const workbenchView: WorkbenchView =
+                  workbenchViewRaw === "inspection" ||
+                  workbenchViewRaw === "diagnosis" ||
+                  workbenchViewRaw === "governance" ||
+                  workbenchViewRaw === "capacity" ||
+                  workbenchViewRaw === "change"
+                    ? workbenchViewRaw
+                    : "events";
+                const inspectionJobId = `job-inspect-${domain}`;
+                if (
+                  workbenchView === "inspection" &&
+                  state.opsInspectionImStatus == null &&
+                  !(state as any)._loadingWorkbenchInspectionIm
+                ) {
+                  (state as any)._loadingWorkbenchInspectionIm = true;
+                  state.loadOpsInspectionImStatus().finally(() => {
+                    (state as any)._loadingWorkbenchInspectionIm = false;
+                  });
+                }
+                if (
+                  workbenchView === "inspection" &&
+                  state.cronRunsJobId !== inspectionJobId &&
+                  !(state as any)._loadingWorkbenchInspectionRuns
+                ) {
+                  (state as any)._loadingWorkbenchInspectionRuns = inspectionJobId;
+                  loadCronRuns(state as any, inspectionJobId).finally(() => {
+                    (state as any)._loadingWorkbenchInspectionRuns = null;
+                  });
+                }
+                const inspections =
+                  state.cronRunsJobId === inspectionJobId
+                    ? mapCronRunsToWorkbenchInspections(domain, state.cronRuns)
+                    : [];
                 const alertGroups = state.opsAlertsByDomain?.[domain] ?? [];
                 const recordAiDecision = async (
                   id: string,
@@ -1619,9 +1691,22 @@ export function renderApp(state: AppViewState) {
                   alertsLoading: state.opsAlertsLoading?.[domain] ?? false,
                   alertsError: state.opsAlertsError?.[domain] ?? null,
                   alertGroups,
+                  activeView: workbenchView,
+                  inspectionsLoading: state.cronLoading,
+                  inspections,
+                  selectedInspectionId: state.opsSelectedInspectionIds[domain] || (inspections[0]?.id ?? null),
+                  inspectionImStatus: state.opsInspectionImStatus,
+                  isInspecting: state.opsIsInspecting[domain] || false,
+                  canInspect: canRunInspection(state.rbacUser),
                   selectedAlertGroupId: selectedId,
                   aiPanelOpen: state.opsSelectedEntityIds?.workbenchAiPanel === "open",
                   aiPanelMode: aiMode,
+                  onViewChange: (view) => {
+                    state.opsSelectedEntityIds = {
+                      ...state.opsSelectedEntityIds,
+                      workbenchView: view,
+                    };
+                  },
                   onRefreshAlerts: () => state.loadOpsDomainAlerts(domain),
                   onSelectAlertGroup: (id) => {
                     state.opsSelectedAlertGroupIds = {
@@ -1629,6 +1714,20 @@ export function renderApp(state: AppViewState) {
                       [domain]: id,
                     };
                   },
+                  onSelectInspection: (id) => {
+                    state.opsSelectedInspectionIds = {
+                      ...state.opsSelectedInspectionIds,
+                      [domain]: id,
+                    };
+                  },
+                  onRunInspection: () => {
+                    void import("./controllers/ops-inspection-run.ts").then(({ runDomainInspectionWithPoll }) => {
+                      return runDomainInspectionWithPoll(state as any, inspectionJobId, domain).catch((err) => {
+                        console.error("Failed to run workbench inspection:", err);
+                      });
+                    });
+                  },
+                  onOpenChannels: () => state.setTab("channels"),
                   onOpenAiPanel: (mode) => {
                     state.opsSelectedEntityIds = {
                       ...state.opsSelectedEntityIds,
@@ -1700,12 +1799,25 @@ export function renderApp(state: AppViewState) {
                 cmdbSyncing: state.opsCmdbSyncing,
                 cmdbSyncHint: state.opsCmdbSyncMessage,
                 selectedDomain: selectedOpsDomain,
+                activeAssetView:
+                  state.opsSelectedEntityIds?.assetsView === "services" ||
+                  state.opsSelectedEntityIds?.assetsView === "components" ||
+                  state.opsSelectedEntityIds?.assetsView === "jobs" ||
+                  state.opsSelectedEntityIds?.assetsView === "topology"
+                    ? state.opsSelectedEntityIds.assetsView
+                    : "clusters",
                 user: state.rbacUser,
                 canManage:
                   state.rbacUser?.roleName === "admin" ||
                   (state.rbacUser?.permissions?.includes("menu:config") ?? false),
                 onRefresh: () => (state as any).loadOpsClusters(),
                 onDomainChange: (domain) => setGlobalOpsDomain(normalizeOpsDomain(domain)),
+                onAssetViewChange: (view) => {
+                  state.opsSelectedEntityIds = {
+                    ...state.opsSelectedEntityIds,
+                    assetsView: view,
+                  };
+                },
                 onSyncCmdb:
                   state.rbacUser?.roleName === "admin" ||
                   (state.rbacUser?.permissions?.includes("menu:config") ?? false)
