@@ -76,6 +76,7 @@ import {
   effectiveOpsDomain,
   firstAccessibleOpsDomain,
   normalizeOpsDomain,
+  opsAssistantForDomain,
   opsDomainLabel,
   renderDomainFilter,
   type OpsDomainKey,
@@ -412,6 +413,7 @@ import { renderLogs } from "./views/logs.ts";
 import { renderNodes } from "./views/nodes.ts";
 import { renderOverview } from "./views/overview.ts";
 import { renderWorkbench, type WorkbenchInspection, type WorkbenchView } from "./views/workbench.ts";
+import { runWorkbenchAi } from "./controllers/ops-workbench-ai.ts";
 import { renderAssetsView } from "./views/assets-view.ts";
 import { renderTechOpsDomain } from "./views/tech-ops-domain.ts";
 import {
@@ -947,8 +949,8 @@ export function renderApp(state: AppViewState) {
                  { tab: "employeeMarket", label: "助手模板库", adminOnly: true },
                  { tab: "digitalEmployee", label: "我的助手", adminOnly: true },
                  { tab: "agentSwarm", label: "工作流编排", adminOnly: true },
-                 { tab: "employeeTasks", label: "执行记录" },
-                 { tab: "employeeEffectiveness", label: "自动化效果" },
+                 { tab: "employeeTasks", label: "执行记录", adminOnly: true },
+                 { tab: "employeeEffectiveness", label: "自动化效果", adminOnly: true },
                  { tab: "channels", label: "通道配置", permission: "menu:channels" },
                  { tab: "scheduledTasks", label: "定时任务" },
                  { tab: "skillLibrary", label: "技能库" },
@@ -1526,9 +1528,12 @@ export function renderApp(state: AppViewState) {
                 dashboardError: state.opsDashboardError,
                 globalInspecting: state.opsGlobalInspecting,
                 dashboardToast: state.opsDashboardToast,
-                onOpenAssets: () => state.setTab("assetManagement"),
+                onOpenAssets: () => state.setTab("assets"),
                 onOpenConfig: () => state.setTab("config"),
-                onNavigateDomain: (tab) => state.setTab(tab),
+                onNavigateDomain: (tab) => {
+                  setGlobalOpsDomain(normalizeOpsDomain(tab));
+                  state.setTab("assets");
+                },
                 onOpenScheduledTasks: () => state.setTab("scheduledTasks"),
                 onRunGlobalInspection: () => state.runGlobalInspectionFromDashboard(),
                 onOpenPendingAlerts: () => state.openPendingAlertsFromDashboard(),
@@ -1632,16 +1637,7 @@ export function renderApp(state: AppViewState) {
                           : `根因分析建议${isAccepted ? "已确认" : "已驳回"}：${trimmedNote}`;
                     
                     const actualDomain = alert.domain || domain;
-                    const employeeId =
-                      actualDomain === "gbase"
-                        ? "emp_gbase_diagnose"
-                        : actualDomain === "fi"
-                          ? "emp_fi_inspect"
-                          : actualDomain === "governance"
-                            ? "emp_governance_remediate"
-                            : actualDomain === "dataapps"
-                              ? "emp_dataapps_ops"
-                              : "builtin-bch-oncall";
+                    const employeeId = opsAssistantForDomain(actualDomain).employeeId;
 
                     const taskId = await createEmployeeTask(state, {
                       employeeId,
@@ -1692,8 +1688,13 @@ export function renderApp(state: AppViewState) {
                     await nativeAlert(err instanceof Error ? err.message : String(err));
                   }
                 };
+                const workbenchAssistant = opsAssistantForDomain(
+                  alertGroups.find((g) => g.id === selectedId)?.domain || domainForAlerts,
+                );
                 return renderWorkbench({
                   domainName: opsDomainLabel(domainForAlerts),
+                  assistantName: workbenchAssistant.name,
+                  assistantPersona: workbenchAssistant.persona,
                   domainFilter: renderDomainFilter({
                     selectedDomain: selectedOpsDomain,
                     user: state.rbacUser,
@@ -1713,6 +1714,21 @@ export function renderApp(state: AppViewState) {
                   selectedAlertGroupId: selectedId,
                   aiPanelOpen: state.opsSelectedEntityIds?.workbenchAiPanel === "open",
                   aiPanelMode: aiMode,
+                  aiStatus:
+                    state.workbenchAiObjectId === selectedId ? state.workbenchAiStatus : "idle",
+                  aiStream: state.workbenchAiObjectId === selectedId ? state.workbenchAiStream : null,
+                  aiResult: state.workbenchAiObjectId === selectedId ? state.workbenchAiResult : null,
+                  aiError: state.workbenchAiObjectId === selectedId ? state.workbenchAiError : null,
+                  onRetryAi: () => {
+                    const target = alertGroups.find((g) => g.id === selectedId) || alertGroups[0];
+                    if (!target) return;
+                    void runWorkbenchAi(state as any, {
+                      domain: target.domain || domainForAlerts,
+                      mode: aiMode,
+                      alert: target,
+                      assistantTemplate: opsAssistantForDomain(target.domain || domainForAlerts).employeeId,
+                    });
+                  },
                   onViewChange: (view) => {
                     state.opsSelectedEntityIds = {
                       ...state.opsSelectedEntityIds,
@@ -1746,6 +1762,14 @@ export function renderApp(state: AppViewState) {
                       workbenchAiPanel: "open",
                       workbenchAiMode: mode,
                     };
+                    const target = alertGroups.find((g) => g.id === selectedId) || alertGroups[0];
+                    if (!target) return;
+                    void runWorkbenchAi(state as any, {
+                      domain: target.domain || domainForAlerts,
+                      mode,
+                      alert: target,
+                      assistantTemplate: opsAssistantForDomain(target.domain || domainForAlerts).employeeId,
+                    });
                   },
                   onCloseAiPanel: () => {
                     state.opsSelectedEntityIds = {

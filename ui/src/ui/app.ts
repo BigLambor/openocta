@@ -180,6 +180,15 @@ export class OpenClawApp extends LitElement implements NativeDialogInvoker {
   @state() chatStream: string | null = null;
   @state() chatStreamStartedAt: number | null = null;
   @state() chatRunId: string | null = null;
+  // Workbench scenario AI (in-panel streaming, separate from the global Copilot session)
+  @state() workbenchAiSessionKey: string | null = null;
+  @state() workbenchAiRunId: string | null = null;
+  @state() workbenchAiStream: string | null = null;
+  @state() workbenchAiResult: string | null = null;
+  @state() workbenchAiStatus: "idle" | "loading" | "streaming" | "done" | "error" = "idle";
+  @state() workbenchAiError: string | null = null;
+  @state() workbenchAiObjectId: string | null = null;
+  @state() workbenchAiMode: "root-cause" | "similar" | "action" = "root-cause";
   @state() compactionStatus: CompactionStatus | null = null;
   @state() chatAvatarUrl: string | null = null;
   @state() chatThinkingLevel: string | null = null;

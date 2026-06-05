@@ -60,6 +60,56 @@ export function effectiveOpsDomain(domain: string): Exclude<OpsDomainKey, "all">
   return normalized === "all" ? "hadoop" : normalized;
 }
 
+export type OpsAssistant = {
+  employeeId: string;
+  name: string;
+  persona: string;
+};
+
+/**
+ * Single source of truth for mapping a technical domain to its digital-employee
+ * template. Used by both the workbench AI side panel (display) and the
+ * confirm/reject flow (execution-record write) so the persona shown always
+ * matches the employee id recorded.
+ */
+export function opsAssistantForDomain(domain: string): OpsAssistant {
+  switch (effectiveOpsDomain(domain)) {
+    case "gbase":
+      return {
+        employeeId: "emp_gbase_diagnose",
+        name: "GBase 诊断数字员工",
+        persona: "专家人设：GBase 慢 SQL、锁等待、容量与性能根因分析。",
+      };
+    case "fi":
+      return {
+        employeeId: "emp_fi_inspect",
+        name: "FI 巡检数字员工",
+        persona: "专家人设：FusionInsight 组件健康巡检、告警降噪与风险研判。",
+      };
+    case "governance":
+      return {
+        employeeId: "emp_governance_remediate",
+        name: "开发治理数字员工",
+        persona: "专家人设：元数据治理、血缘影响面与配置合规整改。",
+      };
+    case "dataapps":
+      return {
+        employeeId: "emp_dataapps_ops",
+        name: "数据 App 护航数字员工",
+        persona: "专家人设：数据应用链路、调度稳定性与 SLA 护航。",
+      };
+    case "hadoop":
+    default:
+      return {
+        // Seeded BCH on-call employee (pkg/init/employee.go); keep in sync with
+        // the backend automation.domainEmployeeIDs mapping.
+        employeeId: "emp_bch_duty",
+        name: "BCH 值班数字员工",
+        persona: "专家人设：BCH 告警降噪、根因候选、影响面判断、处置建议。",
+      };
+  }
+}
+
 export function renderDomainFilter(props: {
   selectedDomain: string;
   user: DomainFilterUser;

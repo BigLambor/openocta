@@ -68,7 +68,7 @@
 - 告警 PATCH 为 `resolved`。
 - 新增一条 `employee.tasks` 执行记录。
 - 记录包含：
-  - `employeeId=builtin-bch-oncall`
+  - `employeeId=emp_bch_duty`（BCH 域已统一到播种的值班数字员工）
   - `domainKey=hadoop`
   - `capabilityKey=observability-alert`
   - `objectRef=<告警组 ID>`

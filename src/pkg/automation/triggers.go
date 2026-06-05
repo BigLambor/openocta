@@ -15,7 +15,26 @@ type TriggerRule struct {
 	EmployeeID string `json:"employeeId"` // target digital employee ID
 }
 
-// DefaultRules defines the pre-configured rules.
+// domainEmployeeIDs maps a technical domain to its default seeded digital-employee ID.
+// Single source of truth shared by alert auto-routing (MatchAlert) and the
+// pre-configured rules below. Keep in sync with the seed manifests in
+// pkg/init/employee.go and the frontend opsAssistantForDomain mapping.
+var domainEmployeeIDs = map[string]string{
+	"hadoop":     "emp_bch_duty",
+	"fi":         "emp_fi_inspect",
+	"gbase":      "emp_gbase_diagnose",
+	"governance": "emp_governance_remediate",
+	"dataapps":   "emp_dataapps_ops",
+}
+
+// DefaultEmployeeForDomain returns the seeded employee ID for a technical domain.
+func DefaultEmployeeForDomain(domain string) (string, bool) {
+	id, ok := domainEmployeeIDs[strings.ToLower(strings.TrimSpace(domain))]
+	return id, ok
+}
+
+// DefaultRules defines the pre-configured rules. Each domain routes to its own
+// seeded expert digital employee rather than a single shared one.
 var DefaultRules = []TriggerRule{
 	{
 		ID:         "rule-bch-alert-oncall",
@@ -23,7 +42,7 @@ var DefaultRules = []TriggerRule{
 		Enabled:    true,
 		Domain:     "hadoop",
 		Severity:   "critical",
-		EmployeeID: "emp_bch_duty",
+		EmployeeID: domainEmployeeIDs["hadoop"],
 	},
 	{
 		ID:         "rule-fi-alert-oncall",
@@ -31,14 +50,28 @@ var DefaultRules = []TriggerRule{
 		Enabled:    true,
 		Domain:     "fi",
 		Severity:   "critical",
-		EmployeeID: "emp_bch_duty",
+		EmployeeID: domainEmployeeIDs["fi"],
 	},
 	{
 		ID:         "rule-gbase-alert-oncall",
 		Name:       "GBase 告警自动分析规则",
 		Enabled:    true,
 		Domain:     "gbase",
-		EmployeeID: "emp_bch_duty",
+		EmployeeID: domainEmployeeIDs["gbase"],
+	},
+	{
+		ID:         "rule-governance-alert",
+		Name:       "开发治理告警自动分析规则",
+		Enabled:    true,
+		Domain:     "governance",
+		EmployeeID: domainEmployeeIDs["governance"],
+	},
+	{
+		ID:         "rule-dataapps-alert",
+		Name:       "数据 App 告警自动分析规则",
+		Enabled:    true,
+		Domain:     "dataapps",
+		EmployeeID: domainEmployeeIDs["dataapps"],
 	},
 }
 

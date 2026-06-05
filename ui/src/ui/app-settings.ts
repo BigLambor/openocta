@@ -487,6 +487,21 @@ function normalizeLegacyChatSessionPath(host: SettingsHost): void {
   window.history.replaceState({}, "", url.toString());
 }
 
+const LEGACY_DOMAIN_TABS = new Set<Tab>(["hadoop", "fi", "gbase", "governance", "dataapps"]);
+
+/**
+ * 旧技术域独立页（/hadoop、/fi…）已被"服务与资产 + 技术域过滤器"取代。
+ * 直接访问这些 URL（书签/外链/前进后退）时收口到 /assets 并带上对应技术域，
+ * 避免回到已废弃的信息架构。仅在 URL 解析层处理，不影响应用内部渲染路径。
+ */
+function collapseLegacyDomainRoute(host: SettingsHost, resolved: Tab): Tab {
+  if (!LEGACY_DOMAIN_TABS.has(resolved)) {
+    return resolved;
+  }
+  applySettings(host, { ...host.settings, opsDomain: normalizeOpsDomain(resolved) });
+  return "assets";
+}
+
 export function syncTabWithLocation(host: SettingsHost, replace: boolean) {
   if (typeof window === "undefined") {
     return;
@@ -497,6 +512,7 @@ export function syncTabWithLocation(host: SettingsHost, replace: boolean) {
   if (resolved === "config") {
     resolved = "overview";
   }
+  resolved = collapseLegacyDomainRoute(host, resolved);
   setTabFromRoute(host, resolved);
   const link = applyOpsDeepLinkFromUrl(host as unknown as Parameters<typeof applyOpsDeepLinkFromUrl>[0]);
   if (link.alertsTab) {
@@ -534,6 +550,7 @@ export function onPopState(host: SettingsHost) {
     applySettings(host, { ...host.settings, opsDomain: normalizeOpsDomain(domain) });
   }
 
+  resolved = collapseLegacyDomainRoute(host, resolved);
   setTabFromRoute(host, resolved);
 }
 

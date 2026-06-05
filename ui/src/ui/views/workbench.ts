@@ -34,6 +34,8 @@ export type WorkbenchInspection = {
 
 export type WorkbenchProps = {
   domainName: string;
+  assistantName?: string;
+  assistantPersona?: string;
   domainFilter?: TemplateResult;
   activeView?: WorkbenchView;
   alertsLoading?: boolean;
@@ -52,6 +54,11 @@ export type WorkbenchProps = {
   selectedAlertGroupId?: string | null;
   aiPanelOpen?: boolean;
   aiPanelMode?: "root-cause" | "similar" | "action";
+  aiStatus?: "idle" | "loading" | "streaming" | "done" | "error";
+  aiStream?: string | null;
+  aiResult?: string | null;
+  aiError?: string | null;
+  onRetryAi?: () => void;
   onViewChange?: (view: WorkbenchView) => void;
   onRefreshAlerts?: () => void;
   onSelectAlertGroup?: (id: string) => void;
@@ -125,6 +132,56 @@ function markdownToLines(text: string): string[] {
     .slice(0, 6);
 }
 
+function renderRichText(text: string) {
+  const blocks = (text || "")
+    .split(/\n{2,}/)
+    .map((b) => b.trim())
+    .filter(Boolean);
+  if (blocks.length === 0) {
+    return nothing;
+  }
+  return html`${blocks.map(
+    (block) => html`<p style="margin:0 0 8px; white-space:pre-wrap;">${block}</p>`,
+  )}`;
+}
+
+function renderAiConclusion(props: WorkbenchProps, active: WorkbenchAlertGroup, mode: "root-cause" | "similar" | "action") {
+  const status = props.aiStatus ?? "idle";
+  if (status === "loading") {
+    return html`<div class="detail-section__content highlight">${icons.loader} 正在调用数字员工分析当前告警上下文…</div>`;
+  }
+  if (status === "streaming") {
+    return html`
+      <div class="detail-section__content highlight">
+        ${props.aiStream ? renderRichText(props.aiStream) : html`<span class="muted">${icons.loader} 分析中…</span>`}
+        <div class="muted" style="margin-top:6px;">${icons.loader} 正在生成…</div>
+      </div>
+    `;
+  }
+  if (status === "done") {
+    return html`<div class="detail-section__content highlight">
+      ${props.aiResult ? renderRichText(props.aiResult) : html`<span class="muted">本次分析未返回内容。</span>`}
+    </div>`;
+  }
+  if (status === "error") {
+    return html`
+      <div class="detail-section__content">
+        <p style="color: var(--danger, #d33);">${props.aiError ?? "AI 分析失败。"}</p>
+        ${props.onRetryAi
+          ? html`<button class="ops-btn" type="button" @click=${props.onRetryAi}>${icons.refreshCw} 重试</button>`
+          : nothing}
+      </div>
+    `;
+  }
+  const fallback =
+    mode === "similar"
+      ? `本组已聚合 ${active.originalCount} 条原始告警，建议优先按共同根因处理，避免逐条关闭。`
+      : mode === "action"
+        ? "建议先确认影响范围，再按 Runbook 执行只读检查；涉及变更或脚本执行时需人工审批。"
+        : active.rootCause || "当前告警缺少明确根因，点击对应 AI 操作发起实时分析。";
+  return html`<div class="detail-section__content highlight">${fallback}</div>`;
+}
+
 function renderAiPanel(props: WorkbenchProps, active: WorkbenchAlertGroup | undefined) {
   if (!props.aiPanelOpen || !active) {
     return nothing;
@@ -137,12 +194,8 @@ function renderAiPanel(props: WorkbenchProps, active: WorkbenchAlertGroup | unde
       : mode === "action"
         ? "处置建议"
         : "分析根因";
-  const recommendation =
-    mode === "similar"
-      ? `本组已聚合 ${active.originalCount} 条原始告警，建议优先按共同根因处理，避免逐条关闭。`
-      : mode === "action"
-        ? "建议先确认影响范围，再按 Runbook 执行只读检查；涉及变更或脚本执行时需人工审批。"
-        : active.rootCause || "当前告警缺少明确根因，建议补充指标、日志和拓扑上下文后再次分析。";
+  const status = props.aiStatus ?? "idle";
+  const busy = status === "loading" || status === "streaming";
 
   return html`
     <aside class="ops-card ops-shell-side detail-column">
@@ -153,16 +206,16 @@ function renderAiPanel(props: WorkbenchProps, active: WorkbenchAlertGroup | unde
       <div class="detail-section">
         <div class="detail-section__header">${icons.users} 数字员工模板</div>
         <div class="detail-section__content">
-          <strong>BCH 值班数字员工</strong>
-          <p class="muted">专家人设：BCH 告警降噪、根因候选、影响面判断、处置建议。</p>
+          <strong>${props.assistantName ?? "BCH 值班数字员工"}</strong>
+          <p class="muted">${props.assistantPersona ?? "专家人设：BCH 告警降噪、根因候选、影响面判断、处置建议。"}</p>
         </div>
       </div>
       <div class="detail-section">
         <div class="detail-section__header">${icons.zap} 结论</div>
-        <div class="detail-section__content highlight">${recommendation}</div>
+        ${renderAiConclusion(props, active, mode)}
       </div>
       <div class="detail-section">
-        <div class="detail-section__header">${icons.scrollText} 证据</div>
+        <div class="detail-section__header">${icons.scrollText} 告警证据</div>
         <div class="detail-section__content">
           ${lines.length
             ? html`<ul>${lines.map((line) => html`<li>${line}</li>`)}</ul>`
@@ -171,10 +224,21 @@ function renderAiPanel(props: WorkbenchProps, active: WorkbenchAlertGroup | unde
       </div>
       <div class="detail-section">
         <div style="display:flex; gap:8px; flex-wrap:wrap;">
-          <button class="ops-btn ops-btn--primary" type="button" @click=${() => props.onAcceptSuggestion?.(active.id)}>
+          <button
+            class="ops-btn ops-btn--primary"
+            type="button"
+            ?disabled=${busy}
+            title=${busy ? "请等待 AI 分析完成后再确认" : ""}
+            @click=${() => props.onAcceptSuggestion?.(active.id)}
+          >
             确认建议并记录
           </button>
-          <button class="ops-btn" type="button" @click=${() => props.onRejectSuggestion?.(active.id)}>
+          <button
+            class="ops-btn"
+            type="button"
+            ?disabled=${busy}
+            @click=${() => props.onRejectSuggestion?.(active.id)}
+          >
             驳回建议并记录
           </button>
           <button class="ops-btn ops-btn--ghost" type="button" @click=${() => props.onOpenTasks?.(active.id)}>

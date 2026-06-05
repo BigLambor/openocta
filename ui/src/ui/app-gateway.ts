@@ -17,6 +17,7 @@ import { loadAgents } from "./controllers/agents.ts";
 import { loadAssistantIdentity } from "./controllers/assistant-identity.ts";
 import { loadChatHistory } from "./controllers/chat.ts";
 import { handleChatEvent, type ChatEventPayload } from "./controllers/chat.ts";
+import { handleWorkbenchAiEvent } from "./controllers/ops-workbench-ai.ts";
 import { loadDevices } from "./controllers/devices.ts";
 import {
   addExecApproval,
@@ -233,6 +234,14 @@ function handleGatewayEventUnsafe(host: GatewayHost, evt: GatewayEventFrame) {
 
   if (evt.event === "chat") {
     const payload = evt.payload as ChatEventPayload | undefined;
+    if (
+      handleWorkbenchAiEvent(
+        host as unknown as Parameters<typeof handleWorkbenchAiEvent>[0],
+        payload as Parameters<typeof handleWorkbenchAiEvent>[1],
+      )
+    ) {
+      return;
+    }
     if (payload?.sessionKey) {
       setLastActiveSessionKey(
         host as unknown as Parameters<typeof setLastActiveSessionKey>[0],
