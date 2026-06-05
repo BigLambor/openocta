@@ -10,6 +10,9 @@ export type OverviewDomainCard = {
   icon: "network" | "building" | "database" | "layout" | "activity";
   score?: number;
   clusterCount?: number;
+  healthyCount?: number;
+  warningCount?: number;
+  criticalCount?: number;
   note?: string;
 };
 
@@ -91,6 +94,9 @@ function summaryToCards(summary: OpsDashboardSummary): {
         icon: DOMAIN_ICON[d.domain] ?? "network",
         score,
         clusterCount: d.clusterCount,
+        healthyCount: d.healthyCount,
+        warningCount: d.warningCount,
+        criticalCount: d.criticalCount,
         note,
       };
     }),
@@ -101,6 +107,276 @@ function iconForDomain(icon: OverviewDomainCard["icon"]) {
   return icons[icon];
 }
 
+function scoreClass(score: number | undefined | null): string {
+  if (score == null) {
+    return "muted";
+  }
+  if (score >= 90) {
+    return "";
+  }
+  if (score >= 75) {
+    return "warning";
+  }
+  return "critical";
+}
+
+function domainStatusLabel(d: OverviewDomainCard): string {
+  if ((d.clusterCount ?? 0) === 0) {
+    return "尚未纳管";
+  }
+  if (d.note) {
+    return d.note;
+  }
+  if ((d.criticalCount ?? 0) > 0) {
+    return `${d.criticalCount} 个严重`;
+  }
+  if ((d.warningCount ?? 0) > 0) {
+    return `${d.warningCount} 个亚健康`;
+  }
+  if (d.score != null && d.score < 90) {
+    return "需关注";
+  }
+  return "运行平稳";
+}
+
+function partitionDomains(domains: OverviewDomainCard[]): {
+  managed: OverviewDomainCard[];
+  unmanaged: OverviewDomainCard[];
+  attention: OverviewDomainCard[];
+} {
+  const managed = domains.filter((d) => (d.clusterCount ?? 0) > 0);
+  const unmanaged = domains.filter((d) => (d.clusterCount ?? 0) === 0);
+  managed.sort((a, b) => {
+    const sa = a.score ?? 101;
+    const sb = b.score ?? 101;
+    if (sa !== sb) {
+      return sa - sb;
+    }
+    return a.name.localeCompare(b.name, "zh-CN");
+  });
+  const attention = managed.filter(
+    (d) =>
+      (d.warningCount ?? 0) > 0 ||
+      (d.criticalCount ?? 0) > 0 ||
+      (d.score != null && d.score < 85),
+  );
+  return { managed, unmanaged, attention };
+}
+
+function renderDomainCard(
+  d: OverviewDomainCard,
+  props: OverviewProps,
+  opts: { compact?: boolean; placeholder?: boolean } = {},
+) {
+  const score = d.score;
+  const cls = scoreClass(score);
+  const managed = (d.clusterCount ?? 0) > 0;
+  const statusLabel = opts.placeholder ? "待接入监控指标" : domainStatusLabel(d);
+
+  return html`
+    <article
+      class="domain-card ${!managed || score == null ? "domain-card--muted" : ""} ${opts.compact
+        ? "domain-card--compact"
+        : ""}"
+      role="button"
+      tabindex="0"
+      @click=${(e: Event) => {
+        const target = e.target as HTMLElement;
+        if (target.closest("button, a")) {
+          return;
+        }
+        props.onNavigateDomain?.(d.tab);
+      }}
+      @keydown=${(e: KeyboardEvent) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          props.onNavigateDomain?.(d.tab);
+        }
+      }}
+    >
+      <div class="domain-card-header">
+        <div class="domain-name">
+          <span class="domain-icon-wrapper">${iconForDomain(d.icon)}</span>
+          <span class="domain-name__text">${d.name}</span>
+        </div>
+        <span class="domain-score ${cls}">${score != null ? `${score}分` : "—"}</span>
+      </div>
+      ${managed && score != null
+        ? html`
+            <div class="health-bar-container">
+              <div class="health-bar ${cls}" style="width: ${Math.min(score, 100)}%;"></div>
+            </div>
+          `
+        : nothing}
+      <div class="domain-stats">
+        <span>${d.clusterCount ?? 0} 个集群</span>
+        <span class="domain-stats__status">${statusLabel}</span>
+      </div>
+      ${props.onNavigateDomain || props.onOpenDomainAssets
+        ? html`
+            <div class="domain-card-actions">
+              ${props.onNavigateDomain
+                ? html`
+                    <button
+                      type="button"
+                      class="ops-btn ops-btn--primary domain-card-link"
+                      @click=${() => props.onNavigateDomain!(d.tab)}
+                    >
+                      进入域详情
+                    </button>
+                  `
+                : nothing}
+              ${props.onOpenDomainAssets
+                ? html`
+                    <button
+                      type="button"
+                      class="ops-btn domain-card-link domain-card-link--secondary"
+                      @click=${() => props.onOpenDomainAssets!(d.tab)}
+                    >
+                      资产
+                    </button>
+                  `
+                : nothing}
+            </div>
+          `
+        : nothing}
+    </article>
+  `;
+}
+
+function renderQuickLinks(props: OverviewProps) {
+  return html`
+    <nav class="ops-dashboard-quicklinks" aria-label="快捷操作">
+      <button
+        type="button"
+        class="ops-dashboard-quicklink"
+        ?disabled=${!props.onOpenPendingAlerts}
+        title="跳转到业务域「告警降噪与影响评估」子页"
+        @click=${() => props.onOpenPendingAlerts?.()}
+      >
+        <span class="ops-dashboard-quicklink__icon">${icons.bell}</span>
+        <span class="ops-dashboard-quicklink__label">未处理告警</span>
+      </button>
+      <button
+        type="button"
+        class="ops-dashboard-quicklink"
+        ?disabled=${!props.onOpenScheduledTasks}
+        @click=${() => props.onOpenScheduledTasks?.()}
+      >
+        <span class="ops-dashboard-quicklink__icon">${icons.historyClock}</span>
+        <span class="ops-dashboard-quicklink__label">定时任务</span>
+      </button>
+      <button
+        type="button"
+        class="ops-dashboard-quicklink"
+        @click=${() => props.onOpenConfig?.()}
+      >
+        <span class="ops-dashboard-quicklink__icon">${icons.monitor}</span>
+        <span class="ops-dashboard-quicklink__label">系统配置</span>
+      </button>
+      <button type="button" class="ops-dashboard-quicklink" @click=${() => props.onOpenAssets?.()}>
+        <span class="ops-dashboard-quicklink__icon">${icons.server}</span>
+        <span class="ops-dashboard-quicklink__label">集群资产</span>
+      </button>
+    </nav>
+  `;
+}
+
+function renderAttentionPanel(
+  attention: OverviewDomainCard[],
+  stats: OverviewStats | null,
+  props: OverviewProps,
+) {
+  const pending = stats?.pendingAlerts ?? 0;
+  return html`
+    <section class="ops-dashboard-panel">
+      <h2 class="section-title">
+        <span class="section-title__icon">${icons.alertTriangle}</span>
+        需关注
+      </h2>
+      <div class="ops-panel ops-dashboard-panel__body">
+        ${attention.length > 0
+          ? html`
+              <ul class="ops-attention-list">
+                ${attention.map(
+                  (d) => html`
+                    <li class="ops-attention-item">
+                      <button
+                        type="button"
+                        class="ops-attention-item__btn"
+                        @click=${() => props.onNavigateDomain?.(d.tab)}
+                      >
+                        <span class="ops-attention-item__name">${d.name}</span>
+                        <span class="ops-attention-item__meta">
+                          ${d.score != null ? `${d.score}分` : "—"} · ${domainStatusLabel(d)}
+                        </span>
+                      </button>
+                    </li>
+                  `,
+                )}
+              </ul>
+            `
+          : html`
+              <p class="ops-dashboard-panel__empty">
+                ${pending > 0
+                  ? `当前有 ${pending} 组待处理告警，建议优先查看。`
+                  : "各业务域运行平稳，暂无需要优先处理的事项。"}
+              </p>
+            `}
+        ${pending > 0 && props.onOpenPendingAlerts
+          ? html`
+              <button
+                type="button"
+                class="ops-btn ops-dashboard-panel__action"
+                @click=${() => props.onOpenPendingAlerts?.()}
+              >
+                查看 ${pending} 组待处理告警
+              </button>
+            `
+          : nothing}
+      </div>
+    </section>
+  `;
+}
+
+function renderOpsSnapshot(summary: OpsDashboardSummary | null | undefined, stats: OverviewStats | null) {
+  const vmConfigured = summary?.vmConfigured ?? false;
+  const criticalClusters = summary?.criticalClusters ?? 0;
+  return html`
+    <section class="ops-dashboard-panel">
+      <h2 class="section-title">
+        <span class="section-title__icon">${icons.barChart}</span>
+        运营概览
+      </h2>
+      <div class="ops-panel ops-dashboard-panel__body">
+        <dl class="ops-snapshot-list">
+          <div class="ops-snapshot-row">
+            <dt>监控接入</dt>
+            <dd class=${vmConfigured ? "ops-snapshot-row--ok" : "ops-snapshot-row--warn"}>
+              ${vmConfigured ? "VictoriaMetrics 已配置" : "未配置 VictoriaMetrics"}
+            </dd>
+          </div>
+          <div class="ops-snapshot-row">
+            <dt>集群健康分布</dt>
+            <dd>
+              ${stats
+                ? `${stats.healthyClusters} 健康 / ${stats.warningClusters} 亚健康${criticalClusters > 0 ? ` / ${criticalClusters} 严重` : ""}`
+                : "—"}
+            </dd>
+          </div>
+          <div class="ops-snapshot-row">
+            <dt>业务域覆盖</dt>
+            <dd>
+              ${summary?.domains.filter((d) => d.clusterCount > 0).length ?? 0} /
+              ${summary?.domains.length ?? DOMAIN_PLACEHOLDERS.length} 已纳管
+            </dd>
+          </div>
+        </dl>
+      </div>
+    </section>
+  `;
+}
+
 export function renderOverview(props: OverviewProps) {
   const fromApi = props.dashboardSummary ? summaryToCards(props.dashboardSummary) : null;
   const stats = fromApi?.stats ?? props.stats ?? null;
@@ -109,10 +385,11 @@ export function renderOverview(props: OverviewProps) {
     fromApi?.domains ??
     (props.domains?.length ? props.domains : hasStats && stats && stats.totalClusters > 0 ? [] : null);
   const showEmptyMetrics = fromApi != null && stats != null && stats.totalClusters === 0;
+  const partitioned = domains ? partitionDomains(domains) : null;
 
   return html`
     <div class="ops-page ops-dashboard">
-      <div class="ops-page-header ops-dashboard-header">
+      <div class="ops-page-header ops-dashboard-header ops-dashboard-header--split">
         <div>
           <h1>运维全局视图</h1>
           <p>
@@ -122,6 +399,21 @@ export function renderOverview(props: OverviewProps) {
                 ? "尚未登记集群资产，请先在「集群资产管理」中添加。"
                 : "接入集群资产与 VictoriaMetrics 后，将在此展示纳管规模、健康度与告警概况。"}
           </p>
+        </div>
+        <div class="ops-dashboard-header__actions">
+          <button
+            type="button"
+            class="ops-btn ops-btn--primary"
+            ?disabled=${!props.onRunGlobalInspection || !props.connected || props.globalInspecting || props.canInspect === false}
+            title=${props.canInspect === false
+              ? "当前账号无 ops:inspect 权限"
+              : !props.connected
+                ? "请先连接网关"
+                : "并行触发各业务域的深度健康巡检任务"}
+            @click=${() => props.onRunGlobalInspection?.()}
+          >
+            ${props.globalInspecting ? "正在启动全局巡检…" : "启动全局深度巡检"}
+          </button>
         </div>
       </div>
 
@@ -202,206 +494,90 @@ export function renderOverview(props: OverviewProps) {
               `
             : nothing}
 
-      <section class="domain-status-section">
-        <h2 class="section-title">
-          <span class="section-title__icon">${icons.activity}</span>
-          业务域健康度
-        </h2>
-        ${domains === null
-          ? html`
-              <div class="domain-grid domain-grid--placeholders">
-                ${DOMAIN_PLACEHOLDERS.map(
-                  (d) => html`
-                    <div class="domain-card domain-card--muted">
-                      <div class="domain-card-header">
-                        <div class="domain-name">
-                          <span class="domain-icon-wrapper">${iconForDomain(d.icon)}</span>
-                          <span>${d.name}</span>
-                        </div>
-                        <span class="domain-score domain-score--muted">—</span>
-                      </div>
-                      <p class="domain-card-hint">待接入监控指标</p>
-                      <div class="domain-card-actions" style="display: flex; gap: 8px; margin-top: 12px;">
-                        ${props.onNavigateDomain
-                          ? html`
-                              <button
-                                type="button"
-                                class="ops-btn ops-btn--primary domain-card-link"
-                                style="flex: 1; padding: 6px 12px; font-size: 13px;"
-                                @click=${() => props.onNavigateDomain!(d.tab)}
-                              >
-                                进入域详情
-                              </button>
-                            `
-                          : nothing}
-                        ${props.onOpenDomainAssets
-                          ? html`
-                              <button
-                                type="button"
-                                class="ops-btn domain-card-link"
-                                style="flex: 1; padding: 6px 12px; font-size: 13px;"
-                                @click=${() => props.onOpenDomainAssets!(d.tab)}
-                              >
-                                查看资产
-                              </button>
-                            `
-                          : nothing}
-                      </div>
-                    </div>
-                  `,
-                )}
-              </div>
-            `
-          : domains.length === 0
+      <div class="ops-dashboard-main">
+        <section class="domain-status-section">
+          <div class="domain-status-section__head">
+            <h2 class="section-title">
+              <span class="section-title__icon">${icons.activity}</span>
+              业务域健康度
+            </h2>
+            ${partitioned && partitioned.managed.length > 0
+              ? html`<span class="domain-status-section__hint">按健康分从低到高排序，点击查看详情</span>`
+              : nothing}
+          </div>
+          ${domains === null
             ? html`
-                <div class="ops-panel">
-                  ${renderOpsEmpty({
-                    icon: "activity",
-                    title: "暂无业务域健康分",
-                    description: "完成 VictoriaMetrics 对接后，将按域聚合健康得分。",
-                    compact: true,
-                  })}
+                <div class="domain-grid domain-grid--placeholders">
+                  ${DOMAIN_PLACEHOLDERS.map((d) => renderDomainCard(d, props, { placeholder: true }))}
                 </div>
+                <p class="domain-unmanaged-hint">以上业务域待接入监控与资产登记后可展示健康分。</p>
               `
-            : html`
-                <div class="domain-grid">
-                  ${domains.map((d) => {
-                    const score = d.score;
-                    const scoreClass =
-                      score == null
-                        ? "muted"
-                        : score >= 90
-                          ? ""
-                          : score >= 75
-                            ? "warning"
-                            : "critical";
-                    return html`
-                      <div class="domain-card ${score == null ? "domain-card--muted" : ""}">
-                        <div class="domain-card-header">
-                          <div class="domain-name">
-                            <span class="domain-icon-wrapper">${iconForDomain(d.icon)}</span>
-                            <span>${d.name}</span>
+            : domains.length === 0
+              ? html`
+                  <div class="ops-panel">
+                    ${renderOpsEmpty({
+                      icon: "activity",
+                      title: "暂无业务域健康分",
+                      description: "完成 VictoriaMetrics 对接后，将按域聚合健康得分。",
+                      compact: true,
+                    })}
+                  </div>
+                `
+              : html`
+                  ${partitioned && partitioned.managed.length > 0
+                    ? html`
+                        <div class="domain-grid domain-grid--managed">
+                          ${partitioned.managed.map((d) => renderDomainCard(d, props))}
+                        </div>
+                      `
+                    : nothing}
+                  ${partitioned && partitioned.unmanaged.length > 0
+                    ? html`
+                        <details class="domain-unmanaged" ?open=${partitioned.managed.length === 0}>
+                          <summary class="domain-unmanaged__summary">
+                            待接入业务域（${partitioned.unmanaged.length}）
+                          </summary>
+                          <div class="domain-chips">
+                            ${partitioned.unmanaged.map(
+                              (d) => html`
+                                <button
+                                  type="button"
+                                  class="domain-chip"
+                                  @click=${() => props.onOpenDomainAssets?.(d.tab)}
+                                >
+                                  <span class="domain-chip__icon">${iconForDomain(d.icon)}</span>
+                                  ${d.name}
+                                </button>
+                              `,
+                            )}
                           </div>
-                          <span class="domain-score ${scoreClass}">
-                            ${score != null ? `${score}分` : "—"}
-                          </span>
-                        </div>
-                        ${d.tab === "hadoop"
-                          ? html`
-                              <div class="domain-sub-health" style="margin: 8px 0; font-size: 11px; display: flex; flex-direction: column; gap: 4px; color: var(--text-muted, #666);">
-                                <div style="display: flex; justify-content: space-between; align-items: center; line-height: 1.2;">
-                                  <span>作业健康 (Flink/Spark)</span>
-                                  <span style="font-weight: 600; color: #4caf50;">94%</span>
-                                </div>
-                                <div class="health-bar-container" style="height: 3px; margin: 0 0 4px; background: rgba(0,0,0,0.06); border-radius: 2px;">
-                                  <div class="health-bar ok" style="width: 94%; height: 100%; background: #4caf50; border-radius: 2px;"></div>
-                                </div>
-                                <div style="display: flex; justify-content: space-between; align-items: center; line-height: 1.2;">
-                                  <span>存储健康 (HDFS)</span>
-                                  <span style="font-weight: 600; color: #f44336;">68%</span>
-                                </div>
-                                <div class="health-bar-container" style="height: 3px; margin: 0 0 4px; background: rgba(0,0,0,0.06); border-radius: 2px;">
-                                  <div class="health-bar danger" style="width: 68%; height: 100%; background: #f44336; border-radius: 2px;"></div>
-                                </div>
-                                <div style="display: flex; justify-content: space-between; align-items: center; line-height: 1.2;">
-                                  <span>服务健康 (YARN/HBase)</span>
-                                  <span style="font-weight: 600; color: #4caf50;">96%</span>
-                                </div>
-                                <div class="health-bar-container" style="height: 3px; margin: 0; background: rgba(0,0,0,0.06); border-radius: 2px;">
-                                  <div class="health-bar ok" style="width: 96%; height: 100%; background: #4caf50; border-radius: 2px;"></div>
-                                </div>
-                              </div>
-                            `
-                          : html`
-                              <div class="health-bar-container">
-                                <div
-                                  class="health-bar ${scoreClass}"
-                                  style="width: ${score != null ? Math.min(score, 100) : 0}%;"
-                                ></div>
-                              </div>
-                            `}
-                        <div class="domain-stats">
-                          <span>${d.clusterCount ?? 0} 个集群</span>
-                          <span>${d.note ?? "—"}</span>
-                        </div>
-                        <div class="domain-card-actions" style="display: flex; gap: 8px; margin-top: 12px;">
-                          ${props.onNavigateDomain
-                            ? html`
-                                <button
-                                  type="button"
-                                  class="ops-btn ops-btn--primary domain-card-link"
-                                  style="flex: 1; padding: 6px 12px; font-size: 13px;"
-                                  @click=${() => props.onNavigateDomain!(d.tab)}
-                                >
-                                  进入域详情
-                                </button>
-                              `
-                            : nothing}
-                          ${props.onOpenDomainAssets
-                            ? html`
-                                <button
-                                  type="button"
-                                  class="ops-btn domain-card-link"
-                                  style="flex: 1; padding: 6px 12px; font-size: 13px;"
-                                  @click=${() => props.onOpenDomainAssets!(d.tab)}
-                                >
-                                  查看资产
-                                </button>
-                              `
-                            : nothing}
-                        </div>
-                      </div>
-                    `;
-                  })}
-                </div>
-              `}
-      </section>
+                        </details>
+                      `
+                    : nothing}
+                `}
+        </section>
+
+        <aside class="ops-dashboard-aside">
+          <h2 class="section-title">
+            <span class="section-title__icon">${icons.zap}</span>
+            快捷操作
+          </h2>
+          ${renderQuickLinks(props)}
+        </aside>
+      </div>
 
       ${props.dashboardToast
         ? html`<div class="ops-dashboard-toast" role="status">${props.dashboardToast}</div>`
         : nothing}
 
-      <section class="ops-dashboard-actions">
-        <h2 class="section-title">
-          <span class="section-title__icon">${icons.zap}</span>
-          快捷操作
-        </h2>
-        <div class="ops-panel ops-dashboard-actions__inner">
-          <button
-            type="button"
-            class="ops-btn ops-btn--primary ops-dashboard-actions__btn"
-            ?disabled=${!props.onRunGlobalInspection || !props.connected || props.globalInspecting || props.canInspect === false}
-            title=${props.canInspect === false
-              ? "当前账号无 ops:inspect 权限"
-              : !props.connected
-                ? "请先连接网关"
-                : "并行触发五个业务域的深度健康巡检任务"}
-            @click=${() => props.onRunGlobalInspection?.()}
-          >
-            ${props.globalInspecting ? "正在启动全局巡检…" : "启动全局深度巡检"}
-          </button>
-          <button
-            type="button"
-            class="ops-btn ops-dashboard-actions__btn"
-            ?disabled=${!props.onOpenPendingAlerts}
-            title="跳转到业务域「告警降噪与影响评估」子页"
-            @click=${() => props.onOpenPendingAlerts?.()}
-          >
-            查看未处理告警
-          </button>
-          <button
-            type="button"
-            class="ops-btn ops-dashboard-actions__btn"
-            ?disabled=${!props.onOpenScheduledTasks}
-            @click=${() => props.onOpenScheduledTasks?.()}
-          >
-            定时任务与运行历史
-          </button>
-          <button type="button" class="ops-btn ops-dashboard-actions__btn" @click=${() => props.onOpenConfig?.()}>
-            系统与环境配置
-          </button>
-        </div>
-      </section>
+      ${hasStats && !props.loading
+        ? html`
+            <div class="ops-dashboard-bottom">
+              ${renderAttentionPanel(partitioned?.attention ?? [], stats, props)}
+              ${renderOpsSnapshot(props.dashboardSummary, stats)}
+            </div>
+          `
+        : nothing}
     </div>
   `;
 }
