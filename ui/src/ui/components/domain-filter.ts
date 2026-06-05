@@ -74,12 +74,12 @@ export function renderDomainFilter(props: {
     return canAccessOpsDomain(props.user, item.key);
   });
   return html`
-    <div class="domain-filter" style="display:flex; gap:8px; flex-wrap:wrap;" role="group" aria-label="技术域过滤器">
+    <div class="ops-domain-pills" role="group" aria-label="技术域过滤器">
       ${options.map(
         (item) => html`
           <button
             type="button"
-            class="ops-btn ${selected === item.key ? "ops-btn--primary" : ""}"
+            class="ops-domain-pill ${selected === item.key ? "ops-domain-pill--active" : ""}"
             @click=${() => props.onChange?.(item.key)}
           >
             ${item.label}

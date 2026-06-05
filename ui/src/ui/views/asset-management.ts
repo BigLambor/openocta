@@ -4,6 +4,8 @@ import type { OpsClusterRecord } from "../controllers/ops-clusters.ts";
 import { renderOpsEmpty, renderOpsError, renderOpsSkeleton } from "../components/ops-status.ts";
 
 export type AssetManagementProps = {
+  /** 嵌入「服务与资产」页时隐藏重复标题与工具栏 */
+  embedded?: boolean;
   clusters?: OpsClusterRecord[];
   loading?: boolean;
   error?: string | null;
@@ -63,35 +65,8 @@ export function renderAssetManagement(props: AssetManagementProps = {}) {
   const hasData = clusters.length > 0;
   const showForm = props.canManage !== false;
 
-  return html`
-    <div class="ops-page">
-      <div class="ops-page-header">
-        <div>
-          <h1>集群资产管理</h1>
-          <p>登记各业务域集群，供运维大屏汇总与上下文选择器使用。</p>
-        </div>
-        <div class="ops-toolbar">
-          ${props.onSyncCmdb
-            ? html`
-                <button
-                  type="button"
-                  class="ops-btn ops-btn--primary"
-                  ?disabled=${props.loading || props.cmdbSyncing}
-                  title=${props.cmdbSyncHint ?? "从 OPS_CMDB_SYNC_URL 拉取并合并集群"}
-                  @click=${() => props.onSyncCmdb?.()}
-                >
-                  <span style="width: 16px; height: 16px; display: flex;">${icons.refreshCw}</span>
-                  ${props.cmdbSyncing ? "同步中…" : "同步 CMDB"}
-                </button>
-              `
-            : nothing}
-          <button type="button" class="ops-btn" ?disabled=${props.loading || props.cmdbSyncing} @click=${() => props.onRefresh?.()}>
-            <span style="width: 16px; height: 16px; display: flex;">${icons.refreshCw}</span>
-            刷新
-          </button>
-        </div>
-      </div>
-      ${props.cmdbSyncHint
+  const body = html`
+      ${!props.embedded && props.cmdbSyncHint
         ? html`<p class="ops-muted-hint" style="margin: 0 0 12px; font-size: 12px;">${props.cmdbSyncHint}</p>`
         : nothing}
 
@@ -264,7 +239,6 @@ export function renderAssetManagement(props: AssetManagementProps = {}) {
                 </table>
               </div>
             `}
-    </div>
     <style>
       .asset-form {
         margin-top: 16px;
@@ -354,5 +328,44 @@ export function renderAssetManagement(props: AssetManagementProps = {}) {
         border: 1px solid rgba(148, 163, 184, 0.24);
       }
     </style>
+  `;
+
+  if (props.embedded) {
+    return body;
+  }
+
+  return html`
+    <div class="ops-page">
+      <div class="ops-page-header">
+        <div>
+          <h1>集群资产管理</h1>
+          <p>登记各业务域集群，供运维大屏汇总与上下文选择器使用。</p>
+        </div>
+        <div class="ops-toolbar">
+          ${props.onSyncCmdb
+            ? html`
+                <button
+                  type="button"
+                  class="ops-btn ops-btn--primary"
+                  ?disabled=${props.loading || props.cmdbSyncing}
+                  title=${props.cmdbSyncHint ?? "从 OPS_CMDB_SYNC_URL 拉取并合并集群"}
+                  @click=${() => props.onSyncCmdb?.()}
+                >
+                  <span style="width: 16px; height: 16px; display: flex;">${icons.refreshCw}</span>
+                  ${props.cmdbSyncing ? "同步中…" : "同步 CMDB"}
+                </button>
+              `
+            : nothing}
+          <button type="button" class="ops-btn" ?disabled=${props.loading || props.cmdbSyncing} @click=${() => props.onRefresh?.()}>
+            <span style="width: 16px; height: 16px; display: flex;">${icons.refreshCw}</span>
+            刷新
+          </button>
+        </div>
+      </div>
+      ${props.cmdbSyncHint
+        ? html`<p class="ops-muted-hint" style="margin: 0 0 12px; font-size: 12px;">${props.cmdbSyncHint}</p>`
+        : nothing}
+      ${body}
+    </div>
   `;
 }

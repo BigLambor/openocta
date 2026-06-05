@@ -4,8 +4,15 @@ import {
   OPS_DOMAIN_OPTIONS,
   opsDomainLabel,
   renderDomainFilter,
+  normalizeOpsDomain,
   type DomainFilterUser,
 } from "../components/domain-filter.ts";
+import {
+  renderOpsShellHeader,
+  renderOpsShellStatGrid,
+  renderOpsViewNav,
+  type OpsViewNavItem,
+} from "../components/ops-shell.ts";
 import { renderAssetManagement, type AssetManagementProps } from "./asset-management.ts";
 
 export type AssetsViewProps = AssetManagementProps & {
@@ -16,21 +23,35 @@ export type AssetsViewProps = AssetManagementProps & {
   onAssetViewChange?: (view: "clusters" | "services" | "components" | "jobs" | "topology") => void;
 };
 
-const ASSET_VIEWS = [
+const ASSET_VIEWS: OpsViewNavItem<NonNullable<AssetsViewProps["activeAssetView"]>>[] = [
   { id: "clusters", label: "集群资产", icon: "server" },
   { id: "services", label: "服务资产", icon: "network" },
   { id: "components", label: "组件资产", icon: "layout" },
   { id: "jobs", label: "作业资产", icon: "activity" },
   { id: "topology", label: "拓扑关系", icon: "folder" },
-] as const;
+];
+
+function clusterHealthCounts(clusters: AssetsViewProps["clusters"]) {
+  let healthy = 0;
+  let warning = 0;
+  let critical = 0;
+  for (const c of clusters) {
+    if (c.status === "healthy") healthy++;
+    else if (c.status === "warning") warning++;
+    else if (c.status === "critical") critical++;
+  }
+  return { healthy, warning, critical };
+}
 
 export function renderAssetsView(props: AssetsViewProps) {
   const selectedDomain = props.selectedDomain || "all";
+  const normalized = normalizeOpsDomain(selectedDomain);
   const filteredClusters =
-    selectedDomain === "all"
+    normalized === "all"
       ? props.clusters
-      : props.clusters.filter((cluster) => cluster.domain === selectedDomain);
+      : props.clusters.filter((cluster) => cluster.domain === normalized);
   const activeAssetView = props.activeAssetView ?? "clusters";
+  const { healthy, warning, critical } = clusterHealthCounts(filteredClusters);
   const componentRows = filteredClusters.flatMap((cluster) =>
     (cluster.components || []).map((component) => ({ cluster, component })),
   );
@@ -45,63 +66,113 @@ export function renderAssetsView(props: AssetsViewProps) {
       })),
   );
 
-  const domainCounts = OPS_DOMAIN_OPTIONS.map(({ key, label }) => ({
+  const domainCounts = OPS_DOMAIN_OPTIONS.filter((o) => o.key !== "all").map(({ key, label }) => ({
     key,
     label,
-    count: key === "all" ? props.clusters.length : props.clusters.filter((c) => c.domain === key).length,
+    count: props.clusters.filter((c) => c.domain === key).length,
   }));
 
   return html`
-    <div class="ops-domain-page">
-      <div class="ops-domain-hero">
-        <div>
-          <div class="ops-domain-kicker">服务与资产 · ${opsDomainLabel(selectedDomain)}</div>
-          <h1>资产目录</h1>
-          <p>技术域作为全局上下文过滤器使用，资产、拓扑和责任关系在这里统一管理。</p>
-        </div>
-        ${renderDomainFilter({
-          selectedDomain,
-          user: props.user ?? null,
-          includeAll: true,
-          onChange: (domain) => props.onDomainChange?.(domain),
-        })}
-      </div>
+    <main class="ops-dashboard ops-shell">
+      ${renderOpsShellHeader({
+        kicker: `服务与资产 · ${opsDomainLabel(selectedDomain)}`,
+        title: "资产目录",
+        description: "技术域作为全局上下文过滤器，资产、拓扑和责任关系在此统一管理。",
+        toolbar: html`
+          <button
+            type="button"
+            class="ops-btn"
+            ?disabled=${props.loading || props.cmdbSyncing}
+            @click=${() => props.onRefresh?.()}
+          >
+            ${icons.refreshCw} 刷新
+          </button>
+          ${props.onSyncCmdb
+            ? html`
+                <button
+                  type="button"
+                  class="ops-btn ops-btn--primary"
+                  ?disabled=${props.loading || props.cmdbSyncing}
+                  title=${props.cmdbSyncHint ?? "从 CMDB 同步集群"}
+                  @click=${() => props.onSyncCmdb?.()}
+                >
+                  ${props.cmdbSyncing ? icons.loader : icons.refreshCw}
+                  ${props.cmdbSyncing ? "同步中…" : "同步 CMDB"}
+                </button>
+              `
+            : ""}
+        `,
+      })}
 
-      <div class="ops-summary-cards">
+      ${renderDomainFilter({
+        selectedDomain,
+        user: props.user ?? null,
+        includeAll: true,
+        onChange: (domain) => props.onDomainChange?.(domain),
+      })}
+
+      <section class="ops-domain-stats" aria-label="各技术域资产概览">
+        <button
+          type="button"
+          class="ops-domain-stat ${normalized === "all" ? "ops-domain-stat--active" : ""}"
+          @click=${() => props.onDomainChange?.("all")}
+        >
+          <span class="ops-domain-stat__label">全部技术域</span>
+          <span class="ops-domain-stat__value">${props.clusters.length}</span>
+          <span class="ops-domain-stat__hint">全部资产</span>
+        </button>
         ${domainCounts.map(
           (item) => html`
-            <div class="ops-card stat-card">
-              <div class="stat-label">${item.label}</div>
-              <div class="stat-value ${item.key === selectedDomain ? "ok" : "info"}">${item.count}</div>
-              <div class="muted">${item.key === "all" ? "全部资产" : "技术域资产"}</div>
-            </div>
+            <button
+              type="button"
+              class="ops-domain-stat ${normalized === item.key ? "ops-domain-stat--active" : ""}"
+              @click=${() => props.onDomainChange?.(item.key)}
+            >
+              <span class="ops-domain-stat__label">${item.label}</span>
+              <span class="ops-domain-stat__value">${item.count}</span>
+              <span class="ops-domain-stat__hint">技术域资产</span>
+            </button>
           `,
         )}
-      </div>
+      </section>
 
-      <div class="ops-card" style="margin-bottom: 16px;">
-        <div class="column-header">${icons.network} 资产视图</div>
-        <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom: 12px;">
-          ${ASSET_VIEWS.map(
-            (item) => html`
-              <button
-                type="button"
-                class="ops-btn ${activeAssetView === item.id ? "ops-btn--primary" : ""}"
-                @click=${() => props.onAssetViewChange?.(item.id)}
-              >
-                ${icons[item.icon]} ${item.label}
-              </button>
-            `,
-          )}
-        </div>
-        <p class="muted" style="margin-top:0;">
-          当前展示 ${opsDomainLabel(selectedDomain)} 资产。后续服务依赖、组件资产、作业资产和拓扑视图在此扩展。
-        </p>
-      </div>
+      ${renderOpsShellStatGrid([
+        {
+          label: "纳管集群",
+          value: filteredClusters.length,
+          hint: opsDomainLabel(selectedDomain),
+          tone: "blue",
+          icon: "server",
+        },
+        {
+          label: "健康",
+          value: healthy,
+          hint: "状态正常",
+          tone: "ok",
+          icon: "checkCircle",
+        },
+        {
+          label: "亚健康",
+          value: warning,
+          hint: "需关注",
+          tone: "warn",
+          icon: "alertTriangle",
+        },
+        {
+          label: "异常",
+          value: critical,
+          hint: "优先处理",
+          tone: "danger",
+          icon: "bell",
+        },
+      ])}
+
+      ${renderOpsViewNav(ASSET_VIEWS, activeAssetView, (view) => props.onAssetViewChange?.(view))}
 
       ${activeAssetView === "clusters"
         ? renderAssetManagement({
             ...props,
+            embedded: true,
             clusters: filteredClusters,
           })
         : activeAssetView === "services"
@@ -111,41 +182,43 @@ export function renderAssetsView(props: AssetsViewProps) {
             : activeAssetView === "jobs"
               ? renderJobAssets(jobRows)
               : renderTopologyAssets(filteredClusters, componentRows)}
-    </div>
+    </main>
   `;
 }
 
 function renderServiceAssets(clusters: AssetsViewProps["clusters"]) {
   return html`
-    <div class="ops-main-columns">
-      <div class="ops-card list-column">
-        <div class="column-header">服务目录</div>
-        ${clusters.length === 0
-          ? html`<div class="empty-placeholder">当前技术域暂无服务资产。</div>`
-          : html`
-              <div class="alert-list">
-                ${clusters.map(
-                  (cluster) => html`
-                    <div class="alert-item">
-                      <div class="alert-item__meta">
-                        <span class="alert-badge alert-badge--info">${cluster.domain}</span>
-                        <span class="alert-time">${cluster.owner || "未设置负责人"}</span>
-                      </div>
-                      <div class="alert-item__title">${cluster.name}</div>
-                      <div class="alert-item__noise">
-                        <span>区域: <strong>${cluster.region || "-"}</strong></span>
-                        <span class="divider">|</span>
-                        <span>组件: <strong>${cluster.components?.length ?? 0}</strong></span>
-                      </div>
+    <div class="ops-shell-columns">
+      <div class="ops-shell-panel list-column">
+        <div class="ops-shell-panel__head">${icons.network} 服务目录</div>
+        <div class="alert-list" style="padding:10px;">
+          ${clusters.length === 0
+            ? html`<div class="empty-placeholder">当前技术域暂无服务资产。</div>`
+            : clusters.map(
+                (cluster) => html`
+                  <div class="alert-item">
+                    <div class="alert-item__meta">
+                      <span class="alert-badge alert-badge--info">${cluster.domain}</span>
+                      <span class="alert-time">${cluster.owner || "未设置负责人"}</span>
                     </div>
-                  `,
-                )}
-              </div>
-            `}
+                    <div class="alert-item__title">${cluster.name}</div>
+                    <div class="alert-item__noise">
+                      <span>区域: <strong>${cluster.region || "-"}</strong></span>
+                      <span class="divider">|</span>
+                      <span>组件: <strong>${cluster.components?.length ?? 0}</strong></span>
+                    </div>
+                  </div>
+                `,
+              )}
+        </div>
       </div>
-      <div class="ops-card detail-column">
-        <div class="column-header">服务责任关系</div>
-        <p class="muted">服务资产由集群、组件、负责人和监控标签组成。后续可在这里接入服务依赖和 SLA。</p>
+      <div class="ops-shell-panel detail-column">
+        <div class="ops-shell-panel__head">${icons.users} 服务责任关系</div>
+        <div style="padding:16px;">
+          <p class="muted" style="margin:0;">
+            服务资产由集群、组件、负责人和监控标签组成。后续可在这里接入服务依赖和 SLA。
+          </p>
+        </div>
       </div>
     </div>
   `;
@@ -153,49 +226,53 @@ function renderServiceAssets(clusters: AssetsViewProps["clusters"]) {
 
 function renderComponentAssets(rows: Array<{ cluster: AssetsViewProps["clusters"][number]; component: string }>) {
   return html`
-    <div class="ops-card">
-      <div class="column-header">组件资产</div>
-      ${rows.length === 0
-        ? html`<div class="empty-placeholder">当前技术域暂无组件资产。</div>`
-        : html`
-            <div class="ops-summary-cards">
-              ${rows.map(
-                (row) => html`
-                  <div class="ops-card stat-card">
-                    <div class="stat-label">${row.cluster.name}</div>
-                    <div class="stat-value info" style="font-size:20px;">${row.component}</div>
-                    <div class="muted">${row.cluster.status || "unknown"} · ${row.cluster.owner || "未设置负责人"}</div>
-                  </div>
-                `,
-              )}
-            </div>
-          `}
+    <div class="ops-shell-panel">
+      <div class="ops-shell-panel__head">${icons.layout} 组件资产</div>
+      <div style="padding:16px;">
+        ${rows.length === 0
+          ? html`<div class="empty-placeholder">当前技术域暂无组件资产。</div>`
+          : html`
+              <div class="ops-domain-stats">
+                ${rows.map(
+                  (row) => html`
+                    <div class="ops-domain-stat" style="cursor:default;">
+                      <span class="ops-domain-stat__label">${row.cluster.name}</span>
+                      <span class="ops-domain-stat__value" style="font-size:16px;">${row.component}</span>
+                      <span class="ops-domain-stat__hint"
+                        >${row.cluster.status || "unknown"} · ${row.cluster.owner || "未设置负责人"}</span
+                      >
+                    </div>
+                  `,
+                )}
+              </div>
+            `}
+      </div>
     </div>
   `;
 }
 
-function renderJobAssets(rows: Array<{ id: string; name: string; cluster: AssetsViewProps["clusters"][number]; status?: string }>) {
+function renderJobAssets(
+  rows: Array<{ id: string; name: string; cluster: AssetsViewProps["clusters"][number]; status?: string }>,
+) {
   return html`
-    <div class="ops-card">
-      <div class="column-header">作业资产</div>
-      ${rows.length === 0
-        ? html`<div class="empty-placeholder">未从组件资产中识别到作业类服务。后续可接入 Flink/Spark/YARN 作业 API。</div>`
-        : html`
-            <div class="alert-list">
-              ${rows.map(
-                (row) => html`
-                  <div class="alert-item">
-                    <div class="alert-item__meta">
-                      <span class="alert-badge alert-badge--warning">${row.status || "unknown"}</span>
-                      <span class="alert-time">${row.cluster.name}</span>
-                    </div>
-                    <div class="alert-item__title">${row.name}</div>
-                    <div class="muted">作业资产来源于当前集群组件，后续接入真实作业运行状态。</div>
+    <div class="ops-shell-panel">
+      <div class="ops-shell-panel__head">${icons.activity} 作业资产</div>
+      <div class="alert-list" style="padding:10px;">
+        ${rows.length === 0
+          ? html`<div class="empty-placeholder">未从组件资产中识别到作业类服务。后续可接入 Flink/Spark/YARN 作业 API。</div>`
+          : rows.map(
+              (row) => html`
+                <div class="alert-item">
+                  <div class="alert-item__meta">
+                    <span class="alert-badge alert-badge--warning">${row.status || "unknown"}</span>
+                    <span class="alert-time">${row.cluster.name}</span>
                   </div>
-                `,
-              )}
-            </div>
-          `}
+                  <div class="alert-item__title">${row.name}</div>
+                  <div class="muted">作业资产来源于当前集群组件，后续接入真实作业运行状态。</div>
+                </div>
+              `,
+            )}
+      </div>
     </div>
   `;
 }
@@ -205,28 +282,34 @@ function renderTopologyAssets(
   rows: Array<{ cluster: AssetsViewProps["clusters"][number]; component: string }>,
 ) {
   return html`
-    <div class="ops-card">
-      <div class="column-header">拓扑关系</div>
-      <div class="ops-summary-cards">
-        <div class="ops-card stat-card">
-          <div class="stat-label">集群节点</div>
-          <div class="stat-value info">${clusters.length}</div>
-          <div class="muted">服务拓扑一级节点</div>
-        </div>
-        <div class="ops-card stat-card">
-          <div class="stat-label">组件节点</div>
-          <div class="stat-value ok">${rows.length}</div>
-          <div class="muted">由集群组件生成</div>
-        </div>
-      </div>
-      <div class="detail-section">
-        <div class="detail-section__header">${icons.network} 拓扑摘要</div>
-        <div class="detail-section__content">
-          ${clusters.length === 0
-            ? "当前技术域暂无拓扑数据。"
-            : clusters
-                .map((cluster) => `${cluster.name} -> ${(cluster.components || []).join(", ") || "暂无组件"}`)
-                .join("；")}
+    <div class="ops-shell-panel">
+      <div class="ops-shell-panel__head">${icons.network} 拓扑关系</div>
+      <div style="padding:16px;">
+        ${renderOpsShellStatGrid([
+          {
+            label: "集群节点",
+            value: clusters.length,
+            hint: "服务拓扑一级节点",
+            tone: "info",
+            icon: "server",
+          },
+          {
+            label: "组件节点",
+            value: rows.length,
+            hint: "由集群组件生成",
+            tone: "ok",
+            icon: "layout",
+          },
+        ])}
+        <div class="detail-section" style="margin-top:16px;">
+          <div class="detail-section__header">${icons.network} 拓扑摘要</div>
+          <div class="detail-section__content">
+            ${clusters.length === 0
+              ? "当前技术域暂无拓扑数据。"
+              : clusters
+                  .map((cluster) => `${cluster.name} → ${(cluster.components || []).join(", ") || "暂无组件"}`)
+                  .join("；")}
+          </div>
         </div>
       </div>
     </div>

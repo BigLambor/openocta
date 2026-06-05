@@ -1,6 +1,12 @@
 import { html, nothing, type TemplateResult } from "lit";
 import { icons } from "../icons.ts";
 import { renderOpsError } from "../components/ops-status.ts";
+import {
+  renderOpsShellHeader,
+  renderOpsShellStatGrid,
+  renderOpsViewNav,
+  type OpsViewNavItem,
+} from "../components/ops-shell.ts";
 
 export type WorkbenchAlertGroup = {
   id: string;
@@ -60,7 +66,7 @@ export type WorkbenchProps = {
   onOpenTasks?: (id: string) => void;
 };
 
-const WORKBENCH_VIEWS: Array<{ id: WorkbenchView; label: string; icon: keyof typeof icons }> = [
+const WORKBENCH_VIEWS: OpsViewNavItem<WorkbenchView>[] = [
   { id: "events", label: "事件中心", icon: "messageSquare" },
   { id: "inspection", label: "巡检中心", icon: "historyClock" },
   { id: "diagnosis", label: "诊断中心", icon: "bug" },
@@ -68,6 +74,36 @@ const WORKBENCH_VIEWS: Array<{ id: WorkbenchView; label: string; icon: keyof typ
   { id: "capacity", label: "容量性能", icon: "usageBars" },
   { id: "change", label: "变更护航", icon: "settings" },
 ];
+
+const WORKBENCH_VIEW_META: Record<
+  WorkbenchView,
+  { title: string; description: string }
+> = {
+  events: {
+    title: "事件中心",
+    description: "从待处理告警进入根因分析、处置建议和执行记录，AI 能力嵌入当前工作流。",
+  },
+  inspection: {
+    title: "巡检中心",
+    description: "触发健康巡检、查看报告与风险摘要，低分结果可推送 IM 通道。",
+  },
+  diagnosis: {
+    title: "诊断中心",
+    description: "汇聚告警、指标、日志与拓扑，输出根因候选与验证步骤。",
+  },
+  governance: {
+    title: "治理中心",
+    description: "识别重复告警、稳定性与配置漂移，沉淀治理任务与采纳效果。",
+  },
+  capacity: {
+    title: "容量性能",
+    description: "关注资源利用率、容量水位与性能瓶颈，给出扩缩容与优化建议。",
+  },
+  change: {
+    title: "变更护航",
+    description: "变更前评估、变更中观测与回滚建议，对接审批与执行记录。",
+  },
+};
 
 function severityLabel(severity: WorkbenchAlertGroup["severity"]): string {
   switch (severity) {
@@ -109,7 +145,7 @@ function renderAiPanel(props: WorkbenchProps, active: WorkbenchAlertGroup | unde
         : active.rootCause || "当前告警缺少明确根因，建议补充指标、日志和拓扑上下文后再次分析。";
 
   return html`
-    <aside class="ops-card" style="min-width: 320px; max-width: 380px;">
+    <aside class="ops-card ops-shell-side detail-column">
       <div class="column-header" style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
         <span>${icons.messageSquare} ${title}</span>
         <button class="ops-btn ops-btn--ghost" type="button" @click=${props.onCloseAiPanel}>关闭</button>
@@ -150,26 +186,6 @@ function renderAiPanel(props: WorkbenchProps, active: WorkbenchAlertGroup | unde
   `;
 }
 
-function renderViewTabs(props: WorkbenchProps) {
-  const activeView = props.activeView ?? "events";
-  return html`
-    <div class="ops-card" style="margin-bottom: 14px;">
-      <div style="display:flex; gap:8px; flex-wrap:wrap;">
-        ${WORKBENCH_VIEWS.map(
-          (item) => html`
-            <button
-              type="button"
-              class="ops-btn ${activeView === item.id ? "ops-btn--primary" : ""}"
-              @click=${() => props.onViewChange?.(item.id)}
-            >
-              ${icons[item.icon]} ${item.label}
-            </button>
-          `,
-        )}
-      </div>
-    </div>
-  `;
-}
 
 function scoreClass(score: number | null | undefined): string {
   if (score == null || score < 0) return "unknown";
@@ -199,8 +215,9 @@ function renderInspectionView(props: WorkbenchProps) {
           `
         : nothing}
 
-      <div class="ops-card" style="margin-bottom: 14px;">
-        <div class="column-header">巡检控制台</div>
+      <div class="ops-shell-panel" style="margin-bottom: 14px;">
+        <div class="ops-shell-panel__head">${icons.zap} 巡检控制台</div>
+        <div style="padding:16px;">
         <div style="display:flex; justify-content:space-between; gap:18px; flex-wrap:wrap; align-items:center;">
           <div>
             <div class="detail-section__title">健康巡检</div>
@@ -216,9 +233,10 @@ function renderInspectionView(props: WorkbenchProps) {
             ${props.isInspecting ? html`${icons.loader} 巡检中...` : html`${icons.zap} 一键巡检`}
           </button>
         </div>
+        </div>
       </div>
 
-      <div class="ops-main-columns">
+      <div class="ops-main-columns ops-shell-columns">
         <div class="ops-card list-column">
           <div class="column-header">巡检报告</div>
           ${props.inspectionsLoading
@@ -335,30 +353,38 @@ function renderEventsView(props: WorkbenchProps, active: WorkbenchAlertGroup | u
       ? html`<div class="ops-panel" style="margin-bottom:12px;">${renderOpsError({ message: props.alertsError })}</div>`
       : nothing}
 
-    <div class="ops-summary-cards">
-      <div class="ops-card stat-card">
-        <div class="stat-label">待处理告警组</div>
-        <div class="stat-value warning">${props.alertGroups.length}</div>
-        <div class="muted">合并后的核心故障组</div>
-      </div>
-      <div class="ops-card stat-card">
-        <div class="stat-label">严重告警</div>
-        <div class="stat-value critical">${criticalCount}</div>
-        <div class="muted">需优先处理</div>
-      </div>
-      <div class="ops-card stat-card">
-        <div class="stat-label">原始事件</div>
-        <div class="stat-value info">${originalTotal}</div>
-        <div class="muted">降噪前事件数</div>
-      </div>
-      <div class="ops-card stat-card">
-        <div class="stat-label">巡检/治理</div>
-        <div class="stat-value ok">${warningCount}</div>
-        <div class="muted">警告级任务候选</div>
-      </div>
-    </div>
+    ${renderOpsShellStatGrid([
+      {
+        label: "待处理告警组",
+        value: props.alertGroups.length,
+        hint: "合并后的核心故障组",
+        tone: "warn",
+        icon: "bell",
+      },
+      {
+        label: "严重告警",
+        value: criticalCount,
+        hint: "需优先处理",
+        tone: "danger",
+        icon: "alertTriangle",
+      },
+      {
+        label: "原始事件",
+        value: originalTotal,
+        hint: "跨域事件条数",
+        tone: "info",
+        icon: "zap",
+      },
+      {
+        label: "警告级",
+        value: warningCount,
+        hint: "巡检/治理候选",
+        tone: "ok",
+        icon: "historyClock",
+      },
+    ])}
 
-    <div class="ops-main-columns" style="align-items: stretch;">
+    <div class="ops-main-columns ops-shell-columns ${props.aiPanelOpen && active ? "ops-shell-columns--with-side" : ""}">
       <div class="ops-card list-column">
         <div class="column-header">${props.domainName} 告警列表</div>
         ${props.alertsLoading
@@ -443,28 +469,48 @@ export function renderWorkbench(props: WorkbenchProps) {
   const warningCount = props.alertGroups.filter((g) => g.severity === "warning").length;
   const activeView = props.activeView ?? "events";
 
-  return html`
-    <div class="ops-domain-page">
-      <div class="ops-domain-hero">
-        <div>
-          <div class="ops-domain-kicker">运维工作台 · ${props.domainName}</div>
-          <h1>事件中心</h1>
-          <p>从待处理告警进入根因分析、处置建议和执行记录，AI 能力嵌入当前工作流。</p>
-        </div>
-        <div style="display:flex; flex-direction:column; align-items:flex-end; gap:10px;">
-          ${props.domainFilter ?? nothing}
-          <button class="ops-btn ops-btn--primary" type="button" @click=${props.onRefreshAlerts}>
-            ${icons.loader} 刷新告警
-          </button>
-        </div>
-      </div>
+  const meta = WORKBENCH_VIEW_META[activeView];
 
-      ${renderViewTabs(props)}
+  return html`
+    <main class="ops-dashboard ops-shell">
+      ${renderOpsShellHeader({
+        kicker: `运维工作台 · ${props.domainName}`,
+        title: meta.title,
+        description: meta.description,
+        toolbar:
+          activeView === "events"
+            ? html`
+                <button
+                  class="ops-btn ops-btn--primary"
+                  type="button"
+                  ?disabled=${props.alertsLoading}
+                  @click=${() => props.onRefreshAlerts?.()}
+                >
+                  ${icons.refreshCw} 刷新告警
+                </button>
+              `
+            : activeView === "inspection"
+              ? html`
+                  <button
+                    class="ops-btn ops-btn--primary ${props.isInspecting ? "btn--loading" : ""}"
+                    type="button"
+                    ?disabled=${props.isInspecting || props.canInspect === false}
+                    title=${props.canInspect === false ? "当前账号无 ops:inspect 权限" : ""}
+                    @click=${() => props.onRunInspection?.()}
+                  >
+                    ${props.isInspecting ? icons.loader : icons.zap}
+                    ${props.isInspecting ? "巡检中..." : "一键巡检"}
+                  </button>
+                `
+              : nothing,
+      })}
+      ${props.domainFilter ?? nothing}
+      ${renderOpsViewNav(WORKBENCH_VIEWS, activeView, (view) => props.onViewChange?.(view))}
       ${activeView === "events"
         ? renderEventsView(props, active, originalTotal, criticalCount, warningCount)
         : activeView === "inspection"
           ? renderInspectionView(props)
           : renderSkeletonView(props, activeView)}
-    </div>
+    </main>
   `;
 }

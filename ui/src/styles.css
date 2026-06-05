@@ -10,4 +10,5 @@
 @import "./styles/ops.css";
 @import "./styles/ops-tokens.css";
 @import "./styles/ops-dashboard.css";
+@import "./styles/ops-shell.css";
 @import "./styles/ops-login.css";
