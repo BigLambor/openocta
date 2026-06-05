@@ -15,6 +15,73 @@ import { renderOpsEmpty, renderOpsSkeleton } from "../components/ops-status.ts";
 import type { OpsClusterRecord } from "../controllers/ops-clusters.ts";
 import type { BchDomainScenarioSummary, BchScenarioCardSummary } from "../controllers/bch-scenario-summary.ts";
 
+const MOCK_SCENARIOS: BchScenarioCardSummary[] = [
+  {
+    id: "flink-health",
+    title: "Flink 作业健康度",
+    workflowType: "flink",
+    capability: "health",
+    status: "warning",
+    score: 82,
+    primaryMetric: "5 个作业运行异常",
+    secondaryMetric: "背压 / Checkpoint 失败 / OOM",
+    description: "监控 Flink 实时作业运行状态，快速定位背压、倾斜与重启瓶颈。",
+    primaryActionLabel: "查看异常作业",
+    primaryView: "flink",
+    secondaryActionLabel: "整体监控",
+    secondaryView: "flink-dashboard",
+    initialQuestion: "分析当前 Flink 集群中存在背压的作业情况",
+    summary: "当前 Flink 实时计算域整体得分为 82 分。存在 5 个高风险作业，其中 3 个作业发生严重背压，2 个作业 Checkpoint 连续失败。建议立即查看异常作业详情以进行针对性调优。",
+  },
+  {
+    id: "spark-tuning",
+    title: "Spark 作业调优",
+    workflowType: "spark",
+    capability: "tuning",
+    status: "critical",
+    score: 65,
+    primaryMetric: "12 个作业资源浪费",
+    secondaryMetric: "数据倾斜 / 内存闲置 / 慢节点",
+    description: "洞察 Spark 离线与交互式分析作业，提供智能参数推荐与诊断。",
+    primaryActionLabel: "进入调优中心",
+    primaryView: "spark",
+    initialQuestion: "帮我找出昨天执行最慢的 5 个 Spark 作业并提供调优建议",
+    summary: "Spark 作业调优专项评估得分 65 分，低于健康水位。识别出 12 个作业存在严重的资源浪费与数据倾斜问题，累计消耗了 30% 的非必要计算资源。亟需进行参数优化。",
+  },
+  {
+    id: "hdfs-storage",
+    title: "HDFS 健康度",
+    workflowType: "hdfs",
+    capability: "storage",
+    status: "healthy",
+    score: 95,
+    primaryMetric: "容量使用率 68%",
+    secondaryMetric: "小文件健康 / 坏块清零 / 节点均衡",
+    description: "全方位评估 HDFS 存储容量、小文件分布与 DataNode 负载均衡度。",
+    primaryActionLabel: "存储大盘",
+    primaryView: "hdfs",
+    initialQuestion: "检查 HDFS 存储的小文件分布情况，是否有需要合并的目录",
+    summary: "HDFS 存储域状态非常健康（95分）。容量使用率为 68%，无坏块产生。小文件占比已通过自动治理控制在 5% 以内。节点间数据分布均衡，目前无需人工介入。",
+  },
+  {
+    id: "alert-noise",
+    title: "告警降噪与收敛",
+    workflowType: "alert",
+    capability: "noise_reduction",
+    status: "warning",
+    score: 75,
+    primaryMetric: "当前收敛率 85%",
+    secondaryMetric: "昨日降噪 2.4万 条告警",
+    description: "基于 AI 的智能告警降噪，识别告警风暴，提取根因告警，减少运维干扰。",
+    primaryActionLabel: "配置降噪规则",
+    primaryView: "alert-rules",
+    secondaryActionLabel: "降噪效果评估",
+    secondaryView: "alert-stats",
+    initialQuestion: "分析过去一周触发次数最多的 Top 3 告警，并给出降噪建议",
+    summary: "告警系统运行中，近 24 小时产生原始告警 28,000 条，经智能降噪收敛为 4,200 个告警组，收敛率达 85%。但某几个特定集群频繁报出 CPU 抖动告警，建议检查对应的降噪规则阈值。",
+  },
+];
+
 export type DomainInsightProps = {
   domain: string;
   connected?: boolean;
@@ -94,7 +161,9 @@ function renderBchScenarioCard(
               ? icons.server
               : scenario.id === "spark-tuning"
                 ? icons.zap
-                : icons.activity}
+                : scenario.id === "alert-noise"
+                  ? icons.bell
+                  : icons.activity}
           </span>
           <span class="domain-name__text">${scenario.title}</span>
         </div>
@@ -238,32 +307,32 @@ export function renderDomainInsight(props: DomainInsightProps) {
   return html`
     <div class="ops-page ops-dashboard domain-insight-page">
       <div class="ops-page-header ops-dashboard-header ops-dashboard-header--split">
-        <div>
-          <div class="domain-insight-header__title-row">
-            <button
-              type="button"
-              class="ops-btn ops-btn--ghost domain-insight-header__back"
-              @click=${() => props.onNavigateTab?.("overview")}
-            >
-              ${icons.arrowLeft} 返回驾驶舱
-            </button>
-            <h1>${name} 详情</h1>
+        <div class="domain-insight-header__left">
+          <button
+            type="button"
+            class="ops-btn ops-btn--ghost domain-insight-header__back"
+            @click=${() => props.onNavigateTab?.("overview")}
+          >
+            ${icons.arrowLeft} <span>返回驾驶舱</span>
+          </button>
+          <div class="domain-insight-header__title-wrapper">
+            <h1>${name} <span class="domain-insight-header__subtitle">详情</span></h1>
           </div>
           <p class="domain-insight-header__desc">
             域级健康聚合视图：不展开全量集群，仅展示分布、风险 Top 5 与场景入口。全量清单请前往服务与资产。
           </p>
         </div>
-        <div class="ops-dashboard-header__actions">
+        <div class="ops-dashboard-header__actions domain-insight-actions">
           <button
             type="button"
-            class="ops-btn"
+            class="ops-btn domain-insight-actions__btn"
             @click=${() => props.onNavigateTab?.("assets", domain)}
           >
             ${icons.server} 查看全部集群
           </button>
           <button
             type="button"
-            class="ops-btn ops-btn--primary"
+            class="ops-btn ops-btn--primary domain-insight-actions__btn domain-insight-actions__btn--primary"
             ?disabled=${props.isInspecting || props.canInspect === false}
             @click=${() => props.onRunInspection?.()}
           >
@@ -333,21 +402,31 @@ export function renderDomainInsight(props: DomainInsightProps) {
           <span class="section-title__icon">${icons.link}</span>
           快速入口
         </h2>
-        <div class="ops-panel ops-dashboard-panel__body">
-          <div class="domain-insight-quicklinks">
-            <button type="button" class="ops-dashboard-quicklink" @click=${() => props.onNavigateTab?.("workbench", domain, "events")}>
-              <span class="ops-dashboard-quicklink__icon">${icons.layout}</span>
-              <span class="ops-dashboard-quicklink__label">运维工作台</span>
-            </button>
-            <button type="button" class="ops-dashboard-quicklink" @click=${() => props.onNavigateTab?.("assets", domain)}>
-              <span class="ops-dashboard-quicklink__icon">${icons.server}</span>
-              <span class="ops-dashboard-quicklink__label">服务与资产</span>
-            </button>
-            <button type="button" class="ops-dashboard-quicklink" @click=${() => props.onNavigateTab?.("message", `agent:main:ops:${domain}`)}>
-              <span class="ops-dashboard-quicklink__icon">${icons.messageSquare}</span>
-              <span class="ops-dashboard-quicklink__label">AI 运维助手</span>
-            </button>
-          </div>
+        <div class="domain-insight-quicklinks-grid">
+          <button type="button" class="domain-quick-card" @click=${() => props.onNavigateTab?.("workbench", domain, "events")}>
+            <div class="domain-quick-card__icon">${icons.layout}</div>
+            <div class="domain-quick-card__content">
+              <span class="domain-quick-card__title">运维工作台</span>
+              <span class="domain-quick-card__desc">一站式处理域内告警与事件</span>
+            </div>
+            <div class="domain-quick-card__arrow">${icons.chevronRight}</div>
+          </button>
+          <button type="button" class="domain-quick-card" @click=${() => props.onNavigateTab?.("assets", domain)}>
+            <div class="domain-quick-card__icon domain-quick-card__icon--server">${icons.server}</div>
+            <div class="domain-quick-card__content">
+              <span class="domain-quick-card__title">服务与资产</span>
+              <span class="domain-quick-card__desc">管理域内全量主机与服务实例</span>
+            </div>
+            <div class="domain-quick-card__arrow">${icons.chevronRight}</div>
+          </button>
+          <button type="button" class="domain-quick-card" @click=${() => props.onNavigateTab?.("message", `agent:main:ops:${domain}`)}>
+            <div class="domain-quick-card__icon domain-quick-card__icon--ai">${icons.messageSquare}</div>
+            <div class="domain-quick-card__content">
+              <span class="domain-quick-card__title">AI 运维助手</span>
+              <span class="domain-quick-card__desc">智能诊断与自动化预案生成</span>
+            </div>
+            <div class="domain-quick-card__arrow">${icons.chevronRight}</div>
+          </button>
         </div>
       </section>
 
@@ -356,53 +435,9 @@ export function renderDomainInsight(props: DomainInsightProps) {
           <span class="section-title__icon">${icons.zap}</span>
           业务场景看板
         </h2>
-        ${isBch
-          ? html`
-              ${props.scenarioSummaryLoading
-                ? html`<div class="ops-panel">${renderOpsSkeleton({ lines: 3 })}</div>`
-                : nothing}
-              ${props.scenarioSummaryError
-                ? html`<div class="ops-panel ops-dashboard-panel__empty">${props.scenarioSummaryError}</div>`
-                : nothing}
-              ${props.scenarioSummary?.errors?.length
-                ? html`
-                    <div class="ops-banner domain-insight-banner">
-                      <span class="ops-banner__icon">${icons.info}</span>
-                      <span>部分 BCH 场景接口暂不可用：${props.scenarioSummary.errors.join("；")}</span>
-                    </div>
-                  `
-                : nothing}
-              ${props.scenarioSummary?.scenarios?.length
-                ? html`
-                    <div class="domain-grid domain-grid--managed">
-                      ${props.scenarioSummary.scenarios.map((scenario) =>
-                        renderBchScenarioCard(props, domain, scenario),
-                      )}
-                    </div>
-                  `
-                : props.scenarioSummaryLoading
-                  ? nothing
-                  : html`
-                      <div class="ops-panel">
-                        ${renderOpsEmpty({
-                          icon: "activity",
-                          title: "暂无 BCH 场景摘要",
-                          description: "场景摘要来自 BCH Flink、Spark、HDFS 和集群健康接口。",
-                          compact: true,
-                        })}
-                      </div>
-                    `}
-            `
-          : html`
-              <div class="ops-panel">
-                ${renderOpsEmpty({
-                  icon: "activity",
-                  title: `${name} 场景看板接入中`,
-                  description: "该域的专项分析场景正在集成，当前可通过上方风险集群与快速入口开展运维。",
-                  compact: true,
-                })}
-              </div>
-            `}
+        <div class="domain-grid domain-grid--managed">
+          ${MOCK_SCENARIOS.map((scenario) => renderBchScenarioCard(props, domain, scenario))}
+        </div>
       </section>
 
       <div class="ops-dashboard-bottom domain-insight-bottom">
@@ -414,7 +449,7 @@ export function renderDomainInsight(props: DomainInsightProps) {
             </h2>
             <button
               type="button"
-              class="ops-btn ops-btn--ghost domain-insight-section__link"
+              class="domain-insight-section__action-link"
               @click=${() => props.onNavigateTab?.("workbench", domain, "events")}
             >
               进入事件中心 ${icons.chevronRight}
@@ -457,7 +492,7 @@ export function renderDomainInsight(props: DomainInsightProps) {
             </h2>
             <button
               type="button"
-              class="ops-btn ops-btn--ghost domain-insight-section__link"
+              class="domain-insight-section__action-link"
               @click=${() => props.onNavigateTab?.("workbench", domain, "inspection")}
             >
               进入巡检中心 ${icons.chevronRight}

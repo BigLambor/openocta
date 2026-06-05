@@ -111,12 +111,12 @@
 
 | ID | 任务 | 交付物 | 验收标准 | 状态 | 备注 |
 |----|------|--------|----------|------|------|
-| P3-1 | Scenario 绑定 MCP | Scenario 配置支持 `mcpServerKeys` | Scenario 能声明可选 MCP，不影响无 MCP 的 GBase 样板运行 | ⬜ 待开始 | |
+| P3-1 | Scenario 绑定 MCP | Scenario 配置支持 `mcpServerKeys` | Scenario 能声明可选 MCP，不影响无 MCP 的 GBase 样板运行 | ✅ 已完成 | `scenario_runner.go` 已支持接入 MCP |
 | P3-2 | 员工绑定 Scenario | DigitalEmployee model/UI | 员工支持 `scenarioKeys`，样板期可每 Scenario 绑定员工 | ✅ 已完成 | 已在 `model.go` 的 `Manifest` 中新增字段 |
 | P3-3 | 工具冲突策略实现 | Tool registry / runtime | Platform Tool 与 MCP 同名时 Platform Tool 优先 | ✅ 已完成 | `scenario_runner.go` 优先调用 PlatformTools |
 | P3-4 | 必需/可选源运行时校验 | Scenario runner | 必需源失败为 `degraded`；可选源失败降低 coverage | ✅ 已完成 | `scenario_runner.go` 已实现校验并阻断组合分数 |
-| P3-5 | Prometheus MCP 试点 | Prometheus MCP 配置示例 | `metrics` 可由 Platform Tool 或 MCP 采集，并统一 Normalize 为 Signal | ⬜ 待开始 | |
-| P3-6 | MCP 失败审计 | Run audit | 记录 `mcpCalled[]`、错误、耗时、missingSources | ⬜ 待开始 | |
+| P3-5 | Prometheus MCP 试点 | Prometheus MCP 配置示例 | `metrics` 可由 Platform Tool 或 MCP 采集，并统一 Normalize 为 Signal | ✅ 已完成 | |
+| P3-6 | MCP 失败审计 | Run audit | 记录 `mcpCalled[]`、错误、耗时、missingSources | ✅ 已完成 | |
 
 ### Phase 3 验收场景
 
@@ -134,13 +134,13 @@
 
 | ID | 任务 | 交付物 | 验收标准 | 状态 | 备注 |
 |----|------|--------|----------|------|------|
-| P4-1 | BCH Policy + Scenario | BCH 配置与 Skill | 主信号包含 `metrics`、`jmx`、`bch_workload` | ⬜ 待开始 | |
-| P4-2 | `bch_workload` Signal | Flink/Spark 适配器 | BCH 深场景不再并行游离，进入 L3 Facts | ⬜ 待开始 | |
-| P4-3 | FI Policy + Scenario | FI 配置与 Skill | 主信号优先 `fi_manager`，metrics/alerts 可选 | ⬜ 待开始 | |
-| P4-4 | 治理平台 Scenario | governance 配置与 Skill/MCP | 支持治理 API/MCP 输入，输出结构化 Signal/Report | ⬜ 待开始 | |
-| P4-5 | 数据 App Scenario | dataapps 配置与 Skill/MCP | 支持调度成功率、SLA 告警、scheduler_api | ⬜ 待开始 | |
-| P4-6 | 告警 Hook → Diagnosis | Diagnosis Scenario | 告警触发诊断并写入 `DiagnosisReport`，不直接写未经校验的分数 | ⬜ 待开始 | |
-| P4-7 | 域级 Snapshot 聚合 | DomainHealthSnapshot | 域级概览显示有分集群均值、partial/degraded 数量和来源 | ⬜ 待开始 | |
+| P4-1 | BCH Policy + Scenario | BCH 配置与 Skill | 主信号包含 `metrics`、`jmx`、`bch_workload` | ✅ 已完成 | |
+| P4-2 | `bch_workload` Signal | Flink/Spark 适配器 | BCH 深场景不再并行游离，进入 L3 Facts | ✅ 已完成 | |
+| P4-3 | FI Policy + Scenario | FI 配置与 Skill | 主信号优先 `fi_manager`，metrics/alerts 可选 | ✅ 已完成 | |
+| P4-4 | 治理平台 Scenario | governance 配置与 Skill/MCP | 支持治理 API/MCP 输入，输出结构化 Signal/Report | ✅ 已完成 | |
+| P4-5 | 数据 App Scenario | dataapps 配置与 Skill/MCP | 支持调度成功率、SLA 告警、scheduler_api | ✅ 已完成 | |
+| P4-6 | 告警 Hook → Diagnosis | Diagnosis Scenario | 告警触发诊断并写入 `DiagnosisReport`，不直接写未经校验的分数 | ✅ 已完成 | |
+| P4-7 | 域级 Snapshot 聚合 | DomainHealthSnapshot | 域级概览显示有分集群均值、partial/degraded 数量和来源 | ✅ 已完成 | |
 
 ### Phase 4 验收场景
 
@@ -160,8 +160,8 @@
 |----|------|--------|----------|------|------|
 | X-1 | Run audit | run store / 日志 | 记录 `runId/scenarioKey/employeeId/objectId/toolsCalled/mcpCalled/signalsWritten/missingSources/durationMs/operator` | ✅ 已完成 | 已实现 `ops.RecordRunAudit` 和 `run_audit.jsonl` |
 | X-2 | RBAC 校验 | API + Scenario runner | L4 读 Facts 按域过滤；L2 触发按 `ops:inspect/ops:diagnose`；L1 按员工权限与 cluster 范围 | ⬜ 待开始 | |
-| X-3 | UI 来源与新鲜度展示 | 驾驶舱/域详情组件 | 展示 `source`、`coverage`、`freshness`、`missingSources`，过期清晰标注 | ⬜ 待开始 | |
-| X-4 | IM 低分推送改造 | Notify 逻辑 | 仅基于结构化 `score` 触发；`partial/degraded/unknown` 不按数字分推送 | ⬜ 待开始 | |
+| X-3 | UI 来源与新鲜度展示 | 驾驶舱/域详情组件 | 展示 `source`、`coverage`、`freshness`、`missingSources`，过期清晰标注 | ✅ 已完成 | |
+| X-4 | IM 低分推送改造 | Notify 逻辑 | 仅基于结构化 `score` 触发；`partial/degraded/unknown` 不按数字分推送 | ✅ 已完成 | |
 | X-5 | SQLite 迁移评估 | 技术评审记录 | 满足分页历史、并发写入、runId 审计或 JSON 瓶颈任一条件时启动 SQLite 规划 | ⬜ 待开始 | |
 | X-6 | 测试覆盖 | Go tests + UI tests | 聚合器、collector、URL 规范化、状态展示均有测试 | ⬜ 待开始 | |
 
