@@ -280,11 +280,11 @@ function getCapabilityPlaceholder(domainKey: string, tab: TechOpsCapabilityTab) 
   const common: Record<TechOpsCapabilityTab, { title: string; description: string; scenarios: Array<{ title: string; desc: string }> }> = {
     overview: {
       title: "技术域概览",
-      description: "聚合该技术域的健康度、风险、告警、巡检、容量和数字员工工作状态。",
+      description: "聚合该技术域的健康度、风险、告警、巡检、容量和自动化执行状态。",
       scenarios: [
         { title: "健康度矩阵", desc: "按集群、组件、作业或实例展示健康评分与风险等级。" },
         { title: "待处理风险", desc: "汇总告警、巡检、容量和变更风险，形成统一待办。" },
-        { title: "员工工作状态", desc: "展示本域数字员工正在处理的任务、产出和异常。" },
+        { title: "自动化执行状态", desc: "展示本域自动化任务正在处理的任务、产出和异常。" },
       ],
     },
     assetTopology: {

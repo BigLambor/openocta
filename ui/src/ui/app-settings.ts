@@ -282,7 +282,7 @@ export async function refreshActiveTab(host: SettingsHost) {
   if (host.tab === "workbench") {
     const app = host as unknown as { loadOpsDomainAlerts?: (d: string) => Promise<void> };
     const domain = normalizeOpsDomain(host.settings.opsDomain);
-    await app.loadOpsDomainAlerts?.(domain === "all" ? "hadoop" : domain);
+    await app.loadOpsDomainAlerts?.(domain);
   }
   if (host.tab === "assets" || host.tab === "assetManagement") {
     const app = host as unknown as { loadOpsClusters?: () => Promise<void> };

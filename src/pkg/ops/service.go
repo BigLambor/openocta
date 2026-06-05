@@ -2,6 +2,7 @@ package ops
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -28,6 +29,82 @@ func InitStore(stateDir string) error {
 		return err
 	}
 	clusters = store.Clusters
+
+	if len(clusters) == 0 && flag.Lookup("test.v") == nil {
+		clusters = []Cluster{
+			{
+				ID:             "cluster-bch-prod-a",
+				Name:           "哈池 BCH 生产集群 A",
+				Domain:         DomainHadoop,
+				Region:         "哈池",
+				NodeCount:      3457,
+				Components:     []string{"HDFS", "YARN", "HIVE", "SPARK"},
+				Owner:          "彭晓东",
+				Status:         "healthy",
+				CreatedAtMs:    nowMs(),
+				UpdatedAtMs:    nowMs(),
+				MonitorLabels:  "job=hadoop-prod",
+				MetricsBaseUrl: "http://127.0.0.1:18900/api/v1/query",
+			},
+			{
+				ID:             "cluster-gbase-prod",
+				Name:           "哈池 GBase 生产数据库",
+				Domain:         DomainGBase,
+				Region:         "哈池",
+				NodeCount:      12,
+				Components:     []string{"GBase 8a", "GBase 8t", "ConnectionPool"},
+				Owner:          "赵铁柱",
+				Status:         "healthy",
+				CreatedAtMs:    nowMs(),
+				UpdatedAtMs:    nowMs(),
+				MonitorLabels:  "job=gbase-prod",
+				MetricsBaseUrl: "http://127.0.0.1:18900/api/v1/query",
+			},
+			{
+				ID:             "cluster-fi-prod",
+				Name:           "呼池 FusionInsight 生产集群",
+				Domain:         DomainFI,
+				Region:         "呼和浩特",
+				NodeCount:      85,
+				Components:     []string{"FI-YARN", "FI-HBase", "FI-Kafka"},
+				Owner:          "王小明",
+				Status:         "warning",
+				CreatedAtMs:    nowMs(),
+				UpdatedAtMs:    nowMs(),
+				MonitorLabels:  "job=fi-prod",
+				MetricsBaseUrl: "http://127.0.0.1:18900/api/v1/query",
+			},
+			{
+				ID:             "cluster-gov-platform",
+				Name:           "数据开发治理中心平台",
+				Domain:         DomainGovernance,
+				Region:         "北京",
+				NodeCount:      5,
+				Components:     []string{"MetadataRegistry", "LineageEngine", "DataQuality"},
+				Owner:          "李华",
+				Status:         "healthy",
+				CreatedAtMs:    nowMs(),
+				UpdatedAtMs:    nowMs(),
+				MonitorLabels:  "job=gov-platform",
+				MetricsBaseUrl: "http://127.0.0.1:18900/api/v1/query",
+			},
+			{
+				ID:             "cluster-dataapp-scheduler",
+				Name:           "核心数据 App 调度平台",
+				Domain:         DomainDataApps,
+				Region:         "北京",
+				NodeCount:      8,
+				Components:     []string{"Airflow", "DolphinScheduler", "SLA-Monitor"},
+				Owner:          "陈刚",
+				Status:         "healthy",
+				CreatedAtMs:    nowMs(),
+				UpdatedAtMs:    nowMs(),
+				MonitorLabels:  "job=dataapp-scheduler",
+				MetricsBaseUrl: "http://127.0.0.1:18900/api/v1/query",
+			},
+		}
+		_ = SaveStore(storePath, &storeFile{Version: 1, Clusters: clusters})
+	}
 	return nil
 }
 

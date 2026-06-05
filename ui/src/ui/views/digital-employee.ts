@@ -223,7 +223,7 @@ export function renderDigitalEmployeeEditModal(props: DigitalEmployeeEditModalPr
   return html`
     <div class="modal-overlay" @click=${props.onEditClose}>
       <div class="modal card" @click=${(e: Event) => e.stopPropagation()}>
-        <div class="card-title">修改数字员工</div>
+        <div class="card-title">修改助手</div>
         <div class="field" style="margin-top: 12px;">
           <span>名称</span>
           <span class="input"><input type="text" .value=${props.editName} disabled /></span>
@@ -615,7 +615,7 @@ export function renderDigitalEmployeeCreateModal(props: DigitalEmployeeCreateMod
   return html`
     <div class="modal-overlay" @click=${props.onCreateClose}>
       <div class="modal card" @click=${(e: Event) => e.stopPropagation()}>
-        <div class="card-title">新增数字员工</div>
+        <div class="card-title">新增助手</div>
         <div class="field" style="margin-top: 12px;">
           <span>名称</span>
           <span class="input"><input
@@ -918,7 +918,7 @@ export function renderDigitalEmployee(props: DigitalEmployeeProps) {
     <section class="card">
       <div class="row" style="justify-content: space-between; align-items: center;">
         <div>
-          <div class="card-title">${t("navTitleDigitalEmployee")}</div>
+          <div class="card-title">我的助手</div>
           <div class="card-sub">
             提供不同垂直场景的对话模版，点击任一数字员工即可开启新的会话。
           </div>
@@ -983,7 +983,7 @@ export function renderDigitalEmployee(props: DigitalEmployeeProps) {
 
       ${
         !props.loading && filtered.length === 0
-          ? html`<div class="muted" style="margin-top: 16px;">暂无匹配的数字员工。</div>`
+          ? html`<div class="muted" style="margin-top: 16px;">暂无匹配的助手。</div>`
           : html`
               ${
                 props.viewMode === "list"
@@ -1014,7 +1014,7 @@ export function renderDigitalEmployee(props: DigitalEmployeeProps) {
           ? html`
               <div class="modal-overlay" @click=${props.onCreateClose}>
                 <div class="modal card" @click=${(e: Event) => e.stopPropagation()}>
-                  <div class="card-title">新增数字员工</div>
+                  <div class="card-title">新增助手</div>
                   <div class="field" style="margin-top: 12px;">
                     <span>名称</span>
                     <span class="input"><input
@@ -1316,11 +1316,11 @@ function roleTypeLabel(roleType?: string) {
     case "oncall":
       return "值班运维";
     case "inspector":
-      return "巡检员工";
+      return "巡检助手";
     case "diagnoser":
-      return "诊断员工";
+      return "诊断助手";
     case "governor":
-      return "治理员工";
+      return "治理助手";
     case "capacity":
       return "容量成本";
     case "change_guard":

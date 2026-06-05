@@ -401,7 +401,7 @@ import { renderCronConfig, renderCronHistory } from "./views/cron.ts";
 import { renderDebug } from "./views/debug.ts";
 import { installFromSite } from "./controllers/remote-market.ts";
 import { renderEmployeeMarket } from "./views/employee-market.ts";
-import { renderEmployeeCenter } from "./views/employee-center.ts";
+import { renderAutomationHub } from "./views/automation-hub.ts";
 import { renderEmployeeOperations } from "./views/employee-operations.ts";
 import { createEmployeeTask, loadEmployeeTasks, loadEmployeeEffectiveness, rateEmployeeTask, deleteEmployeeTask } from "./controllers/employee-tasks.ts";
 import "./components/category-tree-sidebar.ts";
@@ -413,8 +413,6 @@ import { renderNodes } from "./views/nodes.ts";
 import { renderOverview } from "./views/overview.ts";
 import { renderWorkbench, type WorkbenchInspection, type WorkbenchView } from "./views/workbench.ts";
 import { renderAssetsView } from "./views/assets-view.ts";
-import { renderOpsCapabilityCenter } from "./views/ops-capability-center.ts";
-import { renderTechOpsHub } from "./views/tech-ops-hub.ts";
 import { renderTechOpsDomain } from "./views/tech-ops-domain.ts";
 import {
   buildEntityGroupsFromClusters,
@@ -1542,18 +1540,19 @@ export function renderApp(state: AppViewState) {
         ${
           state.tab === "workbench"
             ? (() => {
+                const domainForAlerts = selectedOpsDomain;
                 const domain = effectiveWorkbenchDomain;
                 if (
-                  !state.opsAlertsLoading?.[domain] &&
-                  state.opsAlertsByDomain?.[domain] === undefined &&
+                  !state.opsAlertsLoading?.[domainForAlerts] &&
+                  state.opsAlertsByDomain?.[domainForAlerts] === undefined &&
                   !(state as any)._loadingWorkbenchAlerts
                 ) {
                   (state as any)._loadingWorkbenchAlerts = true;
-                  state.loadOpsDomainAlerts(domain).finally(() => {
+                  state.loadOpsDomainAlerts(domainForAlerts).finally(() => {
                     (state as any)._loadingWorkbenchAlerts = false;
                   });
                 }
-                const selectedId = state.opsSelectedAlertGroupIds[domain] || null;
+                const selectedId = state.opsSelectedAlertGroupIds[domainForAlerts] || null;
                 const aiModeRaw = state.opsSelectedEntityIds?.workbenchAiMode;
                 const aiMode =
                   aiModeRaw === "similar" || aiModeRaw === "action" || aiModeRaw === "root-cause"
@@ -1593,7 +1592,7 @@ export function renderApp(state: AppViewState) {
                   state.cronRunsJobId === inspectionJobId
                     ? mapCronRunsToWorkbenchInspections(domain, state.cronRuns)
                     : [];
-                const alertGroups = state.opsAlertsByDomain?.[domain] ?? [];
+                const alertGroups = state.opsAlertsByDomain?.[domainForAlerts] ?? [];
                 const recordAiDecision = async (
                   id: string,
                   decision: "accepted" | "rejected",
@@ -1631,11 +1630,24 @@ export function renderApp(state: AppViewState) {
                         : aiMode === "action"
                           ? `处置建议${isAccepted ? "已确认" : "已驳回"}：${trimmedNote}`
                           : `根因分析建议${isAccepted ? "已确认" : "已驳回"}：${trimmedNote}`;
+                    
+                    const actualDomain = alert.domain || domain;
+                    const employeeId =
+                      actualDomain === "gbase"
+                        ? "emp_gbase_diagnose"
+                        : actualDomain === "fi"
+                          ? "emp_fi_inspect"
+                          : actualDomain === "governance"
+                            ? "emp_governance_remediate"
+                            : actualDomain === "dataapps"
+                              ? "emp_dataapps_ops"
+                              : "builtin-bch-oncall";
+
                     const taskId = await createEmployeeTask(state, {
-                      employeeId: "builtin-bch-oncall",
-                      domainKey: domain,
+                      employeeId,
+                      domainKey: actualDomain,
                       capabilityKey: "observability-alert",
-                      scenarioKey: `bch-alert-${aiMode}`,
+                      scenarioKey: `${actualDomain}-alert-${aiMode}`,
                       objectRef: id,
                       triggerType: "alert",
                       executionStatus: "succeeded",
@@ -1663,7 +1675,7 @@ export function renderApp(state: AppViewState) {
                         savedHours: Math.max(0, (alert.originalCount - alert.reducedTo) * 0.08),
                       },
                     });
-                    await state.loadOpsDomainAlerts(domain);
+                    await state.loadOpsDomainAlerts(domainForAlerts);
                     state.opsSelectedEntityIds = {
                       ...state.opsSelectedEntityIds,
                       workbenchAiPanel: "closed",
@@ -1681,15 +1693,15 @@ export function renderApp(state: AppViewState) {
                   }
                 };
                 return renderWorkbench({
-                  domainName: opsDomainLabel(domain),
+                  domainName: opsDomainLabel(domainForAlerts),
                   domainFilter: renderDomainFilter({
                     selectedDomain: selectedOpsDomain,
                     user: state.rbacUser,
                     includeAll: true,
                     onChange: setGlobalOpsDomain,
                   }),
-                  alertsLoading: state.opsAlertsLoading?.[domain] ?? false,
-                  alertsError: state.opsAlertsError?.[domain] ?? null,
+                  alertsLoading: state.opsAlertsLoading?.[domainForAlerts] ?? false,
+                  alertsError: state.opsAlertsError?.[domainForAlerts] ?? null,
                   alertGroups,
                   activeView: workbenchView,
                   inspectionsLoading: state.cronLoading,
@@ -1707,11 +1719,11 @@ export function renderApp(state: AppViewState) {
                       workbenchView: view,
                     };
                   },
-                  onRefreshAlerts: () => state.loadOpsDomainAlerts(domain),
+                  onRefreshAlerts: () => state.loadOpsDomainAlerts(domainForAlerts),
                   onSelectAlertGroup: (id) => {
                     state.opsSelectedAlertGroupIds = {
                       ...state.opsSelectedAlertGroupIds,
-                      [domain]: id,
+                      [domainForAlerts]: id,
                     };
                   },
                   onSelectInspection: (id) => {
@@ -1854,7 +1866,7 @@ export function renderApp(state: AppViewState) {
 
         ${
           state.tab === "opsCapabilities"
-            ? renderOpsCapabilityCenter()
+            ? nothing
             : nothing
         }
 
@@ -2360,7 +2372,7 @@ export function renderApp(state: AppViewState) {
                 if (!state.digitalEmployeesLoading && (state.digitalEmployees?.length ?? 0) === 0) {
                   queueMicrotask(() => void loadDigitalEmployees(state));
                 }
-                return renderEmployeeCenter({
+                return renderAutomationHub({
                   employees: state.digitalEmployees,
                   loading: state.digitalEmployeesLoading,
                   onOpenMarket: () => state.setTab("employeeMarket"),
@@ -3637,23 +3649,7 @@ export function renderApp(state: AppViewState) {
 
         ${
           state.tab === "techDomains"
-            ? renderTechOpsHub({
-                loading: state.opsDashboardLoading,
-                dashboardSummary: state.opsDashboardSummary,
-                dashboardError: state.opsDashboardError,
-                globalInspecting: state.opsGlobalInspecting,
-                dashboardToast: state.opsDashboardToast,
-                onOpenDomain: (tab) => {
-                  void openTechDomain(state as any, tab, {
-                    capabilityTab: "overview",
-                    prefetch: { clusters: true, alerts: true },
-                  });
-                },
-                onOpenAssets: () => state.setTab("assetManagement"),
-                onRunGlobalInspection: () => state.runGlobalInspectionFromDashboard(),
-                onOpenPendingAlerts: () => state.openPendingAlertsFromDashboard(),
-                canInspect: canRunInspection(state.rbacUser),
-              })
+            ? nothing
             : nothing
         }
 

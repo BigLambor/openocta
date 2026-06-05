@@ -4,7 +4,7 @@ import { pathForTab, tabFromPath, type Tab } from "../navigation.ts";
 /** Routes referenced in docs/e2e-ops-smoke.md (P4-4 automation smoke). */
 const OPS_SMOKE_TABS: Tab[] = [
   "overview",
-  "assetManagement",
+  "assets",
   "hadoop",
   "fi",
   "gbase",

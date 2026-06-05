@@ -439,7 +439,7 @@ export function getProductTourSteps(): ProductTourStep[] {
     {
       tab: "employeeMarket",
       title: "数字员工",
-      body: "在「员工市场」挑选或启用数字员工模板，快速落地客服、运营、研发等角色化助手。",
+      body: "在「助手模板库」挑选数字员工模板，快速落地巡检、诊断、值班等运维助手。",
     },
     {
       tab: "scheduledTasks",
@@ -484,13 +484,13 @@ export function subtitleForTab(tab: Tab) {
     case "cronHistory":
       return "";
     case "employeeCenter":
-      return "统一管理数字员工资产、岗位、任务、编排、权限和效能";
+      return "管理数字员工模板、工作流编排、触发规则和执行记录";
     case "employeeMarket":
-      return "发现、安装和上架面向运维岗位的数字员工";
+      return "发现、安装和上架面向运维场景的数字员工模板";
     case "employeeTasks":
-      return "沉淀数字员工处理告警、巡检、诊断、治理、容量和变更的任务记录";
+      return "数字员工处理告警、巡检、诊断、治理等场景的执行记录";
     case "employeeEffectiveness":
-      return "量化数字员工的任务量、闭环率、采纳率、降噪率、人时节省和成本";
+      return "量化自动化执行效果：任务量、成功率、闭环率和成本";
     case "skillLibrary":
       return "";
     case "toolLibrary":
@@ -508,7 +508,7 @@ export function subtitleForTab(tab: Tab) {
     case "agents":
       return t("subtitleAgents");
     case "overview":
-      return "跨技术域聚合健康度、告警、巡检、容量、任务和数字员工工作状态";
+      return "跨技术域聚合健康度、告警、巡检、容量、任务和自动化执行状态";
     case "techDomains":
       return "从技术域视角进入 BCH、FI、GBase、开发治理与数据 App 运维";
     case "opsCapabilities":
@@ -536,9 +536,9 @@ export function subtitleForTab(tab: Tab) {
     case "chat":
       return t("subtitleChat");
     case "digitalEmployee":
-      return "管理已安装和自建数字员工，配置岗位、Prompt、技能和工具";
+      return "管理已安装和自建数字员工，配置 Prompt、技能和工具";
     case "agentSwarm":
-      return "编排多个数字员工协同处理复杂运维任务";
+      return "编排自动化步骤、触发条件、审批节点和工具调用";
     case "config":
       return t("subtitleConfig");
     case "envVars":

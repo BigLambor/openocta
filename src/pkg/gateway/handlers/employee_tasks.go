@@ -227,6 +227,9 @@ func EmployeeTasksUpdateHandler(opts HandlerOpts) error {
 		task.Evaluation = strings.ToLower(strings.TrimSpace(evaluation))
 		if task.Evaluation == employees.EvaluationAccepted {
 			task.WorkflowStatus = employees.WorkflowClosed
+			if task.StartedAt > 0 {
+				task.Metrics.MTTRMs = time.Now().UnixMilli() - task.StartedAt
+			}
 		} else if task.Evaluation == employees.EvaluationRejected {
 			task.WorkflowStatus = employees.WorkflowRejected
 		}

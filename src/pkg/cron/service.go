@@ -580,27 +580,45 @@ func (s *Service) ensureDefaultJobs() error {
 	changed := false
 	for _, dj := range defaultJobs {
 		found := false
-		for _, j := range s.store.Jobs {
+		for i, j := range s.store.Jobs {
 			if j.ID == dj.ID {
 				found = true
+				empID := ""
+				if dj.ID == "job-inspect-hadoop" || dj.ID == "job-inspect-fi" {
+					empID = "emp_bch_inspect"
+				} else {
+					empID = "emp_bch_diagnose"
+				}
+				if s.store.Jobs[i].DigitalEmployeeID == "" {
+					s.store.Jobs[i].DigitalEmployeeID = empID
+					s.store.Jobs[i].UpdatedAtMs = now
+					changed = true
+				}
 				break
 			}
 		}
 		if !found {
 			sched := CronSchedule{Kind: "cron", Expr: "0 8,20 * * *"}
 			next := ComputeNextRunAtMs(sched, now)
+			empID := ""
+			if dj.ID == "job-inspect-hadoop" || dj.ID == "job-inspect-fi" {
+				empID = "emp_bch_inspect"
+			} else {
+				empID = "emp_bch_diagnose"
+			}
 			j := CronJob{
-				ID:            dj.ID,
-				AgentID:       "main",
-				Name:          dj.Name,
-				Description:   dj.Description,
-				Enabled:       true,
-				CreatedAtMs:   now,
-				UpdatedAtMs:   now,
-				Schedule:      sched,
-				SessionTarget: "isolated",
-				SessionKey:    "agent:main:cron:" + dj.ID,
-				WakeMode:      "next-heartbeat",
+				ID:                dj.ID,
+				AgentID:           "main",
+				Name:              dj.Name,
+				Description:       dj.Description,
+				Enabled:           true,
+				CreatedAtMs:       now,
+				UpdatedAtMs:       now,
+				DigitalEmployeeID: empID,
+				Schedule:          sched,
+				SessionTarget:     "isolated",
+				SessionKey:        "agent:main:cron:" + dj.ID,
+				WakeMode:          "next-heartbeat",
 				Payload: CronPayload{
 					Kind:    "agentTurn",
 					Message: dj.Message,

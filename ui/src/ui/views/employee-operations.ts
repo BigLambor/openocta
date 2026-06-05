@@ -38,17 +38,17 @@ export function renderEmployeeOperations(props: EmployeeOperationsProps) {
     <main class="ops-dashboard">
       <div class="ops-dashboard-header">
         <div>
-          <h1>${isTasks ? "员工任务记录" : "员工效能评估"}</h1>
+          <h1>${isTasks ? "执行记录" : "自动化效果"}</h1>
           <p class="muted">
             ${isTasks
-              ? "将数字员工从一次会话升级为可追踪、可确认、可复盘的工作任务。"
-              : "用任务量、闭环率、采纳率、降噪率、人时节省和成本消耗量化数字员工价值。"}
+              ? "数字员工处理告警、巡检、诊断、治理等场景的执行记录。"
+              : "量化自动化执行效果：任务量、成功率、闭环率和成本。"}
           </p>
         </div>
         <div class="ops-dashboard-actions__inner">
           <button class="ops-dashboard-actions__btn" type="button" @click=${props.onOpenEmployees}>
             <span class="ops-dashboard-actions__icon" aria-hidden="true">${icons.users}</span>
-            <span>我的员工</span>
+            <span>我的助手</span>
           </button>
         </div>
       </div>
@@ -73,13 +73,13 @@ function renderTasksView(props: EmployeeOperationsProps) {
     <!-- 过滤器栏 -->
     <section class="filters-bar" style="margin-top: 16px; display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; background: var(--bg-card); padding: 12px; border-radius: 8px; border: 1px solid var(--border-color);">
       <div class="field" style="margin: 0; min-width: 160px;">
-        <span style="font-size: 12px; font-weight: 500; margin-bottom: 4px;">筛选员工</span>
+        <span style="font-size: 12px; font-weight: 500; margin-bottom: 4px;">筛选助手</span>
         <span class="select">
           <select
             .value=${props.filterEmployee}
             @change=${(e: Event) => props.onFilterEmployeeChange((e.target as HTMLSelectElement).value)}
           >
-            <option value="">全部员工</option>
+            <option value="">全部助手</option>
             ${props.employees.map(
               (emp) => html`<option value=${emp.id}>${emp.name || emp.id}</option>`,
             )}
@@ -122,7 +122,7 @@ function renderTasksView(props: EmployeeOperationsProps) {
           <thead>
             <tr style="background: var(--bg-header); border-bottom: 1px solid var(--border-color); font-size: 12px; color: var(--text-muted);">
               <th style="padding: 12px 16px; font-weight: 600;">任务 ID</th>
-              <th style="padding: 12px 16px; font-weight: 600;">执行员工</th>
+              <th style="padding: 12px 16px; font-weight: 600;">执行助手</th>
               <th style="padding: 12px 16px; font-weight: 600;">归属技术域</th>
               <th style="padding: 12px 16px; font-weight: 600;">服务能力域</th>
               <th style="padding: 12px 16px; font-weight: 600;">关联对象</th>
@@ -353,7 +353,7 @@ function renderTaskDetailsModal(task: EmployeeTask, props: EmployeeOperationsPro
           <!-- 元数据网格 -->
           <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; background: var(--bg-header); padding: 12px; border-radius: 8px; border: 1px solid var(--border-color);">
             <div>
-              <span class="muted" style="font-size: 11px; display: block;">执行员工</span>
+              <span class="muted" style="font-size: 11px; display: block;">执行助手</span>
               <span style="font-size: 13px; font-weight: 500;">${empName}</span>
             </div>
             <div>

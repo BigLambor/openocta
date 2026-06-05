@@ -8,6 +8,7 @@ import (
 
 	"github.com/openocta/openocta/pkg/gateway/handlers"
 	"github.com/openocta/openocta/pkg/ops"
+	"github.com/openocta/openocta/pkg/rbac"
 )
 
 func opsWriteJSON(w http.ResponseWriter, status int, v interface{}) {
@@ -23,17 +24,54 @@ func opsWriteError(w http.ResponseWriter, status int, msg string) {
 	opsWriteJSON(w, status, map[string]string{"error": msg})
 }
 
+func userHasDomainPermission(session *rbac.UserSession, domain string) bool {
+	if session == nil || session.RoleName == "admin" {
+		return true
+	}
+	for _, p := range session.Permissions {
+		if p == "menu:"+domain {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Server) handleOpsListClusters(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	domain := strings.TrimSpace(r.URL.Query().Get("domain"))
+	if domain == "all" {
+		domain = ""
+	}
+
+	session := GetUserSession(r)
+	if session != nil && session.RoleName != "admin" {
+		if domain != "" {
+			if !userHasDomainPermission(session, domain) {
+				opsWriteError(w, http.StatusForbidden, "没有该技术域的访问权限")
+				return
+			}
+		}
+	}
+
 	list, err := ops.ListClusters(domain)
 	if err != nil {
 		opsWriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
+	if session != nil && session.RoleName != "admin" {
+		filtered := make([]ops.Cluster, 0)
+		for _, c := range list {
+			if userHasDomainPermission(session, c.Domain) {
+				filtered = append(filtered, c)
+			}
+		}
+		list = filtered
+	}
+
 	opsWriteJSON(w, http.StatusOK, map[string]interface{}{
 		"clusters": list,
 		"total":    len(list),
@@ -55,6 +93,15 @@ func (s *Server) handleOpsGetCluster(w http.ResponseWriter, r *http.Request) {
 		opsWriteError(w, http.StatusNotFound, err.Error())
 		return
 	}
+
+	session := GetUserSession(r)
+	if session != nil && session.RoleName != "admin" {
+		if !userHasDomainPermission(session, c.Domain) {
+			opsWriteError(w, http.StatusForbidden, "没有该技术域的访问权限")
+			return
+		}
+	}
+
 	opsWriteJSON(w, http.StatusOK, c)
 }
 
@@ -161,7 +208,41 @@ func (s *Server) handleOpsDashboardSummary(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	opsWriteJSON(w, http.StatusOK, ops.BuildDashboardSummaryWithContext(r.Context()))
+	summary := ops.BuildDashboardSummaryWithContext(r.Context())
+
+	session := GetUserSession(r)
+	if session != nil && session.RoleName != "admin" {
+		filteredDomains := make([]ops.DomainHealthSummary, 0)
+		var totalClusters, healthyClusters, warningClusters, criticalClusters int
+
+		for _, d := range summary.Domains {
+			if userHasDomainPermission(session, d.Domain) {
+				filteredDomains = append(filteredDomains, d)
+				totalClusters += d.ClusterCount
+				healthyClusters += d.HealthyCount
+				warningClusters += d.WarningCount
+				criticalClusters += d.CriticalCount
+			}
+		}
+
+		summary.Domains = filteredDomains
+		summary.TotalClusters = totalClusters
+		summary.HealthyClusters = healthyClusters
+		summary.WarningClusters = warningClusters
+		summary.CriticalClusters = criticalClusters
+
+		// Recalculate pending alerts based on user permissions
+		alertsList := ops.ListAlertGroups("", "")
+		var pendingAlerts int
+		for _, g := range alertsList.Groups {
+			if userHasDomainPermission(session, g.Domain) && (g.Status == ops.AlertStatusActive || g.Status == ops.AlertStatusAnalyzing) {
+				pendingAlerts++
+			}
+		}
+		summary.PendingAlerts = pendingAlerts
+	}
+
+	opsWriteJSON(w, http.StatusOK, summary)
 }
 
 func (s *Server) handleOpsListAlertGroups(w http.ResponseWriter, r *http.Request) {
@@ -171,7 +252,54 @@ func (s *Server) handleOpsListAlertGroups(w http.ResponseWriter, r *http.Request
 	}
 	domain := strings.TrimSpace(r.URL.Query().Get("domain"))
 	status := strings.TrimSpace(r.URL.Query().Get("status"))
-	opsWriteJSON(w, http.StatusOK, ops.ListAlertGroups(domain, status))
+	if domain == "all" {
+		domain = ""
+	}
+
+	session := GetUserSession(r)
+	if session != nil && session.RoleName != "admin" {
+		if domain != "" {
+			if !userHasDomainPermission(session, domain) {
+				opsWriteError(w, http.StatusForbidden, "没有该技术域的访问权限")
+				return
+			}
+		}
+	}
+
+	res := ops.ListAlertGroups(domain, status)
+
+	if session != nil && session.RoleName != "admin" {
+		filtered := make([]ops.AlertGroup, 0)
+		var originalTotal int
+		pendingActive := 0
+		for _, g := range res.Groups {
+			if userHasDomainPermission(session, g.Domain) {
+				filtered = append(filtered, g)
+				originalTotal += g.OriginalCount
+				if g.Status == ops.AlertStatusActive || g.Status == ops.AlertStatusAnalyzing {
+					pendingActive++
+				}
+			}
+		}
+
+		merged := len(filtered)
+		var rate float64
+		if originalTotal > 0 && merged > 0 {
+			rate = (1 - float64(merged)/float64(originalTotal)) * 100
+			if rate < 0 {
+				rate = 0
+			}
+		}
+
+		res.Groups = filtered
+		res.Total = merged
+		res.OriginalTotal = originalTotal
+		res.MergedTotal = merged
+		res.ReductionRate = rate
+		res.PendingActive = pendingActive
+	}
+
+	opsWriteJSON(w, http.StatusOK, res)
 }
 
 func (s *Server) handleOpsGetAlertGroup(w http.ResponseWriter, r *http.Request) {
@@ -189,6 +317,15 @@ func (s *Server) handleOpsGetAlertGroup(w http.ResponseWriter, r *http.Request) 
 		opsWriteError(w, http.StatusNotFound, err.Error())
 		return
 	}
+
+	session := GetUserSession(r)
+	if session != nil && session.RoleName != "admin" {
+		if !userHasDomainPermission(session, g.Domain) {
+			opsWriteError(w, http.StatusForbidden, "没有该技术域的访问权限")
+			return
+		}
+	}
+
 	opsWriteJSON(w, http.StatusOK, g)
 }
 
@@ -202,16 +339,31 @@ func (s *Server) handleOpsPatchAlertGroup(w http.ResponseWriter, r *http.Request
 		opsWriteError(w, http.StatusBadRequest, "缺少告警组 ID")
 		return
 	}
+
+	g, err := ops.GetAlertGroup(id)
+	if err != nil {
+		opsWriteError(w, http.StatusNotFound, err.Error())
+		return
+	}
+
+	session := GetUserSession(r)
+	if session != nil && session.RoleName != "admin" {
+		if !userHasDomainPermission(session, g.Domain) {
+			opsWriteError(w, http.StatusForbidden, "没有该技术域的访问权限")
+			return
+		}
+	}
+
 	var patch ops.AlertGroupPatch
 	if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
 		opsWriteError(w, http.StatusBadRequest, "无效的 JSON 格式")
 		return
 	}
 	operator := "system"
-	if session := GetUserSession(r); session != nil {
+	if session != nil {
 		operator = session.Username
 	}
-	g, err := ops.PatchAlertGroup(id, patch, operator)
+	updatedGroup, err := ops.PatchAlertGroup(id, patch, operator)
 	if err != nil {
 		status := http.StatusBadRequest
 		if strings.Contains(err.Error(), "不存在") {
@@ -220,7 +372,7 @@ func (s *Server) handleOpsPatchAlertGroup(w http.ResponseWriter, r *http.Request
 		opsWriteError(w, status, err.Error())
 		return
 	}
-	opsWriteJSON(w, http.StatusOK, g)
+	opsWriteJSON(w, http.StatusOK, updatedGroup)
 }
 
 func (s *Server) handleOpsInspectionIMStatus(w http.ResponseWriter, r *http.Request) {

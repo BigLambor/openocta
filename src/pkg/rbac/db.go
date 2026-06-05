@@ -14,6 +14,11 @@ import (
 
 var db *sql.DB
 
+// GetDB returns the underlying database connection.
+func GetDB() *sql.DB {
+	return db
+}
+
 // InitDB initializes the RBAC database and pre-seeds it if empty.
 func InitDB(stateDir string) error {
 	dbPath := filepath.Join(stateDir, "rbac.db")

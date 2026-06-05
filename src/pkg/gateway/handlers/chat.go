@@ -960,6 +960,9 @@ func updateSessionAfterRun(ctx *Context, sessionKey string, sessionID string, se
 			if isCronSessionKey(sessionKey) {
 				triggerType = "cron"
 				operator = "cron"
+			} else if strings.Contains(strings.ToLower(sessionKey), "alert") || strings.Contains(strings.ToLower(sessionID), "alert") {
+				triggerType = "alert"
+				operator = "alert"
 			}
 
 			if strings.Contains(strings.ToLower(outputMsg), "[错误]") || strings.Contains(strings.ToLower(outputMsg), "failed") {
@@ -970,6 +973,32 @@ func updateSessionAfterRun(ctx *Context, sessionKey string, sessionID string, se
 			conclusion = outputMsg
 			if len(conclusion) > 300 {
 				conclusion = conclusion[:297] + "..."
+			}
+
+			var taskMetrics employees.EmployeeTaskMetrics
+			if triggerType == "alert" {
+				if alertGroup, err := ops.GetAlertGroup(sessionID); err == nil {
+					taskMetrics.RawAlertCount = alertGroup.OriginalCount
+					taskMetrics.ReducedAlertCount = alertGroup.ReducedTo
+					if alertGroup.CreatedAtMs > 0 {
+						taskMetrics.MTTAMs = finishedAt - alertGroup.CreatedAtMs
+					}
+					taskMetrics.SavedHours = float64(alertGroup.OriginalCount) * 0.15
+					if taskMetrics.SavedHours < 0.25 {
+						taskMetrics.SavedHours = 0.25
+					}
+				} else {
+					taskMetrics.RawAlertCount = 1
+					taskMetrics.ReducedAlertCount = 1
+					taskMetrics.SavedHours = 0.25
+				}
+				taskMetrics.CostUSD = 0.05
+			} else if triggerType == "cron" || capKey == employees.CapabilityHealthInspection {
+				taskMetrics.SavedHours = 1.0
+				taskMetrics.CostUSD = 0.08
+			} else {
+				taskMetrics.SavedHours = 0.5
+				taskMetrics.CostUSD = 0.03
 			}
 
 			task := &employees.EmployeeTask{
@@ -992,6 +1021,7 @@ func updateSessionAfterRun(ctx *Context, sessionKey string, sessionID string, se
 				FinishedAt:      finishedAt,
 				Operator:        operator,
 				Evaluation:      employees.EvaluationUnrated,
+				Metrics:         taskMetrics,
 			}
 			_ = employees.SaveTask(task, env)
 		}

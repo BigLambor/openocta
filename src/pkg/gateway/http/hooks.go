@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/openocta/openocta/pkg/automation"
 	"github.com/openocta/openocta/pkg/config"
 	"github.com/openocta/openocta/pkg/gateway/handlers"
 	"github.com/openocta/openocta/pkg/logging"
@@ -517,6 +518,15 @@ func triggerMergedAlertAnalysis(ctx *handlers.Context, batch *alertBatch) {
 		hooksLog.Warn("failed to persist alert group: %v", err)
 	}
 
+	sessionKey := batch.SessionKey
+	employeeID, matched := automation.MatchAlert(recorded.Domain, recorded.Severity, recorded.Title)
+	if matched {
+		sessionKey = fmt.Sprintf("agent:main:employee:%s:run:%s", employeeID, recorded.ID)
+		if err := ops.UpdateAlertGroupSessionKey(recorded.ID, sessionKey); err != nil {
+			hooksLog.Warn("failed to update alert group session key: %v", err)
+		}
+	}
+
 	builder := &strings.Builder{}
 	builder.WriteString("You are a senior SRE/ops alert analysis assistant. ")
 	builder.WriteString("A batch of merged alert events has occurred. Please analyze them collectively to identify potential root cause and assess impact.\n\n")
@@ -589,10 +599,11 @@ func triggerMergedAlertAnalysis(ctx *handlers.Context, batch *alertBatch) {
 	_ = ctx.HooksAgent(handlers.HooksAgentParams{
 		Message:    builder.String(),
 		Name:       "AlertGroup",
-		SessionKey: batch.SessionKey,
+		SessionKey: sessionKey,
 		WakeMode:   "now",
 		Deliver:    true,
 		Channel:    channel,
 		To:         to,
 	})
 }
+

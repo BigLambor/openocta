@@ -382,7 +382,7 @@ export function renderEmployeeMarket(props: EmployeeMarketProps) {
             ${props.loading
               ? html`<div class="emp-loading">加载中...</div>`
               : filteredItems.length === 0 && installedItems.length === 0
-                ? html`<div class="emp-empty">暂无匹配的数字员工</div>`
+                ? html`<div class="emp-empty">暂无匹配的助手模板</div>`
                 : nothing}
           </div>
         </div>

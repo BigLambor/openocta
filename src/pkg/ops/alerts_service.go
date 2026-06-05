@@ -1,6 +1,7 @@
 package ops
 
 import (
+	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -45,7 +46,118 @@ func InitAlertsStore(stateDir string) error {
 
 	stateDirRoot = stateDir
 	alertsPath = filepath.Join(stateDir, "ops", "alerts.json")
-	return loadAlertsLocked()
+	err := loadAlertsLocked()
+	if err != nil {
+		return err
+	}
+
+	if len(alertGroups) == 0 && flag.Lookup("test.v") == nil {
+		now := nowMs()
+		alertGroups = []AlertGroup{
+			{
+				ID:            "alert-group-hadoop-01",
+				Source:        "prometheus",
+				Domain:        DomainHadoop,
+				Title:         "HDFS NameNode 内存占用过高",
+				Severity:      "warning",
+				Status:        AlertStatusActive,
+				OriginalCount: 3,
+				ReducedTo:     1,
+				CreatedAtMs:   now - 3600000,
+				UpdatedAtMs:   now - 3600000,
+				Alertname:     "HDFSNameNodeHeapUsageHigh",
+				Service:       "HDFS",
+				Instance:      "nn-prod-01",
+				ClusterID:     "cluster-bch-prod-a",
+				Component:     "NameNode",
+				Timeline: []AlertTimelineEvent{
+					{Type: "created", Operator: "system", TimestampMs: now - 3600000, Message: "告警组已创建"},
+				},
+			},
+			{
+				ID:            "alert-group-gbase-01",
+				Source:        "gbase-monitor",
+				Domain:        DomainGBase,
+				Title:         "GBase 数据库连接池占满告警",
+				Severity:      "critical",
+				Status:        AlertStatusActive,
+				OriginalCount: 5,
+				ReducedTo:     1,
+				CreatedAtMs:   now - 1800000,
+				UpdatedAtMs:   now - 1800000,
+				Alertname:     "GBaseConnectionPoolExhausted",
+				Service:       "GBase",
+				Instance:      "gbase-prod-01",
+				ClusterID:     "cluster-gbase-prod",
+				Component:     "ConnectionPool",
+				Timeline: []AlertTimelineEvent{
+					{Type: "created", Operator: "system", TimestampMs: now - 1800000, Message: "告警组已创建"},
+				},
+			},
+			{
+				ID:            "alert-group-fi-01",
+				Source:        "fi-manager",
+				Domain:        DomainFI,
+				Title:         "FusionInsight YARN root.default 队列资源耗尽",
+				Severity:      "warning",
+				Status:        AlertStatusActive,
+				OriginalCount: 2,
+				ReducedTo:     1,
+				CreatedAtMs:   now - 900000,
+				UpdatedAtMs:   now - 900000,
+				Alertname:     "FIYarnQueueExhausted",
+				Service:       "YARN",
+				Instance:      "fi-yarn-rm-01",
+				ClusterID:     "cluster-fi-prod",
+				Component:     "ResourceManager",
+				Timeline: []AlertTimelineEvent{
+					{Type: "created", Operator: "system", TimestampMs: now - 900000, Message: "告警组已创建"},
+				},
+			},
+			{
+				ID:            "alert-group-gov-01",
+				Source:        "governance-lineage",
+				Domain:        DomainGovernance,
+				Title:         "开发治理平台数据血缘解析中断异常",
+				Severity:      "warning",
+				Status:        AlertStatusActive,
+				OriginalCount: 1,
+				ReducedTo:     1,
+				CreatedAtMs:   now - 600000,
+				UpdatedAtMs:   now - 600000,
+				Alertname:     "LineageParsingInterrupted",
+				Service:       "Metadata",
+				Instance:      "gov-lineage-01",
+				ClusterID:     "cluster-gov-platform",
+				Component:     "LineageEngine",
+				Timeline: []AlertTimelineEvent{
+					{Type: "created", Operator: "system", TimestampMs: now - 600000, Message: "告警组已创建"},
+				},
+			},
+			{
+				ID:            "alert-group-dataapps-01",
+				Source:        "scheduler-dataapp",
+				Domain:        DomainDataApps,
+				Title:         "核心数据 App (financial_report_daily) 出现 SLA 逾期告警",
+				Severity:      "critical",
+				Status:        AlertStatusActive,
+				OriginalCount: 1,
+				ReducedTo:     1,
+				CreatedAtMs:   now - 300000,
+				UpdatedAtMs:   now - 300000,
+				Alertname:     "DataAppSLABreach",
+				Service:       "Scheduler",
+				Instance:      "scheduler-prod-01",
+				ClusterID:     "cluster-dataapp-scheduler",
+				Component:     "SLA-Monitor",
+				Timeline: []AlertTimelineEvent{
+					{Type: "created", Operator: "system", TimestampMs: now - 300000, Message: "告警组已创建"},
+				},
+			},
+		}
+		_ = persistAlertsLocked()
+	}
+	return nil
 }
 
 // MergedAlertInput is one alert in a merged batch (from hooks).
@@ -469,4 +581,20 @@ func readAssistantMarkdown(sessionKey string) string {
 		}
 	}
 	return strings.TrimSpace(lastAssistant)
+}
+
+// UpdateAlertGroupSessionKey updates the session key of a recorded alert group.
+func UpdateAlertGroupSessionKey(id string, sessionKey string) error {
+	alertsMu.Lock()
+	defer alertsMu.Unlock()
+
+	id = strings.TrimSpace(id)
+	for i, g := range alertGroups {
+		if g.ID == id {
+			alertGroups[i].SessionKey = sessionKey
+			alertGroups[i].UpdatedAtMs = nowMs()
+			return persistAlertsLocked()
+		}
+	}
+	return fmt.Errorf("告警组不存在: %s", id)
 }
