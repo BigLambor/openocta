@@ -7,6 +7,7 @@ import {
   renderOpsViewNav,
   type OpsViewNavItem,
 } from "../components/ops-shell.ts";
+import { renderOpsContextSidebar, type SidebarItem } from "../components/ops-context-sidebar.ts";
 
 export type WorkbenchAlertGroup = {
   id: string;
@@ -34,6 +35,14 @@ export type WorkbenchInspection = {
 
 export type WorkbenchProps = {
   domainName: string;
+  selectedDomain?: string;
+  user?: any;
+  onDomainChange?: (domain: string) => void;
+  domainSummary?: {
+    alertsCount?: number;
+    clustersCount?: number;
+    score?: number | null;
+  };
   assistantName?: string;
   assistantPersona?: string;
   domainFilter?: TemplateResult;
@@ -535,46 +544,65 @@ export function renderWorkbench(props: WorkbenchProps) {
 
   const meta = WORKBENCH_VIEW_META[activeView];
 
+  const sidebarItems: SidebarItem<WorkbenchView>[] = WORKBENCH_VIEWS.map((v) => {
+    if (v.id === "events") {
+      return { ...v, badge: props.alertGroups.length };
+    }
+    return v;
+  });
+
   return html`
-    <main class="ops-dashboard ops-shell">
-      ${renderOpsShellHeader({
-        kicker: `运维工作台 · ${props.domainName}`,
-        title: meta.title,
-        description: meta.description,
-        toolbar:
-          activeView === "events"
-            ? html`
-                <button
-                  class="ops-btn ops-btn--primary"
-                  type="button"
-                  ?disabled=${props.alertsLoading}
-                  @click=${() => props.onRefreshAlerts?.()}
-                >
-                  ${icons.refreshCw} 刷新告警
-                </button>
-              `
-            : activeView === "inspection"
-              ? html`
-                  <button
-                    class="ops-btn ops-btn--primary ${props.isInspecting ? "btn--loading" : ""}"
-                    type="button"
-                    ?disabled=${props.isInspecting || props.canInspect === false}
-                    title=${props.canInspect === false ? "当前账号无 ops:inspect 权限" : ""}
-                    @click=${() => props.onRunInspection?.()}
-                  >
-                    ${props.isInspecting ? icons.loader : icons.zap}
-                    ${props.isInspecting ? "巡检中..." : "一键巡检"}
-                  </button>
-                `
-              : nothing,
+    <div class="ops-workbench-layout" style="display: flex; height: 100%; width: 100%;">
+      ${renderOpsContextSidebar({
+        selectedDomain: props.selectedDomain || "all",
+        user: props.user,
+        items: sidebarItems,
+        activeItemId: activeView,
+        onItemChange: (id) => props.onViewChange?.(id as WorkbenchView),
+        onDomainChange: (domain) => props.onDomainChange?.(domain),
+        domainSummary: props.domainSummary,
+        includeAllDomain: true,
       })}
-      ${props.domainFilter ?? nothing}
-      ${renderOpsViewNav(WORKBENCH_VIEWS, activeView, (view) => props.onViewChange?.(view))}
-      ${activeView === "events"
-        ? renderEventsView(props, active, originalTotal, criticalCount, warningCount)
-        : activeView === "inspection"
-          ? renderInspectionView(props)
-          : renderSkeletonView(props, activeView)}
-    </main>
+      <div style="flex: 1; min-width: 0; overflow-y: auto;">
+        <main class="ops-dashboard ops-shell" style="height: 100%; box-sizing: border-box; display: flex; flex-direction: column;">
+          ${renderOpsShellHeader({
+            kicker: `运维工作台 · ${props.domainName}`,
+            title: meta.title,
+            description: meta.description,
+            toolbar:
+              activeView === "events"
+                ? html`
+                    <button
+                      class="ops-btn ops-btn--primary"
+                      type="button"
+                      ?disabled=${props.alertsLoading}
+                      @click=${() => props.onRefreshAlerts?.()}
+                    >
+                      ${icons.refreshCw} 刷新告警
+                    </button>
+                  `
+                : activeView === "inspection"
+                  ? html`
+                      <button
+                        class="ops-btn ops-btn--primary ${props.isInspecting ? "btn--loading" : ""}"
+                        type="button"
+                        ?disabled=${props.isInspecting || props.canInspect === false}
+                        title=${props.canInspect === false ? "当前账号无 ops:inspect 权限" : ""}
+                        @click=${() => props.onRunInspection?.()}
+                      >
+                        ${props.isInspecting ? icons.loader : icons.zap}
+                        ${props.isInspecting ? "巡检中..." : "一键巡检"}
+                      </button>
+                    `
+                  : nothing,
+          })}
+          ${activeView === "events"
+            ? renderEventsView(props, active, originalTotal, criticalCount, warningCount)
+            : activeView === "inspection"
+              ? renderInspectionView(props)
+              : renderSkeletonView(props, activeView)}
+        </main>
+      </div>
+    </div>
   `;
 }

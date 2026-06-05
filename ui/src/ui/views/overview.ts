@@ -32,6 +32,7 @@ export type OverviewProps = {
   onOpenAssets?: () => void;
   onOpenConfig?: () => void;
   onNavigateDomain?: (tab: Tab) => void;
+  onOpenDomainAssets?: (tab: Tab) => void;
   onOpenScheduledTasks?: () => void;
   onRunGlobalInspection?: () => void;
   onOpenPendingAlerts?: () => void;
@@ -220,17 +221,32 @@ export function renderOverview(props: OverviewProps) {
                         <span class="domain-score domain-score--muted">—</span>
                       </div>
                       <p class="domain-card-hint">待接入监控指标</p>
-                      ${props.onNavigateDomain
-                        ? html`
-                            <button
-                              type="button"
-                              class="ops-btn domain-card-link"
-                              @click=${() => props.onNavigateDomain!(d.tab)}
-                            >
-                              进入 ${d.name}
-                            </button>
-                          `
-                        : nothing}
+                      <div class="domain-card-actions" style="display: flex; gap: 8px; margin-top: 12px;">
+                        ${props.onNavigateDomain
+                          ? html`
+                              <button
+                                type="button"
+                                class="ops-btn ops-btn--primary domain-card-link"
+                                style="flex: 1; padding: 6px 12px; font-size: 13px;"
+                                @click=${() => props.onNavigateDomain!(d.tab)}
+                              >
+                                进入域详情
+                              </button>
+                            `
+                          : nothing}
+                        ${props.onOpenDomainAssets
+                          ? html`
+                              <button
+                                type="button"
+                                class="ops-btn domain-card-link"
+                                style="flex: 1; padding: 6px 12px; font-size: 13px;"
+                                @click=${() => props.onOpenDomainAssets!(d.tab)}
+                              >
+                                查看资产
+                              </button>
+                            `
+                          : nothing}
+                      </div>
                     </div>
                   `,
                 )}
@@ -270,27 +286,70 @@ export function renderOverview(props: OverviewProps) {
                             ${score != null ? `${score}分` : "—"}
                           </span>
                         </div>
-                        <div class="health-bar-container">
-                          <div
-                            class="health-bar ${scoreClass}"
-                            style="width: ${score != null ? Math.min(score, 100) : 0}%;"
-                          ></div>
-                        </div>
+                        ${d.tab === "hadoop"
+                          ? html`
+                              <div class="domain-sub-health" style="margin: 8px 0; font-size: 11px; display: flex; flex-direction: column; gap: 4px; color: var(--text-muted, #666);">
+                                <div style="display: flex; justify-content: space-between; align-items: center; line-height: 1.2;">
+                                  <span>作业健康 (Flink/Spark)</span>
+                                  <span style="font-weight: 600; color: #4caf50;">94%</span>
+                                </div>
+                                <div class="health-bar-container" style="height: 3px; margin: 0 0 4px; background: rgba(0,0,0,0.06); border-radius: 2px;">
+                                  <div class="health-bar ok" style="width: 94%; height: 100%; background: #4caf50; border-radius: 2px;"></div>
+                                </div>
+                                <div style="display: flex; justify-content: space-between; align-items: center; line-height: 1.2;">
+                                  <span>存储健康 (HDFS)</span>
+                                  <span style="font-weight: 600; color: #f44336;">68%</span>
+                                </div>
+                                <div class="health-bar-container" style="height: 3px; margin: 0 0 4px; background: rgba(0,0,0,0.06); border-radius: 2px;">
+                                  <div class="health-bar danger" style="width: 68%; height: 100%; background: #f44336; border-radius: 2px;"></div>
+                                </div>
+                                <div style="display: flex; justify-content: space-between; align-items: center; line-height: 1.2;">
+                                  <span>服务健康 (YARN/HBase)</span>
+                                  <span style="font-weight: 600; color: #4caf50;">96%</span>
+                                </div>
+                                <div class="health-bar-container" style="height: 3px; margin: 0; background: rgba(0,0,0,0.06); border-radius: 2px;">
+                                  <div class="health-bar ok" style="width: 96%; height: 100%; background: #4caf50; border-radius: 2px;"></div>
+                                </div>
+                              </div>
+                            `
+                          : html`
+                              <div class="health-bar-container">
+                                <div
+                                  class="health-bar ${scoreClass}"
+                                  style="width: ${score != null ? Math.min(score, 100) : 0}%;"
+                                ></div>
+                              </div>
+                            `}
                         <div class="domain-stats">
                           <span>${d.clusterCount ?? 0} 个集群</span>
                           <span>${d.note ?? "—"}</span>
                         </div>
-                        ${props.onNavigateDomain
-                          ? html`
-                              <button
-                                type="button"
-                                class="ops-btn domain-card-link"
-                                @click=${() => props.onNavigateDomain!(d.tab)}
-                              >
-                                打开运维域
-                              </button>
-                            `
-                          : nothing}
+                        <div class="domain-card-actions" style="display: flex; gap: 8px; margin-top: 12px;">
+                          ${props.onNavigateDomain
+                            ? html`
+                                <button
+                                  type="button"
+                                  class="ops-btn ops-btn--primary domain-card-link"
+                                  style="flex: 1; padding: 6px 12px; font-size: 13px;"
+                                  @click=${() => props.onNavigateDomain!(d.tab)}
+                                >
+                                  进入域详情
+                                </button>
+                              `
+                            : nothing}
+                          ${props.onOpenDomainAssets
+                            ? html`
+                                <button
+                                  type="button"
+                                  class="ops-btn domain-card-link"
+                                  style="flex: 1; padding: 6px 12px; font-size: 13px;"
+                                  @click=${() => props.onOpenDomainAssets!(d.tab)}
+                                >
+                                  查看资产
+                                </button>
+                              `
+                            : nothing}
+                        </div>
                       </div>
                     `;
                   })}

@@ -31,6 +31,7 @@ export type AssetManagementProps = {
     gbaseDsnRef: string;
     credentialsRef: string;
   }) => Promise<void>;
+  onAnalyzeAsset?: (params: { domain: string; assetRef: string; type: string; summary: string }) => void;
 };
 
 const DOMAIN_OPTIONS = [
@@ -215,6 +216,7 @@ export function renderAssetManagement(props: AssetManagementProps = {}) {
                       <th>核心组件</th>
                       <th>纳管状态</th>
                       <th>负责人</th>
+                      <th>操作</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -232,6 +234,20 @@ export function renderAssetManagement(props: AssetManagementProps = {}) {
                             </span>
                           </td>
                           <td>${row.owner || "—"}</td>
+                          <td>
+                            <button
+                              class="ops-btn ops-btn--ghost"
+                              style="padding: 2px 6px; font-size: 12px; display: inline-flex; align-items: center; gap: 4px;"
+                              @click=${() => props.onAnalyzeAsset?.({
+                                domain: row.domain,
+                                assetRef: row.name,
+                                type: "cluster",
+                                summary: `集群名称: ${row.name}, 节点规模: ${row.nodeCount}, 组件: ${(row.components ?? []).join(", ")}, 负责人: ${row.owner || "未分配"}`
+                              })}
+                            >
+                              ${icons.messageSquare} AI 分析
+                            </button>
+                          </td>
                         </tr>
                       `,
                     )}

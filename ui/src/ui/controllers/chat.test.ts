@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { handleChatEvent, type ChatEventPayload, type ChatState } from "./chat.ts";
+import { handleChatEvent, buildUnifiedAiContext, type ChatEventPayload, type ChatState } from "./chat.ts";
 
 function createState(overrides: Partial<ChatState> = {}): ChatState {
   return {
@@ -110,3 +110,41 @@ describe("handleChatEvent", () => {
     expect(state.chatStream).toBe(null);
   });
 });
+
+describe("buildUnifiedAiContext", () => {
+  it("constructs correct context map from unified properties", () => {
+    const context = buildUnifiedAiContext({
+      domain: "hadoop",
+      scenario: "diagnosis",
+      capability: "observability-alert",
+      objectRef: "alert:group-001",
+      assetRef: "bch-prod-cluster",
+      severity: "critical",
+      summary: "High disk usage",
+      customField: "extra-value",
+    });
+
+    expect(context).toEqual({
+      domain: "hadoop",
+      workflowType: "diagnosis",
+      capability: "observability-alert",
+      objectType: "alert",
+      objectId: "group-001",
+      cluster: "bch-prod-cluster",
+      severity: "critical",
+      summary: "High disk usage",
+      customField: "extra-value",
+    });
+  });
+
+  it("handles objectRef without colon separator gracefully", () => {
+    const context = buildUnifiedAiContext({
+      domain: "fi",
+      objectRef: "plain-id",
+    });
+
+    expect(context.objectId).toBe("plain-id");
+    expect(context.objectType).toBe("object");
+  });
+});
+

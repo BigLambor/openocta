@@ -150,6 +150,18 @@ export function renderTechOpsDomain(props: TechOpsDomainProps) {
         </div>
 
         <div class="ops-main-content">
+          <!-- Migrated Warning Banner -->
+          <div class="ops-banner warning" style="margin: 12px 16px; border-radius: 6px; padding: 10px 16px; background: rgba(255, 152, 0, 0.08); border: 1px dashed rgba(255, 152, 0, 0.4); display: flex; justify-content: space-between; align-items: center; box-sizing: border-box;">
+            <div style="display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 500; color: #e65100;">
+              <span style="display: flex;">${icons.info}</span>
+              <span><strong>升级提示</strong>：该独立入口已合并。技术域的告警、巡检、优化和数字员工等能力，已全面升级迁移至<strong>“运维工作台”</strong>与<strong>“技术域详情”</strong>。</span>
+            </div>
+            <div style="display: flex; gap: 8px; flex-shrink: 0;">
+              <button type="button" class="ops-btn ops-btn--primary" style="padding: 4px 10px; font-size: 12px;" @click=${() => props.host?.setTab?.("domainInsight")}>进入域详情</button>
+              <button type="button" class="ops-btn" style="padding: 4px 10px; font-size: 12px;" @click=${() => props.host?.setTab?.("workbench")}>进入工作台</button>
+            </div>
+          </div>
+
           <div class="ops-main-header">
             <div class="ops-main-header__left">
               <span class="ops-main-header__breadcrumb-domain">${props.domainName}</span>

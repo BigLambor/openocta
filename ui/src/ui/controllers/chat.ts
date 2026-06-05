@@ -232,3 +232,62 @@ export function handleChatEvent(state: ChatState, payload?: ChatEventPayload) {
   }
   return payload.state;
 }
+
+export type UnifiedAiContextParams = {
+  domain: string;
+  scenario?: string; // maps to workflowType
+  capability?: string;
+  objectRef?: string; // maps to objectId
+  objectType?: string;
+  assetRef?: string; // maps to cluster
+  severity?: string;
+  summary?: string;
+  [key: string]: unknown;
+};
+
+export function buildUnifiedAiContext(params: UnifiedAiContextParams): Record<string, unknown> {
+  const context: Record<string, unknown> = {
+    domain: params.domain || "hadoop",
+  };
+  
+  if (params.scenario) {
+    context.workflowType = params.scenario;
+  }
+  if (params.capability) {
+    context.capability = params.capability;
+  }
+  if (params.objectRef) {
+    context.objectId = params.objectRef;
+    if (params.objectType) {
+      context.objectType = params.objectType;
+    } else {
+      const match = /^([a-zA-Z0-9_-]+):(.+)$/.exec(params.objectRef);
+      if (match) {
+        context.objectType = match[1];
+        context.objectId = match[2];
+      } else {
+        context.objectType = "object";
+      }
+    }
+  }
+  if (params.assetRef) {
+    context.cluster = params.assetRef;
+    if (params.service) {
+      context.service = params.service;
+    }
+  }
+  if (params.severity) {
+    context.severity = params.severity;
+  }
+  if (params.summary) {
+    context.summary = params.summary;
+  }
+  
+  for (const k of Object.keys(params)) {
+    if (!["domain", "scenario", "capability", "objectRef", "objectType", "assetRef", "severity", "summary"].includes(k)) {
+      context[k] = params[k];
+    }
+  }
+  return context;
+}
+

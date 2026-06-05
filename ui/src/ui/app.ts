@@ -445,6 +445,10 @@ export class OpenClawApp extends LitElement implements NativeDialogInvoker {
     null;
   @state() opsDashboardLoading = false;
   @state() opsDashboardError: string | null = null;
+  @state() opsBchScenarioSummary: import("./controllers/bch-scenario-summary.ts").BchDomainScenarioSummary | null =
+    null;
+  @state() opsBchScenarioSummaryLoading = false;
+  @state() opsBchScenarioSummaryError: string | null = null;
   @state() opsGlobalInspecting = false;
   @state() opsDashboardToast: string | null = null;
 
@@ -770,6 +774,7 @@ export class OpenClawApp extends LitElement implements NativeDialogInvoker {
   basePath = "";
   private popStateHandler = () =>
     onPopStateInternal(this as unknown as Parameters<typeof onPopStateInternal>[0]);
+  private sidebarToggleHandler = () => this.requestUpdate();
   private themeMedia: MediaQueryList | null = null;
   private themeMediaHandler: ((event: MediaQueryListEvent) => void) | null = null;
   private topbarObserver: ResizeObserver | null = null;
@@ -799,6 +804,7 @@ export class OpenClawApp extends LitElement implements NativeDialogInvoker {
     super.connectedCallback();
     registerNativeDialogInvoker(this);
     document.addEventListener("keydown", this.sessionOverflowEscapeHandler);
+    this.addEventListener("sidebar-toggle", this.sidebarToggleHandler);
     void this.initialiseDesktopWindowChrome();
 
     // Initialize layout and routing state
@@ -836,6 +842,7 @@ export class OpenClawApp extends LitElement implements NativeDialogInvoker {
     }
     unregisterNativeDialogInvoker(this);
     document.removeEventListener("keydown", this.sessionOverflowEscapeHandler);
+    this.removeEventListener("sidebar-toggle", this.sidebarToggleHandler);
     this.teardownDesktopWindowChrome();
     handleDisconnected(this as unknown as Parameters<typeof handleDisconnected>[0]);
     super.disconnectedCallback();
@@ -950,6 +957,20 @@ export class OpenClawApp extends LitElement implements NativeDialogInvoker {
       this.opsDashboardSummary = null;
     } finally {
       this.opsDashboardLoading = false;
+    }
+  }
+
+  async loadBchScenarioSummary() {
+    this.opsBchScenarioSummaryLoading = true;
+    this.opsBchScenarioSummaryError = null;
+    try {
+      const { fetchBchDomainScenarioSummary } = await import("./controllers/bch-scenario-summary.ts");
+      this.opsBchScenarioSummary = await fetchBchDomainScenarioSummary(this);
+    } catch (err) {
+      this.opsBchScenarioSummaryError = err instanceof Error ? err.message : String(err);
+      this.opsBchScenarioSummary = null;
+    } finally {
+      this.opsBchScenarioSummaryLoading = false;
     }
   }
 

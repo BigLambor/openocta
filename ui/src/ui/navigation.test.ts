@@ -155,11 +155,13 @@ describe("pathForTab", () => {
     expect(pathForTab("chat")).toBe("/chat");
     expect(pathForTab("overview")).toBe("/overview");
     expect(pathForTab("modelLibrary")).toBe("/model-library");
+    expect(pathForTab("domainInsight", "", "hadoop")).toBe("/overview/domain/hadoop");
   });
 
   it("prepends base path", () => {
     expect(pathForTab("chat", "/ui")).toBe("/ui/chat");
     expect(pathForTab("sessions", "/apps/openclaw")).toBe("/apps/openclaw/sessions");
+    expect(pathForTab("domainInsight", "/ui", "fi")).toBe("/ui/overview/domain/fi");
   });
 });
 
@@ -169,6 +171,7 @@ describe("tabFromPath", () => {
     expect(tabFromPath("/overview")).toBe("overview");
     expect(tabFromPath("/sessions")).toBe("sessions");
     expect(tabFromPath("/model-library")).toBe("modelLibrary");
+    expect(tabFromPath("/overview/domain/hadoop")).toBe("domainInsight");
   });
 
   it("returns message for root path", () => {
@@ -178,6 +181,7 @@ describe("tabFromPath", () => {
   it("handles base paths", () => {
     expect(tabFromPath("/ui/chat", "/ui")).toBe("chat");
     expect(tabFromPath("/apps/openclaw/sessions", "/apps/openclaw")).toBe("sessions");
+    expect(tabFromPath("/ui/overview/domain/fi", "/ui")).toBe("domainInsight");
   });
 
   it("returns null for unknown path", () => {
@@ -187,6 +191,7 @@ describe("tabFromPath", () => {
   it("is case-insensitive", () => {
     expect(tabFromPath("/CHAT")).toBe("chat");
     expect(tabFromPath("/Overview")).toBe("overview");
+    expect(tabFromPath("/Overview/Domain/hadoop")).toBe("domainInsight");
   });
 });
 

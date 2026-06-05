@@ -53,6 +53,7 @@ export type Tab =
   | "llmTrace"
   | "sandbox"
   | "assetManagement"
+  | "domainInsight"
   // New operational technology domains
   | "hadoop"
   | "fi"
@@ -101,6 +102,7 @@ const TAB_PATHS: Record<Tab, string> = {
   llmTrace: "/llm-trace",
   sandbox: "/sandbox",
   assetManagement: "/asset-management",
+  domainInsight: "/overview/domain",
   // New operational technology domains paths
   hadoop: "/hadoop",
   fi: "/fi",
@@ -161,8 +163,12 @@ export function normalizePath(path: string): string {
   return normalized;
 }
 
-export function pathForTab(tab: Tab, basePath = ""): string {
+export function pathForTab(tab: Tab, basePath = "", domainId?: string): string {
   const base = normalizeBasePath(basePath);
+  if (tab === "domainInsight") {
+    const d = domainId || "all";
+    return base ? `${base}/overview/domain/${d}` : `/overview/domain/${d}`;
+  }
   const path = TAB_PATHS[tab];
   return base ? `${base}${path}` : path;
 }
@@ -187,6 +193,9 @@ export function tabFromPath(pathname: string, basePath = ""): Tab | null {
   const legacy = LEGACY_PATH_TO_TAB.get(normalized);
   if (legacy) {
     return legacy;
+  }
+  if (normalized.startsWith("/overview/domain/")) {
+    return "domainInsight";
   }
   return PATH_TO_TAB.get(normalized) ?? null;
 }
@@ -351,6 +360,8 @@ export function titleForTab(tab: Tab) {
       return t("navTitleChat");
     case "overview":
       return "运维驾驶舱";
+    case "domainInsight":
+      return "技术域详情";
     case "workbench":
       return "运维工作台";
     case "assets":
@@ -509,6 +520,8 @@ export function subtitleForTab(tab: Tab) {
       return t("subtitleAgents");
     case "overview":
       return "跨技术域聚合健康度、告警、巡检、容量、任务和自动化执行状态";
+    case "domainInsight":
+      return "技术域运行概览、健康得分与业务场景分析卡片";
     case "techDomains":
       return "从技术域视角进入 BCH、FI、GBase、开发治理与数据 App 运维";
     case "opsCapabilities":

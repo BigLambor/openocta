@@ -270,13 +270,22 @@ export async function refreshActiveTab(host: SettingsHost) {
       app.loadOpsDomainAlerts?.(host.tab) ?? Promise.resolve(),
     ]);
   }
-  if (host.tab === "overview" || host.tab === "techDomains") {
+  if (host.tab === "overview" || host.tab === "techDomains" || host.tab === "domainInsight") {
     await loadOverview(host);
     const app = host as unknown as {
       loadOpsDashboard?: () => Promise<void>;
+      loadOpsDomainAlerts?: (d: string) => Promise<void>;
+      loadOpsDomainClusters?: (d: string) => Promise<void>;
     };
     if (app.loadOpsDashboard) {
       await app.loadOpsDashboard();
+    }
+    if (host.tab === "domainInsight") {
+      const domain = normalizeOpsDomain(host.settings.opsDomain);
+      await Promise.allSettled([
+        app.loadOpsDomainAlerts?.(domain) ?? Promise.resolve(),
+        app.loadOpsDomainClusters?.(domain) ?? Promise.resolve(),
+      ]);
     }
   }
   if (host.tab === "workbench") {
@@ -502,6 +511,20 @@ function collapseLegacyDomainRoute(host: SettingsHost, resolved: Tab): Tab {
   return "assets";
 }
 
+function extractDomainIdFromPathname(pathname: string, basePath = ""): string | null {
+  const base = normalizeBasePath(basePath);
+  let path = pathname || "/";
+  if (base && path.startsWith(`${base}/`)) {
+    path = path.slice(base.length);
+  }
+  const normalized = normalizePath(path).toLowerCase();
+  const prefix = "/overview/domain/";
+  if (normalized.startsWith(prefix)) {
+    return normalized.slice(prefix.length).split("/")[0] || null;
+  }
+  return null;
+}
+
 export function syncTabWithLocation(host: SettingsHost, replace: boolean) {
   if (typeof window === "undefined") {
     return;
@@ -512,12 +535,19 @@ export function syncTabWithLocation(host: SettingsHost, replace: boolean) {
   if (resolved === "config") {
     resolved = "overview";
   }
+  if (resolved === "domainInsight") {
+    const domainId = extractDomainIdFromPathname(window.location.pathname, host.basePath);
+    if (domainId) {
+      applySettings(host, { ...host.settings, opsDomain: normalizeOpsDomain(domainId) });
+    }
+  }
   resolved = collapseLegacyDomainRoute(host, resolved);
   setTabFromRoute(host, resolved);
   const link = applyOpsDeepLinkFromUrl(host as unknown as Parameters<typeof applyOpsDeepLinkFromUrl>[0]);
-  if (link.alertsTab) {
+  if (link.alertsTab || resolved === "domainInsight") {
     const app = host as unknown as { loadOpsDomainAlerts?: (d: string) => Promise<void> };
-    void app.loadOpsDomainAlerts?.(resolved);
+    const targetDomain = normalizeOpsDomain(host.settings.opsDomain);
+    void app.loadOpsDomainAlerts?.(targetDomain);
   }
   syncUrlWithTab(host, resolved, replace);
 }
@@ -548,6 +578,13 @@ export function onPopState(host: SettingsHost) {
   }
   if (domain != null) {
     applySettings(host, { ...host.settings, opsDomain: normalizeOpsDomain(domain) });
+  }
+
+  if (resolved === "domainInsight") {
+    const domainId = extractDomainIdFromPathname(window.location.pathname, host.basePath);
+    if (domainId) {
+      applySettings(host, { ...host.settings, opsDomain: normalizeOpsDomain(domainId) });
+    }
   }
 
   resolved = collapseLegacyDomainRoute(host, resolved);

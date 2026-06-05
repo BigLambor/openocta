@@ -7,7 +7,7 @@ import { refreshChatAvatar } from "./app-chat.ts";
 import { syncUrlWithSessionKey } from "./app-settings.ts";
 import { renderChatControls, renderTab } from "./app-render.helpers.ts";
 import { loadChannels } from "./controllers/channels.ts";
-import { loadChatHistory, sendChatMessage } from "./controllers/chat.ts";
+import { loadChatHistory, sendChatMessage, buildUnifiedAiContext } from "./controllers/chat.ts";
 import { loadDigitalEmployees } from "./controllers/digital-employees.ts";
 import { applyConfig, loadConfig, runUpdate, saveConfig, saveConfigPatch, updateConfigFormValue, removeConfigFormValue } from "./controllers/config.ts";
 import {
@@ -412,6 +412,7 @@ import { renderNativeDialogOverlay } from "./views/native-dialog-overlay.ts";
 import { renderLogs } from "./views/logs.ts";
 import { renderNodes } from "./views/nodes.ts";
 import { renderOverview } from "./views/overview.ts";
+import { renderDomainInsight } from "./views/domain-insight.ts";
 import { renderWorkbench, type WorkbenchInspection, type WorkbenchView } from "./views/workbench.ts";
 import { runWorkbenchAi } from "./controllers/ops-workbench-ai.ts";
 import { renderAssetsView } from "./views/assets-view.ts";
@@ -750,6 +751,7 @@ export function renderApp(state: AppViewState) {
     isOpsDomainPage ||
     state.tab === "techDomains" ||
     state.tab === "overview" ||
+    state.tab === "domainInsight" ||
     state.tab === "workbench" ||
     state.tab === "assets" ||
     state.tab === "opsCapabilities" ||
@@ -1532,6 +1534,10 @@ export function renderApp(state: AppViewState) {
                 onOpenConfig: () => state.setTab("config"),
                 onNavigateDomain: (tab) => {
                   setGlobalOpsDomain(normalizeOpsDomain(tab));
+                  state.setTab("domainInsight");
+                },
+                onOpenDomainAssets: (tab) => {
+                  setGlobalOpsDomain(normalizeOpsDomain(tab));
                   state.setTab("assets");
                 },
                 onOpenScheduledTasks: () => state.setTab("scheduledTasks"),
@@ -1539,6 +1545,97 @@ export function renderApp(state: AppViewState) {
                 onOpenPendingAlerts: () => state.openPendingAlertsFromDashboard(),
                 canInspect: canRunInspection(state.rbacUser),
               })
+            : nothing
+        }
+
+        ${
+          state.tab === "domainInsight"
+            ? (() => {
+                const domain = normalizeOpsDomain(state.settings.opsDomain);
+                if (
+                  domain === "hadoop" &&
+                  !state.opsBchScenarioSummary &&
+                  !state.opsBchScenarioSummaryLoading &&
+                  !state.opsBchScenarioSummaryError
+                ) {
+                  void (state as any).loadBchScenarioSummary?.();
+                }
+                const domainSummary = state.opsDashboardSummary?.domains?.find((d: any) => d.domain === domain) ?? null;
+                const score = domainSummary?.healthScore != null ? Math.round(domainSummary.healthScore) : undefined;
+                const clusterCount = domainSummary?.clusterCount ?? 0;
+                
+                const inspectionJobId = `job-inspect-${domain}`;
+                if (
+                  state.cronRunsJobId !== inspectionJobId &&
+                  !(state as any)._loadingWorkbenchInspectionRuns
+                ) {
+                  (state as any)._loadingWorkbenchInspectionRuns = inspectionJobId;
+                  loadCronRuns(state as any, inspectionJobId).finally(() => {
+                    (state as any)._loadingWorkbenchInspectionRuns = null;
+                  });
+                }
+                const inspections =
+                  state.cronRunsJobId === inspectionJobId
+                    ? mapCronRunsToWorkbenchInspections(domain, state.cronRuns)
+                    : [];
+                
+                const alertGroups = state.opsAlertsByDomain?.[domain] ?? [];
+                
+                return renderDomainInsight({
+                  domain,
+                  connected: state.connected,
+                  loading: state.opsDashboardLoading,
+                  score,
+                  clusterCount,
+                  alertCount: alertGroups.length,
+                  inspections,
+                  alertGroups,
+                  scenarioSummary: domain === "hadoop" ? state.opsBchScenarioSummary : null,
+                  scenarioSummaryLoading: domain === "hadoop" ? state.opsBchScenarioSummaryLoading : false,
+                  scenarioSummaryError: domain === "hadoop" ? state.opsBchScenarioSummaryError : null,
+                  onNavigateTab: (tab, domainContext, view) => {
+                    if (domainContext) {
+                      setGlobalOpsDomain(normalizeOpsDomain(domainContext));
+                    }
+                    if (view && tab === "workbench") {
+                      state.opsSelectedEntityIds = {
+                        ...state.opsSelectedEntityIds,
+                        workbenchView: view as any,
+                      };
+                    }
+                    state.setTab(tab as any);
+                  },
+                  onRunInspection: () => {
+                    void import("./controllers/ops-inspection-run.ts").then(({ runDomainInspectionWithPoll }) => {
+                      return runDomainInspectionWithPoll(state as any, inspectionJobId, domain).catch((err) => {
+                        console.error("Failed to run domain-insight inspection:", err);
+                      });
+                    });
+                  },
+                  isInspecting: state.opsIsInspecting[domain] || false,
+                  canInspect: canRunInspection(state.rbacUser),
+                  onAnalyzeScenario: async ({ scenario, capability, initialQuestion, summary }) => {
+                    const sessionKey = `agent:main:ops:${domain}`;
+                    state.applySettings({
+                      ...state.settings,
+                      sessionKey,
+                      lastActiveSessionKey: sessionKey,
+                    });
+                    state.setTab("message");
+                    state.chatMessage = initialQuestion;
+                    await loadChatHistory(state);
+                    await sendChatMessage(state, initialQuestion, [], state.chatModelRef ?? null, {
+                      context: buildUnifiedAiContext({
+                        domain,
+                        scenario,
+                        capability,
+                        summary,
+                      }),
+                    });
+                    state.chatMessage = "";
+                  },
+                });
+              })()
             : nothing
         }
 
@@ -1688,19 +1785,23 @@ export function renderApp(state: AppViewState) {
                     await nativeAlert(err instanceof Error ? err.message : String(err));
                   }
                 };
+                const domainSummaryRaw = state.opsDashboardSummary?.domains?.find((d: any) => d.domain === domain) ?? null;
+                const domainSummary = {
+                  score: domainSummaryRaw?.healthScore != null ? Math.round(domainSummaryRaw.healthScore) : undefined,
+                  clustersCount: domainSummaryRaw?.clusterCount ?? 0,
+                  alertsCount: alertGroups.length,
+                };
                 const workbenchAssistant = opsAssistantForDomain(
                   alertGroups.find((g) => g.id === selectedId)?.domain || domainForAlerts,
                 );
                 return renderWorkbench({
                   domainName: opsDomainLabel(domainForAlerts),
+                  selectedDomain: selectedOpsDomain,
+                  user: state.rbacUser,
+                  onDomainChange: setGlobalOpsDomain,
+                  domainSummary,
                   assistantName: workbenchAssistant.name,
                   assistantPersona: workbenchAssistant.persona,
-                  domainFilter: renderDomainFilter({
-                    selectedDomain: selectedOpsDomain,
-                    user: state.rbacUser,
-                    includeAll: true,
-                    onChange: setGlobalOpsDomain,
-                  }),
                   alertsLoading: state.opsAlertsLoading?.[domainForAlerts] ?? false,
                   alertsError: state.opsAlertsError?.[domainForAlerts] ?? null,
                   alertGroups,
@@ -1854,6 +1955,22 @@ export function renderApp(state: AppViewState) {
                     assetsView: view,
                   };
                 },
+                searchQuery: state.opsSelectedEntityIds?.assetsSearch || "",
+                statusFilter: state.opsSelectedEntityIds?.assetsStatus || "all",
+                onSearchChange: (q) => {
+                  state.opsSelectedEntityIds = {
+                    ...state.opsSelectedEntityIds,
+                    assetsSearch: q,
+                  };
+                  state.requestUpdate();
+                },
+                onStatusFilterChange: (s) => {
+                  state.opsSelectedEntityIds = {
+                    ...state.opsSelectedEntityIds,
+                    assetsStatus: s,
+                  };
+                  state.requestUpdate();
+                },
                 onSyncCmdb:
                   state.rbacUser?.roleName === "admin" ||
                   (state.rbacUser?.permissions?.includes("menu:config") ?? false)
@@ -1883,6 +2000,29 @@ export function renderApp(state: AppViewState) {
                   });
                   await (state as any).loadOpsClusters();
                   await (state as any).loadOpsDashboard();
+                },
+                onAnalyzeAsset: async ({ domain, assetRef, type, summary }) => {
+                  const sessionKey = `agent:main:ops:${domain}`;
+                  state.applySettings({
+                    ...state.settings,
+                    sessionKey,
+                    lastActiveSessionKey: sessionKey,
+                  });
+                  state.setTab("message");
+                  const initialQuestion = `请分析${type === "cluster" ? "集群" : type === "service" ? "服务" : type === "component" ? "组件" : "作业"}资产：${assetRef}。`;
+                  state.chatMessage = initialQuestion;
+                  await loadChatHistory(state);
+                  await sendChatMessage(state, initialQuestion, [], state.chatModelRef ?? null, {
+                    context: buildUnifiedAiContext({
+                      domain,
+                      capability: "observability-alert",
+                      scenario: "diagnosis",
+                      objectRef: `${type}:${assetRef}`,
+                      assetRef,
+                      summary,
+                    }),
+                  });
+                  state.chatMessage = "";
                 },
               })
             : nothing
@@ -3796,6 +3936,7 @@ export function renderApp(state: AppViewState) {
                   gatewayHttpUrl: state.gatewayHttpUrl,
                   rbacToken: state.rbacUser?.token ?? null,
                   settings: { token: state.settings?.token ?? "" },
+                  setTab: (tab: any) => state.setTab(tab),
                 };
                 const domainChatProps = {
                   ...chatProps,
