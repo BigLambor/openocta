@@ -171,7 +171,7 @@ describe("BCH ecosystem ops scenarios tests", () => {
     subtabs[4].click(); // "作业治理"
     app.opsActiveSubTabs = { ...app.opsActiveSubTabs, hadoop: "jobGovernance" };
     await app.updateComplete;
-    const govEl = app.querySelector("bch-job-governance");
+    const govEl = app.querySelector("bch-flink-diagnosis");
     expect(govEl).not.toBeNull();
 
     // 3. Capacity Tab

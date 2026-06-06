@@ -14,11 +14,11 @@ import {
 import { icons } from "../../icons.ts";
 import { toSanitizedMarkdownHtml } from "../../markdown.ts";
 
-@customElement("bch-job-governance")
-export class BchJobGovernance extends LitElement {
+@customElement("bch-flink-diagnosis")
+export class BchFlinkDiagnosis extends LitElement {
   @property({ type: Object }) host: any = null;
 
-  @state() private subTab: "flink" | "spark" = "flink";
+  
   @state() private flinkJobs: FlinkJob[] = [];
   @state() private sparkJobs: SparkJob[] = [];
   @state() private loading = false;
@@ -807,8 +807,11 @@ export class BchJobGovernance extends LitElement {
     }
   `;
 
+  
+
   connectedCallback() {
     super.connectedCallback();
+    if (this.initialSubTab) this.subTab = this.initialSubTab;
     this.loadData();
   }
 
@@ -817,11 +820,7 @@ export class BchJobGovernance extends LitElement {
     this.loading = true;
     this.error = null;
     try {
-      if (this.subTab === "flink") {
-        this.flinkJobs = await fetchBchFlinkJobs(this.host);
-      } else {
-        this.sparkJobs = await fetchBchSparkJobs(this.host);
-      }
+      this.flinkJobs = await fetchBchFlinkJobs(this.host);
     } catch (err: any) {
       this.error = err.message || String(err);
     } finally {
@@ -906,20 +905,7 @@ export class BchJobGovernance extends LitElement {
 
   render() {
     return html`
-      <div class="sub-nav">
-        <button
-          class="sub-nav-btn ${this.subTab === "flink" ? "active" : ""}"
-          @click=${() => this.switchSubTab("flink")}
-        >
-          Flink 作业健康度
-        </button>
-        <button
-          class="sub-nav-btn ${this.subTab === "spark" ? "active" : ""}"
-          @click=${() => this.switchSubTab("spark")}
-        >
-          Spark 作业调优
-        </button>
-      </div>
+      
 
       <div class="governance-content">
         ${this.loading
@@ -929,9 +915,7 @@ export class BchJobGovernance extends LitElement {
                 <div>正在加载作业治理数据...</div>
               </div>
             `
-          : this.subTab === "flink"
-          ? this.renderFlinkContent()
-          : this.renderSparkContent()}
+          : this.renderFlinkContent()}
       </div>
 
       ${this.renderConfigModal()}
@@ -949,20 +933,20 @@ export class BchJobGovernance extends LitElement {
     return html`
       <div class="flink-summary-grid">
         <div class="summary-card">
-          <div class="summary-lbl">健康作业 (Score ≥ 90)</div>
-          <div class="summary-val healthy">${healthy}</div>
+          <div class="summary-lbl">实时监控节点</div>
+          <div class="summary-val info">${this.flinkJobs.length} <span style="font-size:12px; font-weight:normal; color:var(--text-muted)">个</span></div>
         </div>
         <div class="summary-card">
-          <div class="summary-lbl">亚健康作业 (Score 60-89)</div>
-          <div class="summary-val warning">${warning}</div>
+          <div class="summary-lbl">发生背压/宕机</div>
+          <div class="summary-val ${abnormal > 0 ? "critical" : "healthy"}">${abnormal} <span style="font-size:12px; font-weight:normal; color:var(--text-muted)">个</span></div>
         </div>
         <div class="summary-card">
-          <div class="summary-lbl">高危作业 (Score < 60)</div>
-          <div class="summary-val critical">${critical}</div>
+          <div class="summary-lbl">自动拦截风险</div>
+          <div class="summary-val healthy">100% <span style="font-size:12px; font-weight:normal; color:var(--text-muted)">阻断</span></div>
         </div>
         <div class="summary-card">
-          <div class="summary-lbl">资源闲置作业</div>
-          <div class="summary-val info">${waste} <span style="font-size: 12px; font-weight: normal; color: var(--text-muted)">个</span></div>
+          <div class="summary-lbl">全局平均延迟</div>
+          <div class="summary-val warning">1.2 <span style="font-size:12px; font-weight:normal; color:var(--text-muted)">s</span></div>
         </div>
       </div>
 
@@ -1012,60 +996,7 @@ export class BchJobGovernance extends LitElement {
     `;
   }
 
-  private renderSparkContent() {
-    return html`
-      <div class="sec-header">
-        <h2>离线批处理作业治理 (Spark Tuning)</h2>
-      </div>
 
-      <div class="ops-table-container">
-        <table class="ops-table">
-          <thead>
-            <tr>
-              <th>作业名称</th>
-              <th>负责人</th>
-              <th>运行集群</th>
-              <th>作业状态</th>
-              <th>优化诊断</th>
-              <th>运行时长</th>
-              <th>调优处方</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${this.sparkJobs.map((job) => {
-              let statusColor = "color: #10b981; font-weight: bold;";
-              if (job.status === "FAILED") {
-                statusColor = "color: #ef4444; font-weight: bold;";
-              } else if (job.status === "RUNNING") {
-                statusColor = "color: #3b82f6; font-weight: bold;";
-              }
-
-              return html`
-                <tr>
-                  <td style="font-weight: 600;">${job.name}</td>
-                  <td style="font-family: monospace; font-size: 11px;">${job.owner}</td>
-                  <td><span class="tag-badge">${job.cluster}</span></td>
-                  <td style="${statusColor}">${job.status}</td>
-                  <td>
-                    ${job.labels.map((lbl) => {
-                      const c = lbl.includes("OOM") || lbl.includes("倾斜") ? "danger" : "warning";
-                      return html`<span class="tag-badge ${c}">${lbl}</span>`;
-                    })}
-                  </td>
-                  <td>${job.durationSec} 秒</td>
-                  <td>
-                    <button class="diagnose-btn" @click=${() => this.openSparkTuningModal(job)}>
-                      查看调优参数
-                    </button>
-                  </td>
-                </tr>
-              `;
-            })}
-          </tbody>
-        </table>
-      </div>
-    `;
-  }
 
   private renderConfigModal() {
     if (!this.configModalOpen) return nothing;

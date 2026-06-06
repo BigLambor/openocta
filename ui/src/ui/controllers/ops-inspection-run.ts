@@ -41,7 +41,7 @@ export async function runDomainInspectionWithPoll(
       component,
       ...(scenarioKey ? { scenarioKey } : {}),
     });
-    await pollInspectionRuns(state, jobId);
+    await pollInspectionRuns(state, jobId, domainKey);
   } finally {
     state.opsIsInspecting = { ...state.opsIsInspecting, [domainKey]: false };
   }
@@ -57,15 +57,17 @@ function scenarioKeyForInspection(domainKey: string, jobId: string): string | un
 export async function pollInspectionRuns(
   state: OpsInspectionRunHost,
   jobId: string,
+  domainKey?: string,
 ): Promise<void> {
   for (let attempt = 1; attempt <= MAX_POLL_ATTEMPTS; attempt++) {
     await loadCronRuns(state, jobId);
     const latest = state.cronRuns[0];
     if (latest?.status === "ok" || attempt >= MAX_POLL_ATTEMPTS) {
       if (latest?.sessionId) {
+        const dKey = domainKey || state.tab;
         state.opsSelectedInspectionIds = {
           ...state.opsSelectedInspectionIds,
-          [state.tab]: latest.sessionId,
+          [dKey]: latest.sessionId,
         };
       }
       return;

@@ -1,6 +1,9 @@
 import { html, nothing, type TemplateResult } from "lit";
 import { icons } from "../icons.ts";
 import { renderOpsError } from "../components/ops-status.ts";
+import "./ops/bch-flink-diagnosis.ts";
+import "./ops/bch-spark-governance.ts";
+import "./ops/bch-fsimage-dashboard.ts";
 import {
   renderOpsShellHeader,
   renderOpsShellStatGrid,
@@ -37,6 +40,7 @@ export type WorkbenchProps = {
   domainName: string;
   selectedDomain?: string;
   user?: any;
+  host?: any;
   onDomainChange?: (domain: string) => void;
   domainSummary?: {
     alertsCount?: number;
@@ -600,6 +604,12 @@ export function renderWorkbench(props: WorkbenchProps) {
             ? renderEventsView(props, active, originalTotal, criticalCount, warningCount)
             : activeView === "inspection"
               ? renderInspectionView(props)
+              : activeView === "diagnosis" && props.selectedDomain === "hadoop"
+                ? html`<bch-flink-diagnosis .host=${props.host}></bch-flink-diagnosis>`
+              : activeView === "governance" && props.selectedDomain === "hadoop"
+                ? html`<bch-spark-governance .host=${props.host}></bch-spark-governance>`
+              : activeView === "capacity" && props.selectedDomain === "hadoop"
+                ? html`<bch-fsimage-dashboard .host=${props.host}></bch-fsimage-dashboard>`
               : renderSkeletonView(props, activeView)}
         </main>
       </div>

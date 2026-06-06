@@ -1831,6 +1831,7 @@ export function renderApp(state: AppViewState) {
                   domainName: opsDomainLabel(domainForAlerts),
                   selectedDomain: selectedOpsDomain,
                   user: state.rbacUser,
+                  host: state,
                   onDomainChange: setGlobalOpsDomain,
                   domainSummary,
                   assistantName: workbenchAssistant.name,
