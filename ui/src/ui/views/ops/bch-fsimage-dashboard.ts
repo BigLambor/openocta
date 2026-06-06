@@ -1,11 +1,13 @@
 import { LitElement, html, css, nothing } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import { fetchBchHdfsFsImage, HdfsFsImageStats } from "../../controllers/bch-client.ts";
+import { parseWorkbenchObjectScope } from "../../ops/workbench-context.ts";
 
 @customElement("bch-fsimage-dashboard")
 export class BchFsImageDashboard extends LitElement {
   @property({ type: Object }) host: any = null;
   @property({ type: String }) activeNamespace = "NS1";
+  @property({ type: String }) objectScope = "all";
   @property({ type: String }) timeRange = "24h";
 
   @state() private stats: HdfsFsImageStats | null = null;
@@ -244,6 +246,9 @@ export class BchFsImageDashboard extends LitElement {
   }
 
   render() {
+    const parsed = parseWorkbenchObjectScope(this.objectScope);
+    const directoryPath = parsed.kind === "directory" ? parsed.value : null;
+
     return html`
       <div class="ns-tabs">
         ${["NS1", "NS2", "NS3", "NS4", "NS5", "NS6", "NS7", "NS8"].map((ns) => html`
@@ -257,6 +262,14 @@ export class BchFsImageDashboard extends LitElement {
       </div>
 
       <div class="dashboard-body">
+        ${directoryPath
+          ? html`
+              <div class="ops-banner info" style="margin-bottom: 20px; display: flex; align-items: center; gap: 10px; padding: 12px 18px; border-radius: 8px; background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.2); font-size: 13px;">
+                <span style="font-weight:600;">目录</span>
+                <span>当前 HDFS 静态治理热点目录：<strong style="color: var(--accent, #3b82f6); font-family: monospace;">${directoryPath}</strong>。此入口用于小文件/容量治理聚焦，不代表实时目录树枚举。</span>
+              </div>
+            `
+          : nothing}
         ${this.loading
           ? html`
               <div class="loading-container" style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 200px; color: var(--text-muted);">

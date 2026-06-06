@@ -53,6 +53,7 @@ export function renderScenarioComponent(
         <bch-flink-diagnosis
           .host=${context.host}
           .selectedCluster=${selectedCluster}
+          .objectScope=${context.objectScope ?? "all"}
           .timeRange=${context.timeRange ?? "24h"}
         ></bch-flink-diagnosis>
       `;
@@ -61,17 +62,26 @@ export function renderScenarioComponent(
         <bch-spark-governance
           .host=${context.host}
           .selectedCluster=${selectedCluster}
+          .objectScope=${context.objectScope ?? "all"}
           .timeRange=${context.timeRange ?? "24h"}
         ></bch-spark-governance>
       `;
-    case "bch-hdfs-capacity":
+    case "bch-hdfs-capacity": {
+      let activeNamespace = "NS1";
+      if (parsedScope.kind === "namespace") {
+        activeNamespace = parsedScope.value;
+      } else if (parsedScope.kind === "directory" && parsedScope.namespace) {
+        activeNamespace = parsedScope.namespace;
+      }
       return html`
         <bch-fsimage-dashboard
           .host=${context.host}
-          .activeNamespace=${activeNamespace ?? "NS1"}
+          .activeNamespace=${activeNamespace}
+          .objectScope=${context.objectScope ?? "all"}
           .timeRange=${context.timeRange ?? "24h"}
         ></bch-fsimage-dashboard>
       `;
+    }
     default:
       return renderScenarioSkeleton(scenario);
   }

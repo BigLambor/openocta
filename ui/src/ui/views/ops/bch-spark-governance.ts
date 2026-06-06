@@ -21,11 +21,13 @@ import {
   renderBchJobHealthOverview,
   sparkHealthScore,
 } from "./bch-job-health-overview.ts";
+import { parseWorkbenchObjectScope } from "../../ops/workbench-context.ts";
 
 @customElement("bch-spark-governance")
 export class BchSparkGovernance extends LitElement {
   @property({ type: Object }) host: any = null;
   @property({ type: String }) selectedCluster = "all";
+  @property({ type: String }) objectScope = "all";
   @property({ type: String }) timeRange = "24h";
 
   
@@ -879,10 +881,15 @@ export class BchSparkGovernance extends LitElement {
   }
 
   private filteredSparkJobs(): SparkJob[] {
-    if (this.selectedCluster === "all") {
+    const parsed = parseWorkbenchObjectScope(this.objectScope);
+    if (parsed.kind === "spark_job") {
+      return this.sparkJobs.filter((job) => job.id === parsed.value);
+    }
+    const cluster = parsed.kind === "cluster" ? parsed.value : this.selectedCluster;
+    if (cluster === "all") {
       return this.sparkJobs;
     }
-    return this.sparkJobs.filter((job) => job.cluster === this.selectedCluster);
+    return this.sparkJobs.filter((job) => job.cluster === cluster);
   }
 
   private renderClusterFilter() {

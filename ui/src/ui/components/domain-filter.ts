@@ -71,7 +71,13 @@ export type OpsAssistant = {
  * matches the employee id recorded.
  */
 export function opsAssistantForDomain(domain: string): OpsAssistant {
-  switch (effectiveOpsDomain(domain)) {
+  switch (normalizeOpsDomain(domain)) {
+    case "all":
+      return {
+        employeeId: "emp_bch_duty",
+        name: "全域值班数字员工",
+        persona: "专家人设：跨技术域告警降噪、巡检汇总、容量分析与多域协同治理建议。",
+      };
     case "gbase":
       return {
         employeeId: "emp_gbase_diagnose",

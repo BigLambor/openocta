@@ -441,6 +441,10 @@ export class OpenClawApp extends LitElement implements NativeDialogInvoker {
   @state() opsClusters: import("./controllers/ops-clusters.ts").OpsClusterRecord[] = [];
   @state() opsClustersLoading = false;
   @state() opsClustersError: string | null = null;
+  @state() opsFlinkJobs: import("./controllers/bch-client.ts").FlinkJob[] = [];
+  @state() opsFlinkJobsLoading = false;
+  @state() opsSparkJobs: import("./controllers/bch-client.ts").SparkJob[] = [];
+  @state() opsSparkJobsLoading = false;
   @state() opsDashboardSummary: import("./controllers/ops-clusters.ts").OpsDashboardSummary | null =
     null;
   @state() opsDashboardLoading = false;
@@ -931,6 +935,32 @@ export class OpenClawApp extends LitElement implements NativeDialogInvoker {
       this.opsClusters = [];
     } finally {
       this.opsClustersLoading = false;
+    }
+  }
+
+  async loadOpsFlinkJobs() {
+    this.opsFlinkJobsLoading = true;
+    try {
+      const { fetchBchFlinkJobs } = await import("./controllers/bch-client.ts");
+      this.opsFlinkJobs = await fetchBchFlinkJobs(this);
+    } catch (err) {
+      console.error("Failed to load Flink jobs:", err);
+      this.opsFlinkJobs = [];
+    } finally {
+      this.opsFlinkJobsLoading = false;
+    }
+  }
+
+  async loadOpsSparkJobs() {
+    this.opsSparkJobsLoading = true;
+    try {
+      const { fetchBchSparkJobs } = await import("./controllers/bch-client.ts");
+      this.opsSparkJobs = await fetchBchSparkJobs(this);
+    } catch (err) {
+      console.error("Failed to load Spark jobs:", err);
+      this.opsSparkJobs = [];
+    } finally {
+      this.opsSparkJobsLoading = false;
     }
   }
 

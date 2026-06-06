@@ -259,9 +259,17 @@ describe("Ops remediation E2E smoke tests", () => {
     const form = app.querySelector(".asset-form") as HTMLFormElement;
     const nameInput = form.querySelector('input[name="name"]') as HTMLInputElement;
     nameInput.value = "New Test Cluster";
+    const labelsField = form.querySelector("ops-monitor-labels-field") as any;
+    if (labelsField) {
+      labelsField.value = 'job="hadoop-prod",cluster="bj-bch-prod"';
+      await labelsField.updateComplete;
+    }
     form.dispatchEvent(new Event("submit"));
     
     // Wait for manual add/reload to complete
+    while (mockClusters.length < 2) {
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
     await new Promise(resolve => setTimeout(resolve, 50));
     while (app.opsClustersLoading) {
       await new Promise(resolve => setTimeout(resolve, 20));

@@ -20,11 +20,13 @@ import {
   bucketJobsByScore,
   renderBchJobHealthOverview,
 } from "./bch-job-health-overview.ts";
+import { parseWorkbenchObjectScope } from "../../ops/workbench-context.ts";
 
 @customElement("bch-flink-diagnosis")
 export class BchFlinkDiagnosis extends LitElement {
   @property({ type: Object }) host: any = null;
   @property({ type: String }) selectedCluster = "all";
+  @property({ type: String }) objectScope = "all";
   @property({ type: String }) timeRange = "24h";
 
   
@@ -878,10 +880,15 @@ export class BchFlinkDiagnosis extends LitElement {
   }
 
   private filteredFlinkJobs(): FlinkJob[] {
-    if (this.selectedCluster === "all") {
+    const parsed = parseWorkbenchObjectScope(this.objectScope);
+    if (parsed.kind === "flink_job") {
+      return this.flinkJobs.filter((job) => job.id === parsed.value);
+    }
+    const cluster = parsed.kind === "cluster" ? parsed.value : this.selectedCluster;
+    if (cluster === "all") {
       return this.flinkJobs;
     }
-    return this.flinkJobs.filter((job) => job.cluster === this.selectedCluster);
+    return this.flinkJobs.filter((job) => job.cluster === cluster);
   }
 
   private renderClusterFilter() {

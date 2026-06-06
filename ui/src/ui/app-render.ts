@@ -1756,6 +1756,21 @@ export function renderApp(state: AppViewState) {
                 const selectedTimeRange = normalizeWorkbenchTimeRange(state.opsSelectedEntityIds?.workbenchTimeRange);
                 const scenarioSearch = state.opsSelectedEntityIds?.workbenchScenarioSearch || "";
                 const scenarioMaturityFilter = state.opsSelectedEntityIds?.workbenchScenarioMaturity || "all";
+                const selectedScenarioId = state.opsSelectedEntityIds?.workbenchScenario || "";
+                if (
+                  selectedScenarioId === "bch-flink-health" &&
+                  state.opsFlinkJobs.length === 0 &&
+                  !state.opsFlinkJobsLoading
+                ) {
+                  void state.loadOpsFlinkJobs();
+                }
+                if (
+                  selectedScenarioId === "bch-spark-tuning" &&
+                  state.opsSparkJobs.length === 0 &&
+                  !state.opsSparkJobsLoading
+                ) {
+                  void state.loadOpsSparkJobs();
+                }
                 const scenarioAiObjectId = `${state.opsSelectedEntityIds?.workbenchScenario || ""}:${selectedObjectScope}:${selectedTimeRange}`;
                 const inspectionJobId = `job-inspect-${domain}`;
                 if (
@@ -1879,7 +1894,7 @@ export function renderApp(state: AppViewState) {
                   clustersCount: domainSummaryRaw?.clusterCount ?? 0,
                   alertsCount: alertGroups.length,
                 };
-                const assistantDomain = alertGroups.find((g) => g.id === selectedId)?.domain || (domainForAlerts === "all" ? "hadoop" : domainForAlerts);
+                const assistantDomain = alertGroups.find((g) => g.id === selectedId)?.domain || domainForAlerts;
                 const workbenchAssistant = opsAssistantForDomain(assistantDomain);
                 return renderWorkbench({
                   domainName: opsDomainLabel(domainForAlerts),
@@ -1909,6 +1924,8 @@ export function renderApp(state: AppViewState) {
                   selectedObjectScope,
                   selectedTimeRange,
                   domainClusters: domain === "all" ? [] : state.opsDomainClusters?.[domain] ?? [],
+                  flinkJobs: state.opsFlinkJobs,
+                  sparkJobs: state.opsSparkJobs,
                   inspectionsLoading: state.cronLoading,
                   inspections,
                   selectedInspectionId: state.opsSelectedInspectionIds[domain] || (inspections[0]?.id ?? null),

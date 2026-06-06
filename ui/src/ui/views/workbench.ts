@@ -9,7 +9,12 @@ import {
   type OpsViewNavItem,
 } from "../components/ops-shell.ts";
 import { renderOpsContextSidebar, type SidebarItem } from "../components/ops-context-sidebar.ts";
-import { normalizeOpsDomain, opsDomainLabel, type OpsDomainKey } from "../components/domain-filter.ts";
+import {
+  canAccessOpsDomain,
+  normalizeOpsDomain,
+  opsDomainLabel,
+  type OpsDomainKey,
+} from "../components/domain-filter.ts";
 import type { OpsClusterRecord } from "../controllers/ops-clusters.ts";
 import {
   findWorkbenchScenario,
@@ -20,6 +25,7 @@ import {
   type OpsScenario,
   type OpsScenarioMaturityFilter,
   type WorkbenchTimeRange,
+  OPS_SCENARIOS,
 } from "../ops/scenario-registry.ts";
 import { renderScenarioComponent } from "../ops/scenario-components.ts";
 import { buildScenarioResult, type OpsScenarioResult } from "../ops/scenario-results.ts";
@@ -75,6 +81,8 @@ export type WorkbenchProps = {
   selectedObjectScope?: string | null;
   selectedTimeRange?: string | null;
   domainClusters?: OpsClusterRecord[];
+  flinkJobs?: any[];
+  sparkJobs?: any[];
   alertsLoading?: boolean;
   alertsError?: string | null;
   alertGroups: WorkbenchAlertGroup[];
@@ -696,11 +704,30 @@ function renderWorkbenchContextBar(
 }
 
 function renderScenarioDirectory(props: WorkbenchProps, view: WorkbenchView, selectedDomain: OpsDomainKey) {
-  const scenarios = scenariosForWorkbench(selectedDomain, view);
+  let scenarios = scenariosForWorkbench(selectedDomain, view);
+  if (selectedDomain === "all") {
+    scenarios = scenarios.filter((scenario) => canAccessOpsDomain(props.user, scenario.domain));
+  }
   if (scenarios.length === 0) {
     return renderSkeletonView(props, view);
   }
-  const stats = scenarioCatalogStats(selectedDomain);
+
+  let stats;
+  if (selectedDomain === "all") {
+    const accessible = OPS_SCENARIOS.filter((scenario) => canAccessOpsDomain(props.user, scenario.domain));
+    stats = {
+      total: accessible.length,
+      centers: {} as Record<string, number>,
+      maturity: { planned: 0, beta: 0, connected: 0, automated: 0 },
+    };
+    for (const scenario of accessible) {
+      stats.centers[scenario.center] = (stats.centers[scenario.center] ?? 0) + 1;
+      stats.maturity[scenario.maturity] += 1;
+    }
+  } else {
+    stats = scenarioCatalogStats(selectedDomain);
+  }
+
   const connectedCount = stats.maturity.beta + stats.maturity.connected + stats.maturity.automated;
   const activeCenterCount = stats.centers[view] ?? scenarios.length;
   const scenarioSearch = props.scenarioSearch ?? "";
@@ -993,7 +1020,12 @@ export function renderWorkbench(props: WorkbenchProps) {
     selectedScenarioRaw.domain === selectedDomain
       ? selectedScenarioRaw
       : undefined;
-  const objectOptions = objectOptionsForScenario(selectedScenario, props.domainClusters ?? []);
+  const objectOptions = objectOptionsForScenario(
+    selectedScenario,
+    props.domainClusters ?? [],
+    props.flinkJobs ?? [],
+    props.sparkJobs ?? [],
+  );
   const selectedObjectScope = normalizeWorkbenchObjectScope(props.selectedObjectScope, objectOptions);
   const selectedTimeRange = normalizeWorkbenchTimeRange(props.selectedTimeRange);
 
