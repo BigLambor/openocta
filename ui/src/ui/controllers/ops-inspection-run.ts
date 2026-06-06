@@ -23,6 +23,9 @@ export async function runDomainInspectionWithPoll(
   }
   const domainKey = domainKeyOverride || state.tab;
   state.opsIsInspecting = { ...state.opsIsInspecting, [domainKey]: true };
+  if (typeof (state as any).requestUpdate === "function") {
+    (state as any).requestUpdate();
+  }
   try {
     const entityId = (state as any).opsSelectedEntityIds?.[domainKey] ?? "all";
     let clusterId = "";
@@ -44,6 +47,9 @@ export async function runDomainInspectionWithPoll(
     await pollInspectionRuns(state, jobId, domainKey);
   } finally {
     state.opsIsInspecting = { ...state.opsIsInspecting, [domainKey]: false };
+    if (typeof (state as any).requestUpdate === "function") {
+      (state as any).requestUpdate();
+    }
   }
 }
 

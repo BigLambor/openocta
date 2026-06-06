@@ -157,7 +157,6 @@ export function objectOptionsForScenario(
   }
   if (scenario.id === "bch-hdfs-capacity") {
     const nsOptions: WorkbenchObjectOption[] = [];
-    const namespaces = ["NS1", "NS2", "NS3", "NS4", "NS5", "NS6", "NS7", "NS8"];
     const hdfsClusters =
       clusters.length > 0
         ? clusters
@@ -173,20 +172,6 @@ export function objectOptionsForScenario(
         label: cluster.name,
         subtitle: cluster.region ? `HDFS 集群 · ${cluster.region}` : "HDFS 集群",
       });
-      for (const ns of namespaces) {
-        nsOptions.push({
-          id: hdfsNamespaceObjectId(cluster.name, ns),
-          label: `${cluster.name} / ${ns}`,
-          subtitle: "HDFS namespace",
-        });
-        for (const dir of ["/tmp", "/user", "/app"]) {
-          nsOptions.push({
-            id: hdfsDirectoryObjectId(cluster.name, ns, dir),
-            label: `${cluster.name} / ${ns}${dir}`,
-            subtitle: "HDFS 静态治理热点目录",
-          });
-        }
-      }
     }
     return nsOptions;
   }

@@ -2003,6 +2003,12 @@ export function renderApp(state: AppViewState) {
                     };
                   },
                   onOpenScenarioAi: (scenario, mode) => {
+                    state.opsSelectedEntityIds = {
+                      ...state.opsSelectedEntityIds,
+                      workbenchAiPanel: "open",
+                      workbenchAiMode: mode,
+                      workbenchScenario: scenario.id,
+                    };
                     void runWorkbenchAi(state as any, {
                       domain: scenario.domain,
                       mode,
@@ -2090,10 +2096,12 @@ export function renderApp(state: AppViewState) {
                             ...state.opsSelectedInspectionIds,
                             [domain]: selectedId,
                           };
+                          state.requestUpdate();
                         })
                         .catch((err) => {
                           console.error("Failed to run workbench inspection:", err);
                           void nativeAlert(err instanceof Error ? err.message : String(err));
+                          state.requestUpdate();
                         });
                     });
                   },

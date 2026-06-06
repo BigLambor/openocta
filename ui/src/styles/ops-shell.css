@@ -629,6 +629,7 @@
 .ops-workbench-shell .ops-shell-columns,
 .ops-workbench-shell .ops-main-columns {
   min-height: clamp(420px, 58vh, 720px);
+  max-height: clamp(420px, 70vh, 1000px);
 }
 
 .ops-workbench-shell .list-column,
