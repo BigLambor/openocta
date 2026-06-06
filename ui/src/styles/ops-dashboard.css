@@ -1767,10 +1767,10 @@
 .ops-map-container {
   position: relative;
   width: 100%;
-  background: linear-gradient(135deg, rgba(20, 24, 35, 0.95) 0%, rgba(10, 12, 18, 0.98) 100%);
+  background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
   border-radius: 8px;
   border: 1px solid var(--border);
-  box-shadow: inset 0 0 40px rgba(0, 0, 0, 0.6);
+  box-shadow: inset 0 0 30px rgba(148, 163, 184, 0.08);
   padding: 12px;
   display: flex;
   justify-content: center;
@@ -1791,18 +1791,23 @@
   opacity: 0.15;
 }
 
-/* Stylized China boundaries (Detailed Province Mesh) */
-.ops-map-svg .province path {
-  fill: rgba(30, 41, 59, 0.3) !important;
-  stroke: rgba(71, 85, 105, 0.35) !important;
+/* Base default for all map paths to prevent default browser black fill */
+.ops-map-svg path {
+  fill: none;
+}
+
+/* Stylized China boundaries (Detailed Province Mesh, matching province paths in both province & borders groups) */
+.ops-map-svg path[id^="p"]:not([id^="pXZd"]):not(#pXJd) {
+  fill: rgba(226, 232, 240, 0.55) !important;
+  stroke: rgba(203, 213, 225, 0.8) !important;
   stroke-width: 0.8px !important;
   stroke-linejoin: round;
   transition: fill 0.2s ease, stroke 0.2s ease;
 }
 
-.ops-map-svg .province path:hover {
+.ops-map-svg path[id^="p"]:not([id^="pXZd"]):not(#pXJd):hover {
   fill: rgba(59, 130, 246, 0.12) !important;
-  stroke: rgba(59, 130, 246, 0.6) !important;
+  stroke: rgba(59, 130, 246, 0.5) !important;
 }
 
 .ops-map-svg .disputed path,
@@ -1810,15 +1815,16 @@
 .ops-map-svg #pXZd1,
 .ops-map-svg #pXZd2,
 .ops-map-svg [id^="pXZd"] {
-  fill: rgba(47, 55, 71, 0.25) !important;
-  stroke: rgba(71, 85, 105, 0.25) !important;
+  fill: rgba(226, 232, 240, 0.45) !important;
+  stroke: rgba(203, 213, 225, 0.6) !important;
   stroke-width: 0.8px !important;
   stroke-dasharray: 2, 2 !important;
 }
 
 .ops-map-svg [id^="bAksai"],
-.ops-map-svg [id^="bSouth"] {
-  stroke: rgba(71, 85, 105, 0.35) !important;
+.ops-map-svg [id^="bSouth"],
+.ops-map-svg .borders path:not([id^="p"]) {
+  stroke: rgba(148, 163, 184, 0.6) !important;
   stroke-width: 0.8px !important;
   stroke-dasharray: 2, 2 !important;
   fill: none !important;
@@ -1834,11 +1840,11 @@
 
 /* Glowing Network Links */
 .ops-map__link {
-  stroke: rgba(59, 130, 246, 0.45);
+  stroke: rgba(59, 130, 246, 0.35);
   stroke-width: 1.5px;
   stroke-dasharray: 6, 6;
   animation: ops-map-link-dash 30s linear infinite;
-  opacity: 0.7;
+  opacity: 0.85;
 }
 
 @keyframes ops-map-link-dash {
@@ -1847,31 +1853,76 @@
   }
 }
 
-/* Main City Node */
+/* Main City Node (Concentric Anchor Structure) */
 .ops-map__node-group {
   cursor: pointer;
 }
 
-.ops-map__node-center {
-  stroke-width: 1.5px;
-}
-
 .ops-map__node-halo {
   fill: none;
-  stroke-width: 1.5px;
-  transform-origin: center;
+  stroke-width: 1px;
 }
 
-.ops-map__node-group:hover .ops-map__node-center {
-  transform: scale(1.15);
-  transition: transform 0.2s ease;
+.ops-map__node-middle {
+  fill: #ffffff !important;
+  stroke-width: 2px !important;
+  transition: stroke-width 0.2s ease;
+}
+
+.ops-map__node-center {
+  stroke: none !important;
+}
+
+.ops-map__node-group:hover .ops-map__node-middle {
+  stroke-width: 3.5px !important;
+}
+
+/* Status colors for City Node Center (Inner solid dot) */
+.ops-map__node-center--healthy { fill: #10b981 !important; }
+.ops-map__node-center--warning { fill: #f59e0b !important; }
+.ops-map__node-center--critical { fill: #ef4444 !important; }
+.ops-map__node-center--unknown { fill: #6b7280 !important; }
+
+/* Status colors for City Node Middle Ring (Stroke color) */
+.ops-map__node-middle--healthy { stroke: #10b981 !important; }
+.ops-map__node-middle--warning { stroke: #f59e0b !important; }
+.ops-map__node-middle--critical { stroke: #ef4444 !important; }
+.ops-map__node-middle--unknown { stroke: #6b7280 !important; }
+
+/* Status colors and pulsing animation for City Node Outer Halo */
+.ops-map__node-halo--healthy {
+  stroke: #10b981 !important;
+  animation: ops-map-pulse-city 3s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+}
+.ops-map__node-halo--warning {
+  stroke: #f59e0b !important;
+  animation: ops-map-pulse-city 1.6s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+}
+.ops-map__node-halo--critical {
+  stroke: #ef4444 !important;
+  animation: ops-map-pulse-city 0.8s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+}
+.ops-map__node-halo--unknown {
+  stroke: #6b7280 !important;
+  animation: none;
+}
+
+@keyframes ops-map-pulse-city {
+  0% {
+    r: 10px;
+    opacity: 0.8;
+  }
+  75%, 100% {
+    r: 24px;
+    opacity: 0;
+  }
 }
 
 /* Label styling */
 .ops-map__node-label {
   font-size: 11px;
   font-weight: 600;
-  fill: #e5e7eb !important;
+  fill: #475569 !important;
   text-anchor: middle;
   pointer-events: none;
   font-family: Inter, system-ui, sans-serif;
@@ -1889,7 +1940,7 @@
 }
 
 .ops-map__sat-core {
-  stroke: rgba(10, 12, 18, 0.8);
+  stroke: #ffffff;
   stroke-width: 1px;
 }
 
@@ -1900,62 +1951,34 @@
   transform-origin: center;
 }
 
-/* Health status colors and animations (Supports parent-child satellite dots AND compound city center nodes) */
-/* Healthy (Green) */
-.ops-map__sat-dot--healthy .ops-map__sat-core,
-circle.ops-map__sat-dot--healthy.ops-map__node-center {
-  fill: #10b981 !important;
-  stroke: rgba(16, 185, 129, 0.4);
-}
-.ops-map__sat-dot--healthy .ops-map__sat-ring,
-circle.ops-map__sat-dot--healthy.ops-map__node-halo {
+/* Status colors and breathing/pulsing for satellite dots only */
+.ops-map__sat-dot--healthy .ops-map__sat-core { fill: #10b981 !important; }
+.ops-map__sat-dot--healthy .ops-map__sat-ring {
   stroke: #10b981 !important;
-  animation: ops-map-pulse 3s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+  animation: ops-map-pulse-sat 3s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
 }
 
-/* Warning (Yellow) */
-.ops-map__sat-dot--warning .ops-map__sat-core,
-circle.ops-map__sat-dot--warning.ops-map__node-center {
-  fill: #f59e0b !important;
-  stroke: rgba(245, 158, 11, 0.4);
-}
-.ops-map__sat-dot--warning .ops-map__sat-ring,
-circle.ops-map__sat-dot--warning.ops-map__node-halo {
+.ops-map__sat-dot--warning .ops-map__sat-core { fill: #f59e0b !important; }
+.ops-map__sat-dot--warning .ops-map__sat-ring {
   stroke: #f59e0b !important;
-  animation: ops-map-pulse 1.6s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+  animation: ops-map-pulse-sat 1.6s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
 }
 
-/* Critical (Red) */
-.ops-map__sat-dot--critical .ops-map__sat-core,
-circle.ops-map__sat-dot--critical.ops-map__node-center {
-  fill: #ef4444 !important;
-  stroke: rgba(239, 68, 68, 0.4);
-}
-.ops-map__sat-dot--critical .ops-map__sat-ring,
-circle.ops-map__sat-dot--critical.ops-map__node-halo {
+.ops-map__sat-dot--critical .ops-map__sat-core { fill: #ef4444 !important; }
+.ops-map__sat-dot--critical .ops-map__sat-ring {
   stroke: #ef4444 !important;
-  animation: ops-map-pulse 0.8s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+  animation: ops-map-pulse-sat 0.8s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
 }
 
-/* Unknown (Gray) */
-.ops-map__sat-dot--unknown .ops-map__sat-core,
-circle.ops-map__sat-dot--unknown.ops-map__node-center {
-  fill: #6b7280 !important;
-  stroke: rgba(107, 114, 128, 0.4);
-}
-.ops-map__sat-dot--unknown .ops-map__sat-ring,
-circle.ops-map__sat-dot--unknown.ops-map__node-halo {
-  stroke: #6b7280 !important;
-  animation: none;
-}
+.ops-map__sat-dot--unknown .ops-map__sat-core { fill: #6b7280 !important; }
 
-@keyframes ops-map-pulse {
+@keyframes ops-map-pulse-sat {
   0% {
-    r: 9px;
+    r: 4px;
     opacity: 0.8;
   }
   75%, 100% {
-    r: 20px;
+    r: 10px;
     opacity: 0;
   }
 }
@@ -1965,16 +1988,16 @@ circle.ops-map__sat-dot--unknown.ops-map__node-halo {
   position: absolute;
   z-index: 50;
   width: 250px;
-  background: rgba(17, 24, 39, 0.85);
+  background: rgba(255, 255, 255, 0.85);
   backdrop-filter: blur(12px) saturate(160%);
   -webkit-backdrop-filter: blur(12px) saturate(160%);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.08), 0 8px 10px -6px rgba(0, 0, 0, 0.08);
   border-radius: 10px;
   padding: 14px;
   pointer-events: none;
   font-family: system-ui, -apple-system, sans-serif;
-  color: #f3f4f6;
+  color: #334155;
   opacity: 0;
   transform: scale(0.95) translateY(5px);
   transition: opacity 0.2s ease, transform 0.2s ease;
@@ -1986,7 +2009,7 @@ circle.ops-map__sat-dot--unknown.ops-map__node-halo {
 }
 
 .ops-map__tooltip-header {
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.15);
   padding-bottom: 8px;
   margin-bottom: 10px;
   display: flex;
@@ -1997,7 +2020,7 @@ circle.ops-map__sat-dot--unknown.ops-map__node-halo {
 .ops-map__tooltip-title {
   font-size: 14px;
   font-weight: 700;
-  color: #ffffff;
+  color: #1e293b;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -2016,8 +2039,8 @@ circle.ops-map__sat-dot--unknown.ops-map__node-halo {
 
 .ops-map__tooltip-subtitle {
   font-size: 11px;
-  color: #9ca3af;
-  background: rgba(255, 255, 255, 0.06);
+  color: #64748b;
+  background: rgba(148, 163, 184, 0.08);
   padding: 2px 6px;
   border-radius: 4px;
 }
@@ -2033,10 +2056,10 @@ circle.ops-map__sat-dot--unknown.ops-map__node-halo {
   align-items: center;
   justify-content: space-between;
   font-size: 12px;
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(148, 163, 184, 0.03);
   padding: 6px 8px;
   border-radius: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(148, 163, 184, 0.05);
 }
 
 .ops-map__tooltip-item-left {
@@ -2109,7 +2132,7 @@ circle.ops-map__sat-dot--unknown.ops-map__node-halo {
 
 .ops-map__tooltip-no-clusters {
   font-size: 11px;
-  color: #9ca3af;
+  color: #64748b;
   text-align: center;
   padding: 8px 0;
   font-style: italic;

@@ -7,21 +7,27 @@ import { PROVINCES, DISPUTED, RIVERS_TRANSFORM, RIVERS, BORDERS } from "./china-
 type CityNode = {
   id: string;
   name: string;
+  label: string;
   x: number;
   y: number;
-  connections: string[];
 };
 
-const CITIES: CityNode[] = [
-  { id: "beijing", name: "北京数据中心", x: 737, y: 335, connections: ["xian", "shanghai"] },
-  { id: "shanghai", name: "上海公有云", x: 861, y: 515, connections: ["beijing", "wuhan", "shenzhen"] },
-  { id: "shenzhen", name: "深圳灾备中心", x: 745, y: 730, connections: ["shanghai", "wuhan"] },
-  { id: "chengdu", name: "成都边缘节点", x: 543, y: 561, connections: ["xian", "wuhan"] },
-  { id: "wuhan", name: "武汉研发中心", x: 724, y: 547, connections: ["shanghai", "shenzhen", "chengdu", "xian"] },
-  { id: "xian", name: "西安控制节点", x: 620, y: 479, connections: ["beijing", "chengdu", "wuhan"] },
-];
+const ALL_CITY_COORDS: Record<string, Omit<CityNode, "id">> = {
+  beijing: { name: "北京数据中心", label: "北京", x: 736.9, y: 335.3 },
+  shanghai: { name: "上海公有云", label: "上海", x: 861.0, y: 515.1 },
+  shenzhen: { name: "深圳灾备中心", label: "深圳", x: 745.0, y: 730.0 },
+  chengdu: { name: "成都边缘节点", label: "成都", x: 542.5, y: 560.5 },
+  wuhan: { name: "武汉研发中心", label: "武汉", x: 724.4, y: 547.3 },
+  xian: { name: "西安控制节点", label: "西安", x: 620.3, y: 479.3 },
+  harbin: { name: "哈尔滨数据中心", label: "哈尔滨", x: 888.7, y: 177.3 },
+  hohhot: { name: "呼和浩特数据中心", label: "呼和浩特", x: 665.1, y: 319.2 },
+  hangzhou: { name: "杭州数据中心", label: "杭州", x: 834.4, y: 538.4 },
+  guangzhou: { name: "广州数据中心", label: "广州", x: 730.9, y: 717.5 },
+  chongqing: { name: "重庆数据中心", label: "重庆", x: 582.4, y: 584.3 },
+  lanzhou: { name: "兰州数据中心", label: "兰州", x: 529.5, y: 440.8 },
+};
 
-const LINKS = [
+const MASTER_LINKS = [
   { from: "beijing", to: "xian" },
   { from: "beijing", to: "shanghai" },
   { from: "shanghai", to: "wuhan" },
@@ -30,6 +36,16 @@ const LINKS = [
   { from: "chengdu", to: "xian" },
   { from: "chengdu", to: "wuhan" },
   { from: "wuhan", to: "xian" },
+  { from: "harbin", to: "beijing" },
+  { from: "hohhot", to: "beijing" },
+  { from: "hohhot", to: "xian" },
+  { from: "hangzhou", to: "shanghai" },
+  { from: "hangzhou", to: "shenzhen" },
+  { from: "guangzhou", to: "shenzhen" },
+  { from: "chongqing", to: "chengdu" },
+  { from: "chongqing", to: "wuhan" },
+  { from: "lanzhou", to: "xian" },
+  { from: "lanzhou", to: "chengdu" },
 ];
 
 const DOMAIN_NAMES: Record<string, string> = {
@@ -45,12 +61,20 @@ const DOMAIN_NAMES: Record<string, string> = {
 function getCityIdByRegion(region: string): string | null {
   if (!region) return null;
   const r = region.toLowerCase();
+  if (r.includes("哈尔滨") || r.includes("哈池") || r.includes("harbin")) return "harbin";
+  if (r.includes("呼和浩特") || r.includes("呼池") || r.includes("hohhot")) return "hohhot";
   if (r.includes("北京") || r.includes("beijing") || r.includes("华北")) return "beijing";
   if (r.includes("上海") || r.includes("shanghai") || r.includes("华东")) return "shanghai";
-  if (r.includes("深圳") || r.includes("广州") || r.includes("shenzhen") || r.includes("guangzhou") || r.includes("华南")) return "shenzhen";
-  if (r.includes("成都") || r.includes("重庆") || r.includes("chengdu") || r.includes("西南")) return "chengdu";
+  if (r.includes("深圳") || r.includes("shenzhen")) return "shenzhen";
+  if (r.includes("广州") || r.includes("guangzhou")) return "guangzhou";
+  if (r.includes("华南")) return "shenzhen";
+  if (r.includes("杭州") || r.includes("hangzhou")) return "hangzhou";
+  if (r.includes("成都") || r.includes("chengdu")) return "chengdu";
+  if (r.includes("重庆") || r.includes("chongqing")) return "chongqing";
+  if (r.includes("西南")) return "chengdu";
   if (r.includes("武汉") || r.includes("wuhan") || r.includes("华中")) return "wuhan";
   if (r.includes("西安") || r.includes("xian") || r.includes("西北")) return "xian";
+  if (r.includes("兰州") || r.includes("lanzhou")) return "lanzhou";
   return null;
 }
 
@@ -69,9 +93,9 @@ export class OpsMap extends LitElement {
   private getCitiesData() {
     const result: Record<string, Array<{ domain: string; score: number; status: string; alerts: number }>> = {};
     
-    // Initialize empty lists for all cities
-    for (const city of CITIES) {
-      result[city.id] = [];
+    // Initialize empty lists for all known cities
+    for (const cityId of Object.keys(ALL_CITY_COORDS)) {
+      result[cityId] = [];
     }
 
     // Process real clusters if present
@@ -173,8 +197,60 @@ export class OpsMap extends LitElement {
 
   render() {
     const citiesData = this.getCitiesData();
-    const hoveredCity = CITIES.find(c => c.id === this.hoveredCityId);
+    
+    // Resolve active cities from clusters
+    const activeCities = Object.keys(ALL_CITY_COORDS)
+      .filter(id => citiesData[id] && citiesData[id].length > 0)
+      .map(id => ({
+        id,
+        ...ALL_CITY_COORDS[id]
+      }));
+
+    const hoveredCity = activeCities.find(c => c.id === this.hoveredCityId);
     const hoveredCityData = hoveredCity ? citiesData[hoveredCity.id] : null;
+
+    // Build active connections
+    const activeLinks: Array<{ from: string; to: string }> = [];
+    const connectedCities = new Set<string>();
+
+    for (const link of MASTER_LINKS) {
+      const fromActive = activeCities.some(c => c.id === link.from);
+      const toActive = activeCities.some(c => c.id === link.to);
+      if (fromActive && toActive) {
+        activeLinks.push(link);
+        connectedCities.add(link.from);
+        connectedCities.add(link.to);
+      }
+    }
+
+    // Connect isolated active cities to their nearest active neighbor
+    if (activeCities.length > 1) {
+      for (const city of activeCities) {
+        if (!connectedCities.has(city.id)) {
+          let minDistance = Infinity;
+          let closestCityId: string | null = null;
+          for (const other of activeCities) {
+            if (other.id === city.id) continue;
+            const dist = Math.sqrt(Math.pow(city.x - other.x, 2) + Math.pow(city.y - other.y, 2));
+            if (dist < minDistance) {
+              minDistance = dist;
+              closestCityId = other.id;
+            }
+          }
+          if (closestCityId) {
+            const linkExists = activeLinks.some(l => 
+              (l.from === city.id && l.to === closestCityId) || 
+              (l.from === closestCityId && l.to === city.id)
+            );
+            if (!linkExists) {
+              activeLinks.push({ from: city.id, to: closestCityId });
+            }
+            connectedCities.add(city.id);
+            connectedCities.add(closestCityId);
+          }
+        }
+      }
+    }
 
     return html`
       <div class="ops-map-container">
@@ -182,7 +258,7 @@ export class OpsMap extends LitElement {
           <!-- Background tech grid pattern -->
           <defs>
             <pattern id="map-grid" width="20" height="20" patternUnits="userSpaceOnUse">
-              <path d="M 20 0 L 0 0 0 20" fill="none" stroke="rgba(255,255,255,0.03)" stroke-width="1"></path>
+              <path d="M 20 0 L 0 0 0 20" fill="none" stroke="rgba(148, 163, 184, 0.12)" stroke-width="1"></path>
             </pattern>
           </defs>
           <rect width="100%" height="100%" fill="url(#map-grid)" class="ops-map__grid-pattern"></rect>
@@ -206,9 +282,9 @@ export class OpsMap extends LitElement {
 
           <!-- Glowing Network Trunk Links -->
           <g class="ops-map__links">
-            ${LINKS.map(link => {
-              const fromCity = CITIES.find(c => c.id === link.from);
-              const toCity = CITIES.find(c => c.id === link.to);
+            ${activeLinks.map(link => {
+              const fromCity = activeCities.find(c => c.id === link.from);
+              const toCity = activeCities.find(c => c.id === link.to);
               if (!fromCity || !toCity) return nothing;
               return svg`
                 <line 
@@ -224,7 +300,7 @@ export class OpsMap extends LitElement {
 
           <!-- Cities Nodes & Orbiting Satellite Business Dots -->
           <g class="ops-map__nodes">
-            ${CITIES.map(city => {
+            ${activeCities.map(city => {
               const bList = citiesData[city.id] || [];
               const numSats = bList.length;
               const radius = 22; // Orbit radius
@@ -262,15 +338,21 @@ export class OpsMap extends LitElement {
                   <circle 
                     cx="${city.x}" 
                     cy="${city.y}" 
-                    r="9" 
-                    class="ops-map__node-halo ops-map__sat-dot--${cityStatus}" 
+                    class="ops-map__node-halo ops-map__node-halo--${cityStatus}" 
+                  ></circle>
+                  <!-- Middle ring for structural definition -->
+                  <circle 
+                    cx="${city.x}" 
+                    cy="${city.y}" 
+                    r="7" 
+                    class="ops-map__node-middle ops-map__node-middle--${cityStatus}" 
                   ></circle>
                   <!-- Inner core circle -->
                   <circle 
                     cx="${city.x}" 
                     cy="${city.y}" 
-                    r="5" 
-                    class="ops-map__node-center ops-map__sat-core ops-map__sat-dot--${cityStatus}" 
+                    r="3.5" 
+                    class="ops-map__node-center ops-map__node-center--${cityStatus}" 
                   ></circle>
                   
                   <!-- Satellite business indicator dots -->
@@ -291,7 +373,7 @@ export class OpsMap extends LitElement {
                     x="${city.x}" 
                     y="${city.y + 36}" 
                     class="ops-map__node-label"
-                  >${city.name.substring(0, 2)}</text>
+                  >${city.label}</text>
                 </g>
               `;
             })}

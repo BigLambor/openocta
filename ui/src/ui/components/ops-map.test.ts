@@ -67,10 +67,18 @@ describe("ops-map component", () => {
     expect(data.beijing[0]).toEqual({ domain: "hadoop", score: 42, status: "critical", alerts: 1 });
   });
 
-  it("renders SVG elements in DOM", async () => {
+  it("renders SVG elements in DOM dynamically based on clusters", async () => {
     const div = document.createElement("div");
     document.body.appendChild(div);
     const component = document.createElement("ops-map") as OpsMap;
+    
+    const mockClusters: OpsClusterRecord[] = [
+      { id: "c1", name: "北京集群", domain: "hadoop", region: "北京", nodeCount: 1, components: [], status: "healthy", createdAtMs: 0, updatedAtMs: 0 },
+      { id: "c2", name: "哈池", domain: "fi", region: "哈尔滨", nodeCount: 1, components: [], status: "warning", createdAtMs: 0, updatedAtMs: 0 },
+      { id: "c3", name: "杭州集群", domain: "gbase", region: "杭州", nodeCount: 1, components: [], status: "critical", createdAtMs: 0, updatedAtMs: 0 }
+    ];
+    component.clusters = mockClusters;
+    
     div.appendChild(component);
     
     await new Promise(resolve => setTimeout(resolve, 100)); // wait for Lit render
@@ -79,10 +87,15 @@ describe("ops-map component", () => {
     expect(svg).not.toBeNull();
     
     const nodes = component.querySelectorAll(".ops-map__node-group");
-    expect(nodes.length).toBe(6);
-    expect(component.querySelector("circle circle")).toBeNull();
-    expect(component.querySelectorAll(".ops-map__node-group > .ops-map__node-halo")).toHaveLength(6);
-    expect(component.querySelectorAll(".ops-map__node-group > .ops-map__node-center")).toHaveLength(6);
+    expect(nodes.length).toBe(3);
+    
+    const labels = Array.from(component.querySelectorAll(".ops-map__node-label")).map(el => el.textContent);
+    expect(labels).toContain("北京");
+    expect(labels).toContain("哈尔滨");
+    expect(labels).toContain("杭州");
+    
+    expect(component.querySelectorAll(".ops-map__node-group > .ops-map__node-halo")).toHaveLength(3);
+    expect(component.querySelectorAll(".ops-map__node-group > .ops-map__node-center")).toHaveLength(3);
     
     document.body.removeChild(div);
   });
