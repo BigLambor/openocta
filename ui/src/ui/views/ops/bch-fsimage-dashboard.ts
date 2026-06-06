@@ -2,7 +2,6 @@ import { LitElement, html, css, nothing } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import { fetchBchHdfsFsImage, HdfsFsImageStats } from "../../controllers/bch-client.ts";
 import { parseWorkbenchObjectScope } from "../../ops/workbench-context.ts";
-import { icons } from "../../icons.ts";
 
 @customElement("bch-fsimage-dashboard")
 export class BchFsImageDashboard extends LitElement {
@@ -59,39 +58,57 @@ export class BchFsImageDashboard extends LitElement {
       box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
     }
 
-    .ns-tabs-spacer {
-      flex: 1;
-    }
-
-    .ai-pill-btn {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      border: 1px solid rgba(59, 130, 246, 0.35);
-      background: rgba(59, 130, 246, 0.08);
-      color: var(--accent, #3b82f6);
-      border-radius: 999px;
-      padding: 6px 12px;
-      font-size: 12px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: all 0.15s ease;
-    }
-
-    .ai-pill-btn:hover:not(:disabled) {
-      background: var(--accent, #3b82f6);
-      color: #fff;
-    }
-
-    .ai-pill-btn:disabled {
-      opacity: 0.55;
-      cursor: not-allowed;
-    }
-
     .dashboard-body {
       flex: 1;
       padding: 24px;
       overflow-y: auto;
+    }
+
+    .hdfs-dashboard-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 18px;
+    }
+
+    .hdfs-dashboard-title {
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--text-primary);
+    }
+
+    .hdfs-dashboard-subtitle {
+      margin-top: 4px;
+      color: var(--text-muted);
+      font-size: 12px;
+    }
+
+    .ai-namespace-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border: 1px solid var(--border);
+      background: var(--bg);
+      color: var(--text-secondary);
+      border-radius: 8px;
+      padding: 7px 10px;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      white-space: nowrap;
+    }
+
+    .ai-namespace-link:hover:not(:disabled) {
+      color: var(--accent, #3b82f6);
+      border-color: rgba(59, 130, 246, 0.35);
+      background: rgba(59, 130, 246, 0.05);
+    }
+
+    .ai-namespace-link:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
     }
 
     /* Top Cards Grid */
@@ -156,14 +173,15 @@ export class BchFsImageDashboard extends LitElement {
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      width: 28px;
-      height: 28px;
+      width: 30px;
+      height: 30px;
       border: 1px solid rgba(59, 130, 246, 0.28);
       border-radius: 999px;
       background: rgba(59, 130, 246, 0.06);
       color: var(--accent, #3b82f6);
       cursor: pointer;
       flex: 0 0 auto;
+      font-size: 15px;
     }
 
     .section-ai-btn:hover {
@@ -395,7 +413,7 @@ export class BchFsImageDashboard extends LitElement {
       <div class="section-title">
         <span>${title}</span>
         <button class="section-ai-btn" type="button" title="问问 AI" @click=${ask}>
-          ${icons.messageSquare}
+          🤖
         </button>
       </div>
     `;
@@ -417,10 +435,6 @@ export class BchFsImageDashboard extends LitElement {
             ${ns}
           </button>
         `)}
-        <div class="ns-tabs-spacer"></div>
-        <button class="ai-pill-btn" type="button" ?disabled=${this.aiPreparing} @click=${() => this.askAiForAllNamespaces()}>
-          ${icons.messageSquare} ${this.aiPreparing ? "分析中..." : "分析全部 Namespace"}
-        </button>
       </div>
 
       <div class="dashboard-body">
@@ -455,6 +469,21 @@ export class BchFsImageDashboard extends LitElement {
     const stats = this.stats!;
 
     return html`
+      <div class="hdfs-dashboard-head">
+        <div>
+          <div class="hdfs-dashboard-title">${stats.namespace} 容量与元数据画像</div>
+          <div class="hdfs-dashboard-subtitle">基于离线 FSImage 的 namespace 级容量、小文件、目录深度和冷热数据分析</div>
+        </div>
+        <button
+          class="ai-namespace-link"
+          type="button"
+          ?disabled=${this.aiPreparing}
+          @click=${() => this.askAiForAllNamespaces()}
+        >
+          🤖 ${this.aiPreparing ? "分析中..." : "对比全部 NS"}
+        </button>
+      </div>
+
       <div class="summary-grid">
         <div class="summary-card">
           <div class="summary-num">${stats.totalRecords}</div>

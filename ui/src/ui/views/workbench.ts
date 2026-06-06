@@ -29,7 +29,6 @@ import {
   OPS_SCENARIOS,
 } from "../ops/scenario-registry.ts";
 import { renderScenarioComponent } from "../ops/scenario-components.ts";
-import { buildScenarioResult, type OpsScenarioResult } from "../ops/scenario-results.ts";
 import {
   formatWorkbenchObjectScope,
   normalizeWorkbenchObjectScope,
@@ -204,16 +203,11 @@ function markdownToLines(text: string): string[] {
 }
 
 function renderRichText(text: string) {
-  const blocks = (text || "")
-    .split(/\n{2,}/)
-    .map((b) => b.trim())
-    .filter(Boolean);
-  if (blocks.length === 0) {
+  const trimmed = (text || "").trim();
+  if (!trimmed) {
     return nothing;
   }
-  return html`${blocks.map(
-    (block) => html`<p style="margin:0 0 8px; white-space:pre-wrap;">${block}</p>`,
-  )}`;
+  return html`<div class="ops-ai-markdown">${unsafeHTML(toSanitizedMarkdownHtml(trimmed))}</div>`;
 }
 
 function renderAiConclusion(props: WorkbenchProps, active: WorkbenchAlertGroup, mode: "root-cause" | "similar" | "action") {
@@ -253,7 +247,20 @@ function renderAiConclusion(props: WorkbenchProps, active: WorkbenchAlertGroup, 
   return html`<div class="detail-section__content highlight">${fallback}</div>`;
 }
 
-function aiModeLabel(mode: WorkbenchAiMode): string {
+function aiModeLabel(mode: WorkbenchAiMode, context?: WorkbenchScenarioAiContext | null): string {
+  const objectType = context?.objectType ?? "";
+  if (objectType === "flink_job") {
+    return mode === "action" ? "处置建议" : "实时诊断";
+  }
+  if (objectType === "spark_job") {
+    return mode === "action" ? "治理建议" : "AI 复核";
+  }
+  if (objectType === "hdfs_namespace_set") {
+    return mode === "action" ? "治理建议" : "全局分析";
+  }
+  if (objectType === "hdfs_chart") {
+    return mode === "action" ? "治理建议" : "图表解读";
+  }
   switch (mode) {
     case "similar":
       return "相似聚合";
@@ -264,7 +271,28 @@ function aiModeLabel(mode: WorkbenchAiMode): string {
   }
 }
 
-function aiModeDescription(mode: WorkbenchAiMode, isScenario: boolean): string {
+function aiModeDescription(mode: WorkbenchAiMode, isScenario: boolean, context?: WorkbenchScenarioAiContext | null): string {
+  const objectType = context?.objectType ?? "";
+  if (objectType === "flink_job") {
+    return mode === "action"
+      ? "基于当前 Flink 作业实时指标，给出处置步骤和风险边界。"
+      : "围绕当前 Flink 作业运行态，分析背压、Checkpoint、资源和重启风险。";
+  }
+  if (objectType === "spark_job") {
+    return mode === "action"
+      ? "把后台调优结论转成可落地的治理动作和风险说明。"
+      : "复核 T+1 调优结论的证据充分性、收益估算和潜在误判点。";
+  }
+  if (objectType === "hdfs_namespace_set") {
+    return mode === "action"
+      ? "给出跨 Namespace 的清理、归档和扩容治理建议。"
+      : "横向对比所有 Namespace，识别容量、小文件、目录深度和 Trash 风险。";
+  }
+  if (objectType === "hdfs_chart") {
+    return mode === "action"
+      ? "基于当前图表生成治理建议和下一步动作。"
+      : "解释当前图表暴露的风险、异常点和判断依据。";
+  }
   if (mode === "similar") {
     return isScenario
       ? "识别可批量治理的相似对象、相似风险与聚合规则。"
@@ -281,11 +309,17 @@ function aiModeDescription(mode: WorkbenchAiMode, isScenario: boolean): string {
 function renderAiTaskSwitch(
   mode: WorkbenchAiMode,
   busy: boolean,
+  modes: WorkbenchAiMode[],
+  context: WorkbenchScenarioAiContext | null | undefined,
   onModeChange: (nextMode: WorkbenchAiMode) => void,
 ) {
-  const modes: WorkbenchAiMode[] = ["root-cause", "similar", "action"];
   return html`
-    <div class="ops-ai-task-switch" role="tablist" aria-label="AI 分析任务">
+    <div
+      class="ops-ai-task-switch"
+      role="tablist"
+      aria-label="AI 分析任务"
+      style="grid-template-columns: repeat(${modes.length}, minmax(0, 1fr));"
+    >
       ${modes.map(
         (item) => html`
           <button
@@ -300,7 +334,7 @@ function renderAiTaskSwitch(
               }
             }}
           >
-            ${aiModeLabel(item)}
+            ${aiModeLabel(item, context)}
           </button>
         `,
       )}
@@ -347,6 +381,17 @@ function renderScenarioAiConclusion(props: WorkbenchProps, scenario: OpsScenario
   return html`<div class="detail-section__content highlight">${fallback}</div>`;
 }
 
+function aiModesForContext(active: WorkbenchAlertGroup | undefined, context: WorkbenchScenarioAiContext | null): WorkbenchAiMode[] {
+  if (active) {
+    return ["root-cause", "similar", "action"];
+  }
+  const objectType = context?.objectType ?? "";
+  if (objectType === "flink_job" || objectType === "spark_job" || objectType === "hdfs_namespace_set" || objectType === "hdfs_chart") {
+    return ["root-cause", "action"];
+  }
+  return ["root-cause", "action"];
+}
+
 function renderAiPanel(
   props: WorkbenchProps,
   active: WorkbenchAlertGroup | undefined,
@@ -356,12 +401,14 @@ function renderAiPanel(
   if (!props.aiPanelOpen || (!active && !scenario)) {
     return nothing;
   }
-  const mode = props.aiPanelMode ?? "root-cause";
+  const requestedMode = props.aiPanelMode ?? "root-cause";
   const status = props.aiStatus ?? "idle";
   const busy = status === "loading" || status === "streaming";
   const isScenario = !!scenario;
   const title = isScenario ? "AI 辅助分析" : "告警 AI 分析";
   const panelContext = props.aiPanelContext ?? null;
+  const modes = aiModesForContext(active, panelContext);
+  const mode = modes.includes(requestedMode) ? requestedMode : modes[0];
   const targetTitle = panelContext?.title ?? scenario?.title ?? active?.title ?? "";
   const evidence = scenario
     ? (panelContext?.evidence?.length ? panelContext.evidence : scenario.inputs)
@@ -393,8 +440,8 @@ function renderAiPanel(
         </button>
       </div>
       <div class="ops-ai-drawer__body">
-        ${renderAiTaskSwitch(mode, busy, onModeChange)}
-        <div class="ops-ai-mode-note">${aiModeDescription(mode, isScenario)}</div>
+        ${renderAiTaskSwitch(mode, busy, modes, panelContext, onModeChange)}
+        <div class="ops-ai-mode-note">${aiModeDescription(mode, isScenario, panelContext)}</div>
         <div class="detail-section">
           <div class="detail-section__header">${icons.users} 数字员工模板</div>
           <div class="detail-section__content">
@@ -431,9 +478,9 @@ function renderAiPanel(
           </div>
         </div>
       </div>
-      <div class="ops-ai-drawer__footer">
-        ${active
-          ? html`
+      ${active
+        ? html`
+            <div class="ops-ai-drawer__footer">
               <button
                 class="ops-btn ops-btn--primary"
                 type="button"
@@ -451,28 +498,13 @@ function renderAiPanel(
               >
                 驳回
               </button>
-            `
-          : scenario
-            ? html`
-                <button
-                  class="ops-btn ops-btn--primary"
-                  type="button"
-                  ?disabled=${busy}
-                  @click=${() => props.onRecordScenarioSuggestion?.(scenario)}
-                >
-                  记录闭环
-                </button>
-              `
-            : nothing}
-        <div style="flex-grow:1;"></div>
-        <button
-          class="ops-btn ops-btn--ghost"
-          type="button"
-          @click=${() => active ? props.onOpenTasks?.(active.id) : scenario ? props.onOpenScenarioTasks?.(scenario) : undefined}
-        >
-          执行记录
-        </button>
-      </div>
+              <div style="flex-grow:1;"></div>
+              <button class="ops-btn ops-btn--ghost" type="button" @click=${() => props.onOpenTasks?.(active.id)}>
+                执行记录
+              </button>
+            </div>
+          `
+        : nothing}
     </aside>
   `;
 }
@@ -727,41 +759,6 @@ function renderTagList(label: string, items: string[]) {
   `;
 }
 
-function renderScenarioClosurePanel(
-  props: WorkbenchProps,
-  scenario: OpsScenario,
-  selectedObjectScope: string,
-  selectedTimeRange: WorkbenchTimeRange,
-) {
-  const busy = props.aiStatus === "loading" || props.aiStatus === "streaming";
-  return html`
-    <section class="ops-card workbench-scenario-toolbar">
-      <div class="workbench-closure-header">
-        <div>
-          <div class="workbench-scenario-toolbar__title">${scenario.title}</div>
-          <div class="muted">对象 ${selectedObjectScope || "all"} · 时间 ${selectedTimeRange}</div>
-        </div>
-        <div class="workbench-closure-actions">
-          <button
-            class="ops-btn ops-btn--primary"
-            type="button"
-            ?disabled=${busy}
-            @click=${() => props.onOpenScenarioAi?.(scenario, "root-cause")}
-          >
-            ${icons.messageSquare} AI 辅助分析
-          </button>
-          <button class="ops-btn" type="button" ?disabled=${busy} @click=${() => props.onRecordScenarioSuggestion?.(scenario)}>
-            记录闭环
-          </button>
-          <button class="ops-btn ops-btn--ghost" type="button" @click=${() => props.onOpenScenarioTasks?.(scenario)}>
-            执行记录
-          </button>
-        </div>
-      </div>
-    </section>
-  `;
-}
-
 function renderWorkbenchContextBar(
   view: WorkbenchView,
   selectedDomain: OpsDomainKey,
@@ -953,10 +950,8 @@ function renderScenarioDetail(
     </div>
   `;
 
-  const result = buildScenarioResult(scenario, selectedObjectScope, selectedTimeRange);
   return html`
     ${back}
-    ${renderScenarioClosurePanel(props, scenario, selectedObjectScope, selectedTimeRange)}
     ${renderScenarioComponent(scenario, {
       host: props.host,
       objectScope: selectedObjectScope,

@@ -56,9 +56,9 @@ function radarPoint(cx: number, cy: number, r: number, angleDeg: number, norm: n
 
 export function renderBchJobHealthOverview(props: JobHealthOverviewProps) {
   const { buckets, radar } = props;
-  const cx = 130;
-  const cy = 108;
-  const r = 72;
+  const cx = 180;
+  const cy = 145;
+  const r = 96;
   const sNorm = Math.min(1, Math.max(0, radar.stability / 100));
   const eNorm = Math.min(1, Math.max(0, radar.efficiency / 100));
   const pNorm = Math.min(1, Math.max(0, radar.performance / 100));
@@ -174,7 +174,7 @@ export function renderBchJobHealthOverview(props: JobHealthOverviewProps) {
         border: 1px solid #e8ebf0;
         border-radius: 12px;
         padding: 18px 20px 20px;
-        min-height: 248px;
+        min-height: 328px;
         box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
       }
 
@@ -198,13 +198,13 @@ export function renderBchJobHealthOverview(props: JobHealthOverviewProps) {
         display: flex;
         align-items: center;
         justify-content: center;
-        min-height: 200px;
+        min-height: 286px;
       }
 
       .bch-overview__radar-label {
-        font-size: 12px;
+        font-size: 14px;
         fill: #6b7280;
-        font-weight: 500;
+        font-weight: 600;
       }
 
       .bch-overview__summary {
@@ -295,7 +295,7 @@ export function renderBchJobHealthOverview(props: JobHealthOverviewProps) {
         <div class="bch-overview__panel">
           <div class="bch-overview__panel-title">集群多维评估均值</div>
           <div class="bch-overview__radar-wrap">
-            <svg width="280" height="230" viewBox="0 0 260 220" aria-label="集群多维评估雷达图">
+            <svg width="100%" height="300" viewBox="0 0 360 300" aria-label="集群多维评估雷达图">
               <polygon points="${outer}" fill="none" stroke="#e5e7eb" stroke-width="1" />
               <polygon points="${mid}" fill="none" stroke="#eceff3" stroke-width="1" />
               <polygon points="${inner}" fill="none" stroke="#f1f3f6" stroke-width="1" />
@@ -303,9 +303,9 @@ export function renderBchJobHealthOverview(props: JobHealthOverviewProps) {
               <line x1="${cx}" y1="${cy}" x2="${radarPoint(cx, cy, r, 150, 1).split(",")[0]}" y2="${radarPoint(cx, cy, r, 150, 1).split(",")[1]}" stroke="#e5e7eb" />
               <line x1="${cx}" y1="${cy}" x2="${radarPoint(cx, cy, r, 30, 1).split(",")[0]}" y2="${radarPoint(cx, cy, r, 30, 1).split(",")[1]}" stroke="#e5e7eb" />
               <polygon points="${poly}" fill="rgba(37, 99, 235, 0.18)" stroke="#3b82f6" stroke-width="2" />
-              <text x="${cx}" y="24" text-anchor="middle" class="bch-overview__radar-label">稳定性</text>
-              <text x="34" y="196" text-anchor="middle" class="bch-overview__radar-label">效率</text>
-              <text x="226" y="196" text-anchor="middle" class="bch-overview__radar-label">性能</text>
+              <text x="${cx}" y="28" text-anchor="middle" class="bch-overview__radar-label">稳定性</text>
+              <text x="58" y="274" text-anchor="middle" class="bch-overview__radar-label">效率</text>
+              <text x="302" y="274" text-anchor="middle" class="bch-overview__radar-label">性能</text>
             </svg>
           </div>
         </div>

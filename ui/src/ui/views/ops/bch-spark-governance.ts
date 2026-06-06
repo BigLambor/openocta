@@ -980,7 +980,7 @@ export class BchSparkGovernance extends LitElement {
         bubbles: true,
         composed: true,
         detail: {
-          mode: "action",
+          mode: "root-cause",
           title: `${job.name} · AI 复核`,
           objectType: "spark_job",
           objectId: job.id,
