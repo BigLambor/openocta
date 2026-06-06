@@ -251,53 +251,60 @@ function renderAiPanel(props: WorkbenchProps, active: WorkbenchAlertGroup | unde
   const busy = status === "loading" || status === "streaming";
 
   return html`
-    <aside class="ops-card ops-shell-side detail-column">
-      <div class="column-header" style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
-        <span>${icons.messageSquare} ${title}</span>
-        <button class="ops-btn ops-btn--ghost" type="button" @click=${props.onCloseAiPanel}>关闭</button>
+    <div class="ops-ai-drawer__overlay" @click=${props.onCloseAiPanel}></div>
+    <aside class="ops-ai-drawer">
+      <div class="ops-ai-drawer__header">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span class="ops-ai-drawer__icon">${icons.messageSquare}</span>
+          <span class="ops-ai-drawer__title">${title}</span>
+        </div>
+        <button class="ops-btn ops-btn--icon" type="button" @click=${props.onCloseAiPanel} title="关闭">
+          ${icons.x || "✕"}
+        </button>
       </div>
-      <div class="detail-section">
-        <div class="detail-section__header">${icons.users} 数字员工模板</div>
-        <div class="detail-section__content">
-          <strong>${props.assistantName ?? "BCH 值班数字员工"}</strong>
-          <p class="muted">${props.assistantPersona ?? "专家人设：BCH 告警降噪、根因候选、影响面判断、处置建议。"}</p>
+      <div class="ops-ai-drawer__body">
+        <div class="detail-section">
+          <div class="detail-section__header">${icons.users} 数字员工模板</div>
+          <div class="detail-section__content">
+            <strong>${props.assistantName ?? "BCH 值班数字员工"}</strong>
+            <p class="muted">${props.assistantPersona ?? "专家人设：BCH 告警降噪、根因候选、影响面判断、处置建议。"}</p>
+          </div>
+        </div>
+        <div class="detail-section">
+          <div class="detail-section__header">${icons.zap} 结论</div>
+          ${renderAiConclusion(props, active, mode)}
+        </div>
+        <div class="detail-section">
+          <div class="detail-section__header">${icons.scrollText} 告警证据</div>
+          <div class="detail-section__content">
+            ${lines.length
+              ? html`<ul class="minimal-list">${lines.map((line) => html`<li>${line}</li>`)}</ul>`
+              : html`<p class="muted">暂无可用分析证据。</p>`}
+          </div>
         </div>
       </div>
-      <div class="detail-section">
-        <div class="detail-section__header">${icons.zap} 结论</div>
-        ${renderAiConclusion(props, active, mode)}
-      </div>
-      <div class="detail-section">
-        <div class="detail-section__header">${icons.scrollText} 告警证据</div>
-        <div class="detail-section__content">
-          ${lines.length
-            ? html`<ul>${lines.map((line) => html`<li>${line}</li>`)}</ul>`
-            : html`<p class="muted">暂无可用分析证据。</p>`}
-        </div>
-      </div>
-      <div class="detail-section">
-        <div style="display:flex; gap:8px; flex-wrap:wrap;">
-          <button
-            class="ops-btn ops-btn--primary"
-            type="button"
-            ?disabled=${busy}
-            title=${busy ? "请等待 AI 分析完成后再确认" : ""}
-            @click=${() => props.onAcceptSuggestion?.(active.id)}
-          >
-            确认建议并记录
-          </button>
-          <button
-            class="ops-btn"
-            type="button"
-            ?disabled=${busy}
-            @click=${() => props.onRejectSuggestion?.(active.id)}
-          >
-            驳回建议并记录
-          </button>
-          <button class="ops-btn ops-btn--ghost" type="button" @click=${() => props.onOpenTasks?.(active.id)}>
-            查看执行记录
-          </button>
-        </div>
+      <div class="ops-ai-drawer__footer">
+        <button
+          class="ops-btn ops-btn--primary"
+          type="button"
+          ?disabled=${busy}
+          title=${busy ? "请等待 AI 分析完成后再确认" : ""}
+          @click=${() => props.onAcceptSuggestion?.(active.id)}
+        >
+          确认建议
+        </button>
+        <button
+          class="ops-btn"
+          type="button"
+          ?disabled=${busy}
+          @click=${() => props.onRejectSuggestion?.(active.id)}
+        >
+          驳回
+        </button>
+        <div style="flex-grow:1;"></div>
+        <button class="ops-btn ops-btn--ghost" type="button" @click=${() => props.onOpenTasks?.(active.id)}>
+          执行记录
+        </button>
       </div>
     </aside>
   `;
@@ -658,52 +665,40 @@ function renderWorkbenchContextBar(
     WORKBENCH_TIME_RANGES.find((range) => range.id === selectedTimeRange)?.label ?? selectedTimeRange,
   ].filter(Boolean);
   return html`
-    <section class="ops-card workbench-context-card">
-      <div class="workbench-context-grid">
-        <div class="workbench-context-field">
-          <div class="stat-label">技术域</div>
-          <div class="workbench-context-value">${opsDomainLabel(selectedDomain)}</div>
-        </div>
-        <div class="workbench-context-field">
-          <div class="stat-label">工作中心</div>
-          <div class="workbench-context-value">${WORKBENCH_VIEW_META[view].title}</div>
-        </div>
-        <div class="workbench-context-field workbench-context-field--wide">
-          <div class="stat-label">对象范围</div>
-          <label class="select">
-            <select
-              .value=${selectedObjectScope}
-              @change=${(e: Event) => props.onObjectScopeChange?.((e.target as HTMLSelectElement).value)}
-            >
-              ${objectOptions.map(
-                (option) => html`<option value=${option.id} ?selected=${option.id === selectedObjectScope}>
-                  ${option.label}${option.subtitle ? ` · ${option.subtitle}` : ""}
-                </option>`,
-              )}
-            </select>
-          </label>
-        </div>
-        <div class="workbench-context-field">
-          <div class="stat-label">时间范围</div>
-          <label class="select">
-            <select
-              .value=${selectedTimeRange}
-              @change=${(e: Event) =>
-                props.onTimeRangeChange?.(normalizeWorkbenchTimeRange((e.target as HTMLSelectElement).value))}
-            >
-              ${WORKBENCH_TIME_RANGES.map(
-                (range) => html`<option value=${range.id} ?selected=${range.id === selectedTimeRange}>${range.label}</option>`,
-              )}
-            </select>
-          </label>
-        </div>
+    <div class="workbench-filter-bar">
+      <div class="workbench-filter-group">
+        <span class="workbench-filter-label">对象:</span>
+        <label class="select minimal-select">
+          <select
+            .value=${selectedObjectScope}
+            @change=${(e: Event) => props.onObjectScopeChange?.((e.target as HTMLSelectElement).value)}
+          >
+            ${objectOptions.map(
+              (option) => html`<option value=${option.id} ?selected=${option.id === selectedObjectScope}>
+                ${option.label}${option.subtitle ? ` · ${option.subtitle}` : ""}
+              </option>`,
+            )}
+          </select>
+        </label>
       </div>
-      <div class="workbench-context-path">
-        <span>当前上下文</span>
-        <strong>${contextParts.join(" / ")}</strong>
-        ${objectScope.subtitle ? html`<em>${objectScope.subtitle}</em>` : nothing}
+      <div class="workbench-filter-group">
+        <span class="workbench-filter-label">时间:</span>
+        <label class="select minimal-select">
+          <select
+            .value=${selectedTimeRange}
+            @change=${(e: Event) =>
+              props.onTimeRangeChange?.(normalizeWorkbenchTimeRange((e.target as HTMLSelectElement).value))}
+          >
+            ${WORKBENCH_TIME_RANGES.map(
+              (range) => html`<option value=${range.id} ?selected=${range.id === selectedTimeRange}>${range.label}</option>`,
+            )}
+          </select>
+        </label>
       </div>
-    </section>
+      <div class="workbench-filter-path">
+        ${contextParts.join(" / ")}
+      </div>
+    </div>
   `;
 }
 
@@ -713,44 +708,28 @@ function renderScenarioCard(
   selectedDomain: OpsDomainKey,
 ) {
   return html`
-    <article class="workbench-scenario-card">
-      <div class="workbench-scenario-card__icon">${icons[scenario.icon] ?? icons.folder}</div>
-      <div class="workbench-scenario-card__body">
-        <div class="workbench-scenario-card__head">
-          <div>
-            <h3>${scenario.title}</h3>
-            <p>${scenario.summary}</p>
-          </div>
-          <span class="score-badge score-badge--${scenario.maturity === "planned" ? "unknown" : "ok"}">
+    <article
+      class="minimal-scenario-card"
+      @click=${() => {
+        if (selectedDomain === "all") {
+          props.onDomainChange?.(scenario.domain);
+        }
+        props.onSelectScenario?.(scenario.id);
+      }}
+    >
+      <div class="minimal-scenario-card__icon">${icons[scenario.icon] ?? icons.folder}</div>
+      <div class="minimal-scenario-card__body">
+        <div class="minimal-scenario-card__header">
+          <h3>${scenario.title}</h3>
+          <span class="minimal-badge minimal-badge--${scenario.maturity === "planned" ? "muted" : "ok"}">
             ${maturityLabel(scenario.maturity)}
           </span>
         </div>
-        <dl class="workbench-scenario-card__meta">
-          <div><dt>技术域</dt><dd>${opsDomainLabel(scenario.domain, true)}</dd></div>
-          <div><dt>自动化</dt><dd>${automationLabel(scenario.automationLevel)}</dd></div>
-          <div><dt>对象</dt><dd>${scenario.objectTypes.join(" / ")}</dd></div>
-          <div><dt>主指标</dt><dd>${scenario.primaryMetric ?? "-"}</dd></div>
-        </dl>
-        <div class="workbench-scenario-card__tags">
-          ${scenario.triggers.map((trigger) => html`<span class="workbench-tag">${triggerLabel(trigger)}</span>`)}
-        </div>
-        <div class="workbench-scenario-card__sections">
-          ${renderTagList("输入证据", scenario.inputs)}
-          ${renderTagList("输出成果", scenario.outputs)}
-        </div>
-        <div class="workbench-scenario-card__footer">
-          <button
-            class="ops-btn ops-btn--primary"
-            type="button"
-            @click=${() => {
-              if (selectedDomain === "all") {
-                props.onDomainChange?.(scenario.domain);
-              }
-              props.onSelectScenario?.(scenario.id);
-            }}
-          >
-            进入专项
-          </button>
+        <p class="minimal-scenario-card__desc">${scenario.summary}</p>
+        <div class="minimal-scenario-card__tags">
+          <span class="minimal-tag">${opsDomainLabel(scenario.domain, true)}</span>
+          <span class="minimal-tag">${automationLabel(scenario.automationLevel)}</span>
+          ${scenario.triggers.map((t) => html`<span class="minimal-tag">${triggerLabel(t)}</span>`)}
         </div>
       </div>
     </article>
@@ -789,77 +768,41 @@ function renderScenarioDirectory(props: WorkbenchProps, view: WorkbenchView, sel
   const filteredScenarios = filterWorkbenchScenarios(scenarios, scenarioSearch, maturityFilter);
 
   return html`
-    <div class="ops-summary-cards" style="margin-bottom: 14px;">
-      <div class="ops-card stat-card">
-        <div class="stat-icon-slot">${icons.folder}</div>
-        <div class="stat-body">
-          <div class="stat-label">场景总数</div>
-          <div class="stat-value">${stats.total}</div>
-          <div class="muted">${selectedDomain === "all" ? "跨域已注册场景" : `${opsDomainLabel(selectedDomain)} 已注册场景`}</div>
-        </div>
+    <div class="minimal-directory-header">
+      <div class="minimal-directory-stats">
+        共 ${stats.total} 个注册场景 (${connectedCount} 已接入)
       </div>
-      <div class="ops-card stat-card">
-        <div class="stat-icon-slot">${icons.layout}</div>
-        <div class="stat-body">
-          <div class="stat-label">当前中心</div>
-          <div class="stat-value">${activeCenterCount}</div>
-          <div class="muted">${WORKBENCH_VIEW_META[view].title} 可用场景</div>
-        </div>
-      </div>
-      <div class="ops-card stat-card">
-        <div class="stat-icon-slot">${icons.checkCircle}</div>
-        <div class="stat-body">
-          <div class="stat-label">试点/已接入</div>
-          <div class="stat-value ok">${connectedCount}</div>
-          <div class="muted">Beta、已接入或自动化闭环</div>
-        </div>
-      </div>
-      <div class="ops-card stat-card">
-        <div class="stat-icon-slot">${icons.info}</div>
-        <div class="stat-body">
-          <div class="stat-label">规划中</div>
-          <div class="stat-value info">${stats.maturity.planned}</div>
-          <div class="muted">已有对象、输入、输出和 Runbook 骨架</div>
-        </div>
+      <div class="minimal-directory-filters">
+        <input
+          class="minimal-search-input"
+          type="search"
+          autocomplete="off"
+          placeholder="搜索场景..."
+          .value=${scenarioSearch}
+          @input=${(e: Event) => props.onScenarioSearchChange?.((e.target as HTMLInputElement).value)}
+        />
+        <select
+          class="minimal-select"
+          .value=${maturityFilter}
+          @change=${(e: Event) =>
+            props.onScenarioMaturityFilterChange?.(
+              normalizeScenarioMaturityFilter((e.target as HTMLSelectElement).value),
+            )}
+        >
+          <option value="all" ?selected=${maturityFilter === "all"}>全部成熟度</option>
+          <option value="planned" ?selected=${maturityFilter === "planned"}>规划中</option>
+          <option value="beta" ?selected=${maturityFilter === "beta"}>Beta</option>
+          <option value="connected" ?selected=${maturityFilter === "connected"}>已接入</option>
+          <option value="automated" ?selected=${maturityFilter === "automated"}>自动化闭环</option>
+        </select>
       </div>
     </div>
-    <section class="ops-card" style="margin-bottom: 14px;">
-      <div class="column-header" style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
-        <span>场景目录</span>
-        <span class="muted">当前显示 ${filteredScenarios.length} / ${scenarios.length}</span>
-      </div>
-      <div style="display:grid; grid-template-columns: minmax(220px, 1fr) minmax(180px, 240px); gap:12px; padding:14px;">
-        <label class="input" style="display:block;">
-          <input
-            type="search"
-            autocomplete="off"
-            placeholder="搜索场景、对象、输入证据或输出成果"
-            .value=${scenarioSearch}
-            @input=${(e: Event) => props.onScenarioSearchChange?.((e.target as HTMLInputElement).value)}
-          />
-        </label>
-        <label class="select" style="display:block;">
-          <select
-            .value=${maturityFilter}
-            @change=${(e: Event) =>
-              props.onScenarioMaturityFilterChange?.(
-                normalizeScenarioMaturityFilter((e.target as HTMLSelectElement).value),
-              )}
-          >
-            <option value="all" ?selected=${maturityFilter === "all"}>全部成熟度</option>
-            <option value="planned" ?selected=${maturityFilter === "planned"}>规划中</option>
-            <option value="beta" ?selected=${maturityFilter === "beta"}>Beta</option>
-            <option value="connected" ?selected=${maturityFilter === "connected"}>已接入</option>
-            <option value="automated" ?selected=${maturityFilter === "automated"}>自动化闭环</option>
-          </select>
-        </label>
-      </div>
+
+    <div class="minimal-scenario-list">
       ${filteredScenarios.length === 0
-        ? html`<div class="empty-placeholder empty-placeholder--compact">没有匹配的场景，可调整关键字或成熟度过滤。</div>`
-        : html`<div class="workbench-scenario-list">
-            ${filteredScenarios.map((scenario) => renderScenarioCard(props, scenario, selectedDomain))}
-          </div>`}
-    </section>
+        ? html`<div class="empty-placeholder">没有匹配的场景。</div>`
+        : filteredScenarios.map((scenario) => renderScenarioCard(props, scenario, selectedDomain))}
+    </div>
   `;
 }
 
@@ -912,51 +855,25 @@ function renderEventsView(props: WorkbenchProps, active: WorkbenchAlertGroup | u
       ? html`<div class="ops-panel" style="margin-bottom:12px;">${renderOpsError({ message: props.alertsError })}</div>`
       : nothing}
 
-    ${renderOpsShellStatGrid([
-      {
-        label: "待处理告警组",
-        value: props.alertGroups.length,
-        hint: "合并后的核心故障组",
-        tone: "warn",
-        icon: "bell",
-      },
-      {
-        label: "严重告警",
-        value: criticalCount,
-        hint: "需优先处理",
-        tone: "danger",
-        icon: "alertTriangle",
-      },
-      {
-        label: "原始事件",
-        value: originalTotal,
-        hint: "跨域事件条数",
-        tone: "info",
-        icon: "zap",
-      },
-      {
-        label: "警告级",
-        value: warningCount,
-        hint: "巡检/治理候选",
-        tone: "ok",
-        icon: "historyClock",
-      },
-    ])}
-
-    <div class="ops-main-columns ops-shell-columns ${props.aiPanelOpen && active ? "ops-shell-columns--with-side" : ""}">
-      <div class="ops-card list-column">
-        <div class="column-header">${props.domainName} 告警列表</div>
+    <div class="ops-main-columns ops-shell-columns workbench-events-layout">
+      <div class="list-column">
+        <div class="minimal-column-header">
+          <span>待处理告警组</span>
+          <span class="minimal-column-stats">
+            (共 ${originalTotal} 原始事件, <span class="${criticalCount > 0 ? "text-danger" : "muted"}">${criticalCount} 严重</span>)
+          </span>
+        </div>
         ${props.alertsLoading
           ? html`<div class="loading-placeholder">${icons.loader} 加载中...</div>`
           : props.alertGroups.length === 0
             ? html`<div class="empty-placeholder">暂无待处理告警。</div>`
             : html`
-                <div class="alert-list">
+                <div class="alert-list minimal-alert-list">
                   ${props.alertGroups.map(
                     (g) => html`
                       <button
                         type="button"
-                        class="alert-item ${g.id === active?.id ? "alert-item--active" : ""} alert-item--${g.severity}"
+                        class="alert-item minimal-alert-item ${g.id === active?.id ? "alert-item--active" : ""}"
                         @click=${() => props.onSelectAlertGroup?.(g.id)}
                       >
                         <div class="alert-item__meta">
@@ -965,9 +882,7 @@ function renderEventsView(props: WorkbenchProps, active: WorkbenchAlertGroup | u
                         </div>
                         <div class="alert-item__title">${g.title}</div>
                         <div class="alert-item__noise">
-                          <span>原始告警: <strong>${g.originalCount}</strong> 次</span>
-                          <span class="divider">|</span>
-                          <span class="rate">降噪后: <strong>${g.reducedTo}</strong> 组</span>
+                          <span>合并了 <strong>${g.originalCount}</strong> 组告警</span>
                         </div>
                       </button>
                     `,
@@ -976,22 +891,22 @@ function renderEventsView(props: WorkbenchProps, active: WorkbenchAlertGroup | u
               `}
       </div>
 
-      <div class="ops-card detail-column">
-        <div class="column-header">告警详情与 AI 操作</div>
+      <div class="detail-column minimal-detail-column">
         ${!active
           ? html`<div class="empty-placeholder">请选择一个告警组。</div>`
           : html`
               <div class="alert-detail">
-                <div class="detail-section">
-                  <div class="detail-section__title">${active.title}</div>
+                <div class="minimal-detail-header">
+                  <h2 class="minimal-detail-title">${active.title}</h2>
                   <div class="detail-meta">
-                    <span class="detail-time">生成时间: ${active.timestamp}</span>
-                    <span class="detail-count">关联原始事件: ${active.originalCount} 次</span>
+                    <span class="detail-time">${active.timestamp}</span>
+                    <span class="detail-count">关联 ${active.originalCount} 次事件</span>
                   </div>
                 </div>
+                
                 <div class="detail-section">
                   <div class="detail-section__header">${icons.zap} 根因候选</div>
-                  <div class="detail-section__content highlight">${active.rootCause || "暂无根因候选。"}</div>
+                  <div class="detail-section__content minimal-highlight">${active.rootCause || "暂无根因候选。"}</div>
                 </div>
                 ${active.impact
                   ? html`
@@ -1001,22 +916,23 @@ function renderEventsView(props: WorkbenchProps, active: WorkbenchAlertGroup | u
                       </div>
                     `
                   : nothing}
-                <div class="detail-section" style="display:flex; gap:8px; flex-wrap:wrap;">
+                
+                <div class="detail-actions-bar">
                   <button class="ops-btn ops-btn--primary" type="button" @click=${() => props.onOpenAiPanel?.("root-cause")}>
-                    ${icons.messageSquare} 分析根因
+                    ${icons.messageSquare} AI 根因分析
                   </button>
                   <button class="ops-btn" type="button" @click=${() => props.onOpenAiPanel?.("similar")}>聚合相似</button>
                   <button class="ops-btn" type="button" @click=${() => props.onOpenAiPanel?.("action")}>处置建议</button>
-                  <button class="ops-btn" type="button" @click=${() => props.onSendToCopilot?.(active.id, "root-cause")}>
-                    ${icons.messageSquare} 发送到 AI 运维助手
+                  <button class="ops-btn ops-btn--ghost" type="button" @click=${() => props.onSendToCopilot?.(active.id, "root-cause")}>
+                    发送到运维助手
                   </button>
                 </div>
               </div>
             `}
       </div>
-
-      ${renderAiPanel(props, active)}
     </div>
+
+    ${renderAiPanel(props, active)}
   `;
 }
 
