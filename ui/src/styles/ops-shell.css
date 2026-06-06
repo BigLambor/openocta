@@ -1033,6 +1033,17 @@
   border-bottom: 1px solid var(--border-subtle, rgba(0,0,0,0.05));
 }
 
+.workbench-scenario-toolbar {
+  margin-bottom: 14px;
+}
+
+.workbench-scenario-toolbar__title {
+  margin-bottom: 4px;
+  color: var(--text-primary);
+  font-size: 15px;
+  font-weight: 600;
+}
+
 .workbench-closure-header .column-header {
   padding: 0;
   border: 0;

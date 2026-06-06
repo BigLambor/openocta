@@ -973,6 +973,38 @@ export class BchFlinkDiagnosis extends LitElement {
     this.sparkModalOpen = true;
   }
 
+  askAiForFlinkJob(job: FlinkJob) {
+    this.dispatchEvent(
+      new CustomEvent("scenario-ai-request", {
+        bubbles: true,
+        composed: true,
+        detail: {
+          mode: "root-cause",
+          title: `${job.name} · 实时问诊`,
+          objectType: "flink_job",
+          objectId: job.id,
+          objectScope: `${job.cluster}/${job.name}`,
+          timeRange: this.timeRange,
+          evidence: [
+            `作业名称: ${job.name}`,
+            `Owner: ${job.owner}`,
+            `所属集群: ${job.cluster}`,
+            `运行状态: ${job.status}`,
+            `健康评分: ${job.score}`,
+            `稳定性/性能/效率: ${job.sScore}/${job.pScore}/${job.eScore}`,
+            `根因候选: ${job.rootCauseText} (${job.rootCause})`,
+            `初步诊断: ${job.diagnosis}`,
+            `Lag: max ${job.metrics?.maxLag}, avg ${job.metrics?.avgLag}, trend ${job.metrics?.lagTrend}`,
+            `CPU: max ${job.metrics?.cpuMax}%, avg ${job.metrics?.cpuAvg}%`,
+            `Heap max: ${job.metrics?.heapMax}%, Full GC: ${job.metrics?.fullGcCount}, Restarts: ${job.metrics?.restarts}`,
+            ...(job.penalties || []).map((item) => `扣分项: ${item.item} -${item.deduction} (${item.type})`),
+          ],
+          expectedOutputs: ["实时根因判断", "证据链", "影响范围", "下一步排查动作", "是否需要扩容/重启/限流"],
+        },
+      }),
+    );
+  }
+
   updated(changedProperties: Map<PropertyKey, unknown>) {
     if (changedProperties.has("copilotMessages")) {
       const messagesContainer = this.renderRoot.querySelector(".copilot-chat-messages");
@@ -1045,14 +1077,15 @@ export class BchFlinkDiagnosis extends LitElement {
               <th>作业名称</th>
               <th>Owner</th>
               <th>所属集群</th>
-              <th style="text-align: center;">健康评分 (点击问诊)</th>
+              <th style="text-align: center;">健康评分</th>
               <th style="text-align: center;">运行配置</th>
               <th>初步诊断</th>
+              <th style="text-align: center;">操作</th>
             </tr>
           </thead>
           <tbody>
             ${jobs.length === 0
-              ? html`<tr><td colspan="6" style="text-align:center; color: var(--text-muted); padding: 24px;">当前集群暂无 Flink 作业。</td></tr>`
+              ? html`<tr><td colspan="7" style="text-align:center; color: var(--text-muted); padding: 24px;">当前集群暂无 Flink 作业。</td></tr>`
               : nothing}
             ${jobs.map((job) => {
               const scoreClass = job.score >= 90 ? "healthy" : job.score >= 60 ? "warning" : "critical";
@@ -1073,6 +1106,11 @@ export class BchFlinkDiagnosis extends LitElement {
                   </td>
                   <td style="font-size: 11px; color: var(--text-secondary);">
                     <strong>${job.rootCauseText}</strong> - ${job.diagnosis}
+                  </td>
+                  <td style="text-align: center;">
+                    <button class="diagnose-btn" @click=${() => this.askAiForFlinkJob(job)}>
+                      实时问诊
+                    </button>
                   </td>
                 </tr>
               `;

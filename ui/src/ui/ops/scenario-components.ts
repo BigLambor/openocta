@@ -1,5 +1,6 @@
 import { html } from "lit";
 import type { OpsScenario } from "./scenario-registry.ts";
+import type { WorkbenchScenarioAiContext } from "../views/workbench.ts";
 import { parseWorkbenchObjectScope } from "./workbench-context.ts";
 import "../views/ops/bch-flink-diagnosis.ts";
 import "../views/ops/bch-spark-governance.ts";
@@ -42,6 +43,7 @@ export function renderScenarioComponent(
     host?: any;
     objectScope?: string;
     timeRange?: string;
+    onAskAi?: (context: WorkbenchScenarioAiContext & { mode?: "root-cause" | "similar" | "action" }) => void;
   } = {},
 ) {
   const parsedScope = parseWorkbenchObjectScope(context.objectScope || "all");
@@ -54,6 +56,7 @@ export function renderScenarioComponent(
           .selectedCluster=${selectedCluster}
           .objectScope=${context.objectScope ?? "all"}
           .timeRange=${context.timeRange ?? "24h"}
+          @scenario-ai-request=${(event: CustomEvent) => context.onAskAi?.(event.detail)}
         ></bch-flink-diagnosis>
       `;
     case "bch-spark-tuning":
@@ -63,6 +66,7 @@ export function renderScenarioComponent(
           .selectedCluster=${selectedCluster}
           .objectScope=${context.objectScope ?? "all"}
           .timeRange=${context.timeRange ?? "24h"}
+          @scenario-ai-request=${(event: CustomEvent) => context.onAskAi?.(event.detail)}
         ></bch-spark-governance>
       `;
     case "bch-hdfs-capacity": {
@@ -84,6 +88,7 @@ export function renderScenarioComponent(
           .activeNamespace=${activeNamespace}
           .objectScope=${context.objectScope ?? "all"}
           .timeRange=${context.timeRange ?? "24h"}
+          @scenario-ai-request=${(event: CustomEvent) => context.onAskAi?.(event.detail)}
         ></bch-fsimage-dashboard>
       `;
     }

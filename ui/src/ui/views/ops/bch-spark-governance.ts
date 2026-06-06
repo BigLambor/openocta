@@ -974,6 +974,37 @@ export class BchSparkGovernance extends LitElement {
     this.sparkModalOpen = true;
   }
 
+  askAiForSparkReview(job: SparkJob) {
+    this.dispatchEvent(
+      new CustomEvent("scenario-ai-request", {
+        bubbles: true,
+        composed: true,
+        detail: {
+          mode: "action",
+          title: `${job.name} · AI 复核`,
+          objectType: "spark_job",
+          objectId: job.id,
+          objectScope: `${job.cluster}/${job.name}`,
+          timeRange: this.timeRange,
+          evidence: [
+            `作业名称: ${job.name}`,
+            `负责人: ${job.owner}`,
+            `运行集群: ${job.cluster}`,
+            `作业状态: ${job.status}`,
+            `运行时长: ${job.durationSec} 秒`,
+            `治理标签: ${job.labels.join(" / ") || "无"}`,
+            `失败 Task: ${job.metrics?.failedTasks}/${job.metrics?.totalTasks}`,
+            `最长/平均 Task 时长: ${job.metrics?.maxTaskDurationSec}s / ${job.metrics?.avgTaskDurationSec}s`,
+            `CPU/内存倾斜比: ${job.metrics?.cpuSkewRatio} / ${job.metrics?.memorySkewRatio}`,
+            `输入/Shuffle Read/Shuffle Write: ${job.metrics?.inputBytes} / ${job.metrics?.shuffleReadBytes} / ${job.metrics?.shuffleWriteBytes}`,
+            `后台调优建议: ${job.tuningAdvice}`,
+          ],
+          expectedOutputs: ["调优建议可信度", "证据充分性", "潜在误判点", "收益与风险", "是否生成治理任务"],
+        },
+      }),
+    );
+  }
+
   updated(changedProperties: Map<PropertyKey, unknown>) {
     if (changedProperties.has("copilotMessages")) {
       const messagesContainer = this.renderRoot.querySelector(".copilot-chat-messages");
@@ -1123,11 +1154,12 @@ export class BchSparkGovernance extends LitElement {
               <th>优化诊断</th>
               <th>运行时长</th>
               <th>调优处方</th>
+              <th style="text-align: center;">操作</th>
             </tr>
           </thead>
           <tbody>
             ${jobs.length === 0
-              ? html`<tr><td colspan="7" style="text-align:center; color: var(--text-muted); padding: 24px;">当前集群暂无 Spark 作业。</td></tr>`
+              ? html`<tr><td colspan="8" style="text-align:center; color: var(--text-muted); padding: 24px;">当前集群暂无 Spark 作业。</td></tr>`
               : nothing}
             ${jobs.map((job) => {
               let statusColor = "color: #10b981; font-weight: bold;";
@@ -1153,6 +1185,11 @@ export class BchSparkGovernance extends LitElement {
                   <td>
                     <button class="diagnose-btn" @click=${() => this.openSparkTuningModal(job)}>
                       查看调优参数
+                    </button>
+                  </td>
+                  <td style="text-align: center;">
+                    <button class="diagnose-btn" @click=${() => this.askAiForSparkReview(job)}>
+                      AI 复核
                     </button>
                   </td>
                 </tr>

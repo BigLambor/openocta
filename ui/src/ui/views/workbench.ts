@@ -53,6 +53,16 @@ export type WorkbenchAlertGroup = {
 
 export type WorkbenchView = "events" | "inspection" | "diagnosis" | "governance" | "capacity" | "change";
 
+export type WorkbenchScenarioAiContext = {
+  title?: string;
+  objectType?: string;
+  objectId?: string;
+  objectScope?: string;
+  timeRange?: WorkbenchTimeRange;
+  evidence?: string[];
+  expectedOutputs?: string[];
+};
+
 export type WorkbenchInspection = {
   id: string;
   time: string;
@@ -111,7 +121,12 @@ export type WorkbenchProps = {
   onScenarioMaturityFilterChange?: (maturity: OpsScenarioMaturityFilter) => void;
   onObjectScopeChange?: (scope: string) => void;
   onTimeRangeChange?: (range: WorkbenchTimeRange) => void;
-  onOpenScenarioAi?: (scenario: OpsScenario, mode: "root-cause" | "similar" | "action") => void;
+  aiPanelContext?: WorkbenchScenarioAiContext | null;
+  onOpenScenarioAi?: (
+    scenario: OpsScenario,
+    mode: "root-cause" | "similar" | "action",
+    context?: WorkbenchScenarioAiContext,
+  ) => void;
   onRecordScenarioSuggestion?: (scenario: OpsScenario) => void;
   onOpenScenarioTasks?: (scenario: OpsScenario) => void;
   onRefreshAlerts?: () => void;
@@ -346,14 +361,17 @@ function renderAiPanel(
   const busy = status === "loading" || status === "streaming";
   const isScenario = !!scenario;
   const title = isScenario ? "AI 辅助分析" : "告警 AI 分析";
-  const targetTitle = scenario?.title ?? active?.title ?? "";
+  const panelContext = props.aiPanelContext ?? null;
+  const targetTitle = panelContext?.title ?? scenario?.title ?? active?.title ?? "";
   const evidence = scenario
-    ? scenario.inputs
+    ? (panelContext?.evidence?.length ? panelContext.evidence : scenario.inputs)
     : markdownToLines(active?.analysisMarkdown || active?.rootCause || "");
-  const outputs = scenario?.outputs ?? [];
+  const outputs = panelContext?.expectedOutputs?.length ? panelContext.expectedOutputs : (scenario?.outputs ?? []);
+  const contextObjectScope = panelContext?.objectScope ?? scenarioContext?.selectedObjectScope;
+  const contextTimeRange = panelContext?.timeRange ?? scenarioContext?.selectedTimeRange;
   const onModeChange = (nextMode: WorkbenchAiMode) => {
     if (scenario) {
-      props.onOpenScenarioAi?.(scenario, nextMode);
+      props.onOpenScenarioAi?.(scenario, nextMode, panelContext ?? undefined);
     } else {
       props.onOpenAiPanel?.(nextMode);
     }
@@ -391,11 +409,12 @@ function renderAiPanel(
         <div class="detail-section">
           <div class="detail-section__header">${icons.scrollText} ${scenario ? "专项上下文" : "告警证据"}</div>
           <div class="detail-section__content">
-            ${scenarioContext
+            ${scenarioContext || panelContext
               ? html`
                   <div class="detail-meta" style="margin-bottom:10px; flex-wrap:wrap;">
-                    <span>对象 ${scenarioContext.selectedObjectScope || "all"}</span>
-                    <span>时间 ${scenarioContext.selectedTimeRange}</span>
+                    <span>对象 ${contextObjectScope || "all"}</span>
+                    <span>时间 ${contextTimeRange || "24h"}</span>
+                    ${panelContext?.objectType ? html`<span>${panelContext.objectType}</span>` : nothing}
                   </div>
                 `
               : nothing}
@@ -711,16 +730,15 @@ function renderTagList(label: string, items: string[]) {
 function renderScenarioClosurePanel(
   props: WorkbenchProps,
   scenario: OpsScenario,
-  result: OpsScenarioResult,
   selectedObjectScope: string,
   selectedTimeRange: WorkbenchTimeRange,
 ) {
   const busy = props.aiStatus === "loading" || props.aiStatus === "streaming";
   return html`
-    <section class="ops-card" style="margin-bottom:14px;">
+    <section class="ops-card workbench-scenario-toolbar">
       <div class="workbench-closure-header">
         <div>
-          <div class="column-header">专项闭环</div>
+          <div class="workbench-scenario-toolbar__title">${scenario.title}</div>
           <div class="muted">对象 ${selectedObjectScope || "all"} · 时间 ${selectedTimeRange}</div>
         </div>
         <div class="workbench-closure-actions">
@@ -738,46 +756,6 @@ function renderScenarioClosurePanel(
           <button class="ops-btn ops-btn--ghost" type="button" @click=${() => props.onOpenScenarioTasks?.(scenario)}>
             执行记录
           </button>
-        </div>
-      </div>
-      <div class="workbench-closure-grid">
-        <div class="detail-section">
-          <div class="detail-section__header">${icons.activity} 健康信号</div>
-          <div class="detail-section__content highlight">${result.healthSignal}</div>
-        </div>
-        <div class="detail-section">
-          <div class="detail-section__header">${icons.alertTriangle} 风险证据</div>
-          <div class="detail-section__content">
-            <ul style="margin:0; padding-left:18px;">
-              ${result.riskEvidence.map((item) => html`<li>${item}</li>`)}
-            </ul>
-          </div>
-        </div>
-        <div class="detail-section">
-          <div class="detail-section__header">${icons.scrollText} 输出结构</div>
-          <div class="detail-section__content">
-            <ul style="margin:0; padding-left:18px;">
-              ${result.outputs.map((item) => html`<li>${item}</li>`)}
-            </ul>
-          </div>
-        </div>
-        <div class="detail-section">
-          <div class="detail-section__header">${icons.zap} 建议动作</div>
-          <div class="detail-section__content">
-            <ul style="margin:0; padding-left:18px;">
-              ${result.recommendedActions.map((item) => html`<li>${item}</li>`)}
-            </ul>
-          </div>
-        </div>
-        <div class="detail-section">
-          <div class="detail-section__header">${icons.usageBars} 预期收益</div>
-          <div class="detail-section__content highlight">${result.expectedBenefit}</div>
-        </div>
-        <div class="detail-section">
-          <div class="detail-section__header">${icons.historyClock} Runbook</div>
-          <div class="detail-meta" style="flex-wrap:wrap;">
-            ${result.runbooks.map((item) => html`<span>${item}</span>`)}
-          </div>
         </div>
       </div>
     </section>
@@ -978,11 +956,12 @@ function renderScenarioDetail(
   const result = buildScenarioResult(scenario, selectedObjectScope, selectedTimeRange);
   return html`
     ${back}
-    ${renderScenarioClosurePanel(props, scenario, result, selectedObjectScope, selectedTimeRange)}
+    ${renderScenarioClosurePanel(props, scenario, selectedObjectScope, selectedTimeRange)}
     ${renderScenarioComponent(scenario, {
       host: props.host,
       objectScope: selectedObjectScope,
       timeRange: selectedTimeRange,
+      onAskAi: (context) => props.onOpenScenarioAi?.(scenario, context.mode ?? "root-cause", context),
     })}
   `;
 }
@@ -1139,7 +1118,7 @@ export function renderWorkbench(props: WorkbenchProps) {
                   `
                 : activeView === "inspection"
                   ? renderInspectionToolbar(props)
-                  : nothing,
+                  : undefined,
           })}
           ${renderWorkbenchContextBar(
             activeView,

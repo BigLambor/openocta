@@ -2,6 +2,7 @@ import { LitElement, html, css, nothing } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import { fetchBchHdfsFsImage, HdfsFsImageStats } from "../../controllers/bch-client.ts";
 import { parseWorkbenchObjectScope } from "../../ops/workbench-context.ts";
+import { icons } from "../../icons.ts";
 
 @customElement("bch-fsimage-dashboard")
 export class BchFsImageDashboard extends LitElement {
@@ -14,6 +15,7 @@ export class BchFsImageDashboard extends LitElement {
   @state() private stats: HdfsFsImageStats | null = null;
   @state() private loading = false;
   @state() private error: string | null = null;
+  @state() private aiPreparing = false;
 
   static styles = css`
     :host {
@@ -27,6 +29,7 @@ export class BchFsImageDashboard extends LitElement {
 
     .ns-tabs {
       display: flex;
+      align-items: center;
       gap: 8px;
       padding: 12px 24px;
       border-bottom: 1px solid var(--border);
@@ -54,6 +57,35 @@ export class BchFsImageDashboard extends LitElement {
       color: white;
       border-color: var(--accent, #3b82f6);
       box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
+    }
+
+    .ns-tabs-spacer {
+      flex: 1;
+    }
+
+    .ai-pill-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border: 1px solid rgba(59, 130, 246, 0.35);
+      background: rgba(59, 130, 246, 0.08);
+      color: var(--accent, #3b82f6);
+      border-radius: 999px;
+      padding: 6px 12px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .ai-pill-btn:hover:not(:disabled) {
+      background: var(--accent, #3b82f6);
+      color: #fff;
+    }
+
+    .ai-pill-btn:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
     }
 
     .dashboard-body {
@@ -108,12 +140,35 @@ export class BchFsImageDashboard extends LitElement {
     }
 
     .section-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
       font-size: 14px;
       font-weight: 600;
       border-bottom: 1px solid var(--border);
       padding-bottom: 8px;
       margin-bottom: 16px;
       color: var(--text-secondary);
+    }
+
+    .section-ai-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      height: 28px;
+      border: 1px solid rgba(59, 130, 246, 0.28);
+      border-radius: 999px;
+      background: rgba(59, 130, 246, 0.06);
+      color: var(--accent, #3b82f6);
+      cursor: pointer;
+      flex: 0 0 auto;
+    }
+
+    .section-ai-btn:hover {
+      background: var(--accent, #3b82f6);
+      color: #fff;
     }
 
     /* Visual Distribution Curves */
@@ -246,6 +301,106 @@ export class BchFsImageDashboard extends LitElement {
     this.loadData();
   }
 
+  private dispatchAiRequest(detail: {
+    title: string;
+    objectType: string;
+    objectId: string;
+    objectScope: string;
+    evidence: string[];
+    expectedOutputs: string[];
+    mode?: "root-cause" | "similar" | "action";
+  }) {
+    this.dispatchEvent(
+      new CustomEvent("scenario-ai-request", {
+        bubbles: true,
+        composed: true,
+        detail: {
+          mode: detail.mode ?? "root-cause",
+          timeRange: this.timeRange,
+          ...detail,
+        },
+      }),
+    );
+  }
+
+  private namespaceEvidence(stats: HdfsFsImageStats): string[] {
+    return [
+      `Namespace: ${stats.namespace}`,
+      `元数据总记录数: ${stats.totalRecords}`,
+      `文件总数: ${stats.totalFiles}`,
+      `目录总数: ${stats.totalDirs}`,
+      `存储容量总大小: ${stats.totalSize}`,
+      `平均文件大小: ${stats.avgFileSize}`,
+      `最大目录树深度: ${stats.maxDepth}`,
+      `Trash 未清理: ${stats.trashFiles}`,
+      `零字节文件: ${stats.zeroByteFiles}`,
+    ];
+  }
+
+  private async askAiForAllNamespaces() {
+    if (!this.host || this.aiPreparing) return;
+    this.aiPreparing = true;
+    try {
+      const namespaces = ["NS1", "NS2", "NS3", "NS4", "NS5", "NS6", "NS7", "NS8"];
+      const results = await Promise.all(
+        namespaces.map((ns) => fetchBchHdfsFsImage(this.host, ns).catch(() => null)),
+      );
+      const evidence = results
+        .filter((item): item is HdfsFsImageStats => !!item)
+        .flatMap((item) => [
+          `${item.namespace}: records=${item.totalRecords}, files=${item.totalFiles}, dirs=${item.totalDirs}, size=${item.totalSize}, avgFile=${item.avgFileSize}, maxDepth=${item.maxDepth}, trash=${item.trashFiles}, zeroByte=${item.zeroByteFiles}`,
+        ]);
+      this.dispatchAiRequest({
+        mode: "root-cause",
+        title: "全部 Namespace · AI 容量分析",
+        objectType: "hdfs_namespace_set",
+        objectId: "all-namespaces",
+        objectScope: "all namespaces",
+        evidence: evidence.length ? evidence : ["未能拉取全部 Namespace 摘要，请基于当前可见 FSImage 数据分析。"],
+        expectedOutputs: ["跨 Namespace 风险排序", "容量/小文件/目录深度根因", "优先治理对象", "清理与扩容建议"],
+      });
+    } finally {
+      this.aiPreparing = false;
+    }
+  }
+
+  private askAiForChart(
+    chartId: string,
+    title: string,
+    evidence: string[],
+    expectedOutputs: string[],
+    mode: "root-cause" | "similar" | "action" = "root-cause",
+  ) {
+    const stats = this.stats;
+    const namespace = stats?.namespace || this.activeNamespace;
+    this.dispatchAiRequest({
+      mode,
+      title: `${title} · 问问 AI`,
+      objectType: "hdfs_chart",
+      objectId: `${namespace}:${chartId}`,
+      objectScope: namespace,
+      evidence: [
+        ...(stats ? this.namespaceEvidence(stats) : [`Namespace: ${namespace}`]),
+        ...evidence,
+      ],
+      expectedOutputs,
+    });
+  }
+
+  private renderSectionTitle(
+    title: string,
+    ask: () => void,
+  ) {
+    return html`
+      <div class="section-title">
+        <span>${title}</span>
+        <button class="section-ai-btn" type="button" title="问问 AI" @click=${ask}>
+          ${icons.messageSquare}
+        </button>
+      </div>
+    `;
+  }
+
   render() {
     const parsed = parseWorkbenchObjectScope(this.objectScope);
     const directoryPath = parsed.kind === "directory" ? parsed.value : null;
@@ -262,6 +417,10 @@ export class BchFsImageDashboard extends LitElement {
             ${ns}
           </button>
         `)}
+        <div class="ns-tabs-spacer"></div>
+        <button class="ai-pill-btn" type="button" ?disabled=${this.aiPreparing} @click=${() => this.askAiForAllNamespaces()}>
+          ${icons.messageSquare} ${this.aiPreparing ? "分析中..." : "分析全部 Namespace"}
+        </button>
       </div>
 
       <div class="dashboard-body">
@@ -343,7 +502,13 @@ export class BchFsImageDashboard extends LitElement {
       <div class="sections-grid">
         <!-- 目录深度分布 -->
         <div class="section-card">
-          <div class="section-title">HDFS 目录深度分布 (Directory Depth)</div>
+          ${this.renderSectionTitle("HDFS 目录深度分布 (Directory Depth)", () =>
+            this.askAiForChart(
+              "directory-depth",
+              "HDFS 目录深度分布",
+              stats.depthData.map((d) => `目录深度 ${d.depth}: ${d.count.toLocaleString()} 个 (${d.percent}%)`),
+              ["目录深度风险解释", "NameNode 元数据压力判断", "需要治理的深层目录", "清理/归档建议"],
+            ))}
           <div class="bar-chart-list">
             ${stats.depthData.map((d) => html`
               <div class="bar-chart-item">
@@ -361,7 +526,13 @@ export class BchFsImageDashboard extends LitElement {
 
         <!-- 文件大小细分 -->
         <div class="section-card">
-          <div class="section-title">文件大小区间占比 (File Size Segments)</div>
+          ${this.renderSectionTitle("文件大小区间占比 (File Size Segments)", () =>
+            this.askAiForChart(
+              "file-size-segments",
+              "文件大小区间占比",
+              stats.sizeData.map((s) => `文件大小 ${s.size}: ${s.count.toLocaleString()} 个 (${s.percent}%)`),
+              ["小文件风险判断", "空间利用效率", "治理优先级", "合并/归档策略"],
+            ))}
           <div class="bar-chart-list">
             ${stats.sizeData.map((s) => html`
               <div class="bar-chart-item">
@@ -381,7 +552,14 @@ export class BchFsImageDashboard extends LitElement {
       <div class="sections-grid">
         <!-- 用户存储排行 -->
         <div class="section-card">
-          <div class="section-title">大租户/用户资源使用占比</div>
+          ${this.renderSectionTitle("大租户/用户资源使用占比", () =>
+            this.askAiForChart(
+              "tenant-usage",
+              "大租户/用户资源使用占比",
+              stats.userData.map((u) => `用户 ${u.user}: 文件 ${u.files.toLocaleString()}, 占比 ${u.percent}%, 大小 ${u.size}`),
+              ["Top 租户风险", "异常占用判断", "责任对象", "治理沟通建议"],
+              "similar",
+            ))}
           <table class="ops-table">
             <thead>
               <tr>
@@ -406,7 +584,20 @@ export class BchFsImageDashboard extends LitElement {
 
         <!-- 修改访问冷热周期 -->
         <div class="section-card">
-          <div class="section-title">冷热数据生命周期分析 (冷数据治理)</div>
+          ${this.renderSectionTitle("冷热数据生命周期分析 (冷数据治理)", () =>
+            this.askAiForChart(
+              "cold-data-lifecycle",
+              "冷热数据生命周期分析",
+              stats.modifyData.slice(0, 5).flatMap((m, idx) => {
+                const accessItem = stats.accessData[idx] || { period: m.period, count: 0, percent: 0 };
+                return [
+                  `修改周期 ${m.period}: ${m.count.toLocaleString()} (${m.percent}%)`,
+                  `访问周期 ${accessItem.period ?? m.period}: ${accessItem.count?.toLocaleString?.() ?? 0} (${accessItem.percent}%)`,
+                ];
+              }),
+              ["冷数据识别", "可归档/清理对象", "业务影响风险", "分阶段治理建议"],
+              "action",
+            ))}
           <div class="bar-chart-list">
             ${stats.modifyData.slice(0, 5).map((m, idx) => {
               const accessItem = stats.accessData[idx] || { percent: 0 };

@@ -106,6 +106,7 @@ describe("workbench view scenario directory filtering", () => {
     expect(container.querySelector(".ops-ai-drawer")).not.toBeNull();
     expect(container.textContent).toContain("AI 辅助分析");
     expect(container.querySelectorAll(".workbench-closure-actions .ops-btn--primary")).toHaveLength(1);
-    expect(container.querySelector(".workbench-closure-grid")).not.toBeNull();
+    expect(container.querySelector(".workbench-scenario-toolbar")).not.toBeNull();
+    expect(container.querySelector(".workbench-closure-grid")).toBeNull();
   });
 });

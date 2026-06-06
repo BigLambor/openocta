@@ -1768,6 +1768,22 @@ export function renderApp(state: AppViewState) {
                   void state.loadOpsSparkJobs();
                 }
                 const scenarioAiObjectId = `${state.opsSelectedEntityIds?.workbenchScenario || ""}:${selectedObjectScope}:${selectedTimeRange}`;
+                const workbenchAiTargetId = state.opsSelectedEntityIds?.workbenchAiTargetId || scenarioAiObjectId;
+                const workbenchAiContext = {
+                  title: state.opsSelectedEntityIds?.workbenchAiContextTitle || undefined,
+                  objectType: state.opsSelectedEntityIds?.workbenchAiContextObjectType || undefined,
+                  objectId: state.opsSelectedEntityIds?.workbenchAiContextObjectId || undefined,
+                  objectScope: state.opsSelectedEntityIds?.workbenchAiContextObjectScope || undefined,
+                  timeRange: normalizeWorkbenchTimeRange(state.opsSelectedEntityIds?.workbenchAiContextTimeRange),
+                  evidence: (state.opsSelectedEntityIds?.workbenchAiContextEvidence || "")
+                    .split("\n")
+                    .map((line) => line.trim())
+                    .filter(Boolean),
+                  expectedOutputs: (state.opsSelectedEntityIds?.workbenchAiContextOutputs || "")
+                    .split("\n")
+                    .map((line) => line.trim())
+                    .filter(Boolean),
+                };
                 const inspectionJobId = `job-inspect-${domain}`;
                 if (
                   workbenchView === "inspection" &&
@@ -1934,39 +1950,43 @@ export function renderApp(state: AppViewState) {
                   selectedAlertGroupId: selectedId,
                   aiPanelOpen: state.opsSelectedEntityIds?.workbenchAiPanel === "open",
                   aiPanelMode: aiMode,
+                  aiPanelContext: workbenchAiContext.title ? workbenchAiContext : null,
                   aiStatus:
-                    state.workbenchAiObjectId === selectedId || state.workbenchAiObjectId === scenarioAiObjectId
+                    state.workbenchAiObjectId === selectedId || state.workbenchAiObjectId === workbenchAiTargetId
                       ? state.workbenchAiStatus
                       : "idle",
                   aiStream:
-                    state.workbenchAiObjectId === selectedId || state.workbenchAiObjectId === scenarioAiObjectId
+                    state.workbenchAiObjectId === selectedId || state.workbenchAiObjectId === workbenchAiTargetId
                       ? state.workbenchAiStream
                       : null,
                   aiResult:
-                    state.workbenchAiObjectId === selectedId || state.workbenchAiObjectId === scenarioAiObjectId
+                    state.workbenchAiObjectId === selectedId || state.workbenchAiObjectId === workbenchAiTargetId
                       ? state.workbenchAiResult
                       : null,
                   aiError:
-                    state.workbenchAiObjectId === selectedId || state.workbenchAiObjectId === scenarioAiObjectId
+                    state.workbenchAiObjectId === selectedId || state.workbenchAiObjectId === workbenchAiTargetId
                       ? state.workbenchAiError
                       : null,
                   onRetryAi: () => {
                     if (workbenchView !== "events" && currentScenario) {
+                      const targetId = workbenchAiTargetId || `${currentScenario.id}:${selectedObjectScope}:${selectedTimeRange}`;
                       void runWorkbenchAi(state as any, {
                         domain: currentScenario.domain,
                         mode: aiMode,
                         assistantTemplate: opsAssistantForDomain(currentScenario.domain).employeeId,
                         alert: {
-                          id: `${currentScenario.id}:${selectedObjectScope}:${selectedTimeRange}`,
-                          title: currentScenario.title,
+                          id: targetId,
+                          title: workbenchAiContext.title || currentScenario.title,
                           severity: "info",
                           domain: currentScenario.domain,
-                          objectType: currentScenario.objectTypes.join("/"),
-                          objectId: selectedObjectScope,
+                          objectType: workbenchAiContext.objectType || currentScenario.objectTypes.join("/"),
+                          objectId: workbenchAiContext.objectId || selectedObjectScope,
                           scenarioTitle: currentScenario.title,
                           scenarioSummary: currentScenario.summary,
-                          evidence: currentScenario.inputs,
-                          expectedOutputs: currentScenario.outputs,
+                          evidence: workbenchAiContext.evidence.length ? workbenchAiContext.evidence : currentScenario.inputs,
+                          expectedOutputs: workbenchAiContext.expectedOutputs.length
+                            ? workbenchAiContext.expectedOutputs
+                            : currentScenario.outputs,
                         },
                       });
                       return;
@@ -2021,28 +2041,39 @@ export function renderApp(state: AppViewState) {
                       workbenchTimeRange: range,
                     };
                   },
-                  onOpenScenarioAi: (scenario, mode) => {
+                  onOpenScenarioAi: (scenario, mode, context) => {
+                    const targetId = context?.objectId
+                      ? `${scenario.id}:${context.objectType || "object"}:${context.objectId}:${context.timeRange || selectedTimeRange}`
+                      : `${scenario.id}:${selectedObjectScope}:${selectedTimeRange}`;
                     state.opsSelectedEntityIds = {
                       ...state.opsSelectedEntityIds,
                       workbenchAiPanel: "open",
                       workbenchAiMode: mode,
                       workbenchScenario: scenario.id,
+                      workbenchAiTargetId: targetId,
+                      workbenchAiContextTitle: context?.title || "",
+                      workbenchAiContextObjectType: context?.objectType || "",
+                      workbenchAiContextObjectId: context?.objectId || "",
+                      workbenchAiContextObjectScope: context?.objectScope || selectedObjectScope,
+                      workbenchAiContextTimeRange: context?.timeRange || selectedTimeRange,
+                      workbenchAiContextEvidence: (context?.evidence || []).join("\n"),
+                      workbenchAiContextOutputs: (context?.expectedOutputs || []).join("\n"),
                     };
                     void runWorkbenchAi(state as any, {
                       domain: scenario.domain,
                       mode,
                       assistantTemplate: opsAssistantForDomain(scenario.domain).employeeId,
                       alert: {
-                        id: `${scenario.id}:${selectedObjectScope}:${selectedTimeRange}`,
-                        title: scenario.title,
+                        id: targetId,
+                        title: context?.title || scenario.title,
                         severity: "info",
                         domain: scenario.domain,
-                        objectType: scenario.objectTypes.join("/"),
-                        objectId: selectedObjectScope,
+                        objectType: context?.objectType || scenario.objectTypes.join("/"),
+                        objectId: context?.objectId || selectedObjectScope,
                         scenarioTitle: scenario.title,
                         scenarioSummary: scenario.summary,
-                        evidence: scenario.inputs,
-                        expectedOutputs: scenario.outputs,
+                        evidence: context?.evidence?.length ? context.evidence : scenario.inputs,
+                        expectedOutputs: context?.expectedOutputs?.length ? context.expectedOutputs : scenario.outputs,
                       },
                     });
                   },
