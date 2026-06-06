@@ -388,6 +388,13 @@
   border-bottom: 1px solid var(--border);
 }
 
+.detail-section__header svg,
+.report-header svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
 .detail-section__content {
   font-size: 13px;
   line-height: 1.6;

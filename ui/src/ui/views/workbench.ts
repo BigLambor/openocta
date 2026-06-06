@@ -324,9 +324,13 @@ function renderInspectionView(props: WorkbenchProps) {
         </div>
       </div>
 
+      <div class="ops-inspection-layout-hint muted">
+        左侧选择巡检记录，右侧查看完整深度报告。
+      </div>
+
       <div class="ops-main-columns ops-shell-columns ops-inspection-columns">
         <div class="ops-card list-column">
-          <div class="column-header">巡检报告</div>
+          <div class="column-header">巡检报告（左侧）</div>
           ${props.inspectionsLoading
             ? html`<div class="loading-placeholder">${icons.loader} 加载中...</div>`
             : inspections.length === 0
@@ -354,7 +358,7 @@ function renderInspectionView(props: WorkbenchProps) {
                 `}
         </div>
         <div class="ops-card detail-column ops-inspection-detail">
-          <div class="column-header">报告详情</div>
+          <div class="column-header">报告详情（右侧）</div>
           ${!active
             ? html`<div class="empty-placeholder">请选择一份巡检报告。</div>`
             : html`
@@ -366,11 +370,11 @@ function renderInspectionView(props: WorkbenchProps) {
                     </span>
                   </div>
                   <div class="detail-section">
-                    <div class="detail-section__header">${icons.scrollText} 发现摘要</div>
+                    <div class="detail-section__header">发现摘要</div>
                     <div class="detail-section__content">${active.reportSummary}</div>
                   </div>
                   <div class="detail-section ops-inspection-detail__report">
-                    <div class="detail-section__header">${icons.messageSquare} 完整报告</div>
+                    <div class="detail-section__header">完整报告</div>
                     <div class="detail-section__content highlight">
                       ${renderInspectionMarkdown(active.reportMarkdown)}
                     </div>
@@ -600,20 +604,7 @@ export function renderWorkbench(props: WorkbenchProps) {
                       ${icons.refreshCw} 刷新告警
                     </button>
                   `
-                : activeView === "inspection"
-                  ? html`
-                      <button
-                        class="ops-btn ops-btn--primary ${props.isInspecting ? "btn--loading" : ""}"
-                        type="button"
-                        ?disabled=${props.isInspecting || props.canInspect === false}
-                        title=${props.canInspect === false ? "当前账号无 ops:inspect 权限" : ""}
-                        @click=${() => props.onRunInspection?.()}
-                      >
-                        ${props.isInspecting ? icons.loader : icons.zap}
-                        ${props.isInspecting ? "巡检中..." : "一键巡检"}
-                      </button>
-                    `
-                  : nothing,
+                : nothing,
           })}
           ${activeView === "events"
             ? renderEventsView(props, active, originalTotal, criticalCount, warningCount)

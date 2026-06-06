@@ -1891,7 +1891,17 @@ export function renderApp(state: AppViewState) {
                     void import("./controllers/ops-inspection-run.ts").then(({ runDomainInspectionWithPoll }) => {
                       return runDomainInspectionWithPoll(state as any, inspectionJobId, domain)
                         .then(() => loadCronRuns(state as any, inspectionJobId))
-                        .then(() => nativeAlert("巡检已完成，请在右侧查看报告。"))
+                        .then(() => {
+                          const latest = state.cronRuns[0] as { sessionId?: string } | undefined;
+                          const selectedId =
+                            latest?.sessionId ||
+                            state.opsSelectedInspectionIds[domain] ||
+                            `inspection-${domain}-0`;
+                          state.opsSelectedInspectionIds = {
+                            ...state.opsSelectedInspectionIds,
+                            [domain]: selectedId,
+                          };
+                        })
                         .catch((err) => {
                           console.error("Failed to run workbench inspection:", err);
                           void nativeAlert(err instanceof Error ? err.message : String(err));
