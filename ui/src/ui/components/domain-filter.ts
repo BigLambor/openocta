@@ -1,5 +1,3 @@
-import { html } from "lit";
-
 export type OpsDomainKey = "all" | "hadoop" | "fi" | "gbase" | "governance" | "dataapps";
 
 export type DomainFilterUser = {
@@ -108,34 +106,4 @@ export function opsAssistantForDomain(domain: string): OpsAssistant {
         persona: "专家人设：BCH 告警降噪、根因候选、影响面判断、处置建议。",
       };
   }
-}
-
-export function renderDomainFilter(props: {
-  selectedDomain: string;
-  user: DomainFilterUser;
-  includeAll?: boolean;
-  onChange?: (domain: OpsDomainKey) => void;
-}) {
-  const selected = normalizeOpsDomain(props.selectedDomain);
-  const options = OPS_DOMAIN_OPTIONS.filter((item) => {
-    if (item.key === "all" && props.includeAll === false) {
-      return false;
-    }
-    return canAccessOpsDomain(props.user, item.key);
-  });
-  return html`
-    <div class="ops-domain-pills" role="group" aria-label="技术域过滤器">
-      ${options.map(
-        (item) => html`
-          <button
-            type="button"
-            class="ops-domain-pill ${selected === item.key ? "ops-domain-pill--active" : ""}"
-            @click=${() => props.onChange?.(item.key)}
-          >
-            ${item.label}
-          </button>
-        `,
-      )}
-    </div>
-  `;
 }

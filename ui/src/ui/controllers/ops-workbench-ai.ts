@@ -17,6 +17,12 @@ export type WorkbenchAiAlert = {
   impact?: string;
   analysisMarkdown?: string;
   domain?: string;
+  objectType?: string;
+  objectId?: string;
+  scenarioTitle?: string;
+  scenarioSummary?: string;
+  evidence?: string[];
+  expectedOutputs?: string[];
 };
 
 /**
@@ -47,6 +53,17 @@ export type WorkbenchAiEventPayload = {
 };
 
 function questionForMode(mode: WorkbenchAiMode, alert: WorkbenchAiAlert): string {
+  if (alert.scenarioTitle) {
+    switch (mode) {
+      case "action":
+        return `请基于当前运维专项给出处置建议，区分只读排查、需要审批的变更和高风险操作，并按步骤说明：${alert.scenarioTitle}`;
+      case "similar":
+        return `请分析当前运维专项是否存在相似对象、相似风险或可批量治理机会，并给出聚合逻辑：${alert.scenarioTitle}`;
+      case "root-cause":
+      default:
+        return `请基于当前运维专项分析风险根因、证据链、影响面和验证步骤：${alert.scenarioTitle}`;
+    }
+  }
   switch (mode) {
     case "action":
       return `请基于当前告警组给出处置建议，区分只读排查、需要审批的变更和高风险操作，并按步骤说明：${alert.title}`;
@@ -61,11 +78,17 @@ function questionForMode(mode: WorkbenchAiMode, alert: WorkbenchAiAlert): string
 function buildSummary(alert: WorkbenchAiAlert): string {
   return [
     alert.title,
+    alert.scenarioTitle ? `专项场景: ${alert.scenarioTitle}` : "",
+    alert.scenarioSummary ? `场景说明: ${alert.scenarioSummary}` : "",
+    alert.objectType ? `对象类型: ${alert.objectType}` : "",
+    alert.objectId ? `对象范围: ${alert.objectId}` : "",
     typeof alert.originalCount === "number" ? `原始告警数: ${alert.originalCount}` : "",
     typeof alert.reducedTo === "number" ? `降噪后: ${alert.reducedTo}` : "",
     alert.rootCause ? `根因候选: ${alert.rootCause}` : "",
     alert.impact ? `影响范围: ${alert.impact}` : "",
     alert.analysisMarkdown ? `已有分析材料: ${alert.analysisMarkdown}` : "",
+    alert.evidence?.length ? `输入证据: ${alert.evidence.join(" / ")}` : "",
+    alert.expectedOutputs?.length ? `期望输出: ${alert.expectedOutputs.join(" / ")}` : "",
   ]
     .filter(Boolean)
     .join("\n");
@@ -112,7 +135,7 @@ export async function runWorkbenchAi(
         capability: "observability-alert",
         workflowType: mode === "action" ? "incident" : "diagnosis",
         objectType: "alert",
-        objectId: alert.id,
+        objectId: alert.objectId || alert.id,
         severity: alert.severity,
         summary: buildSummary(alert),
       },

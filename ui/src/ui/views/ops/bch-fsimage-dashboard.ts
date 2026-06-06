@@ -5,8 +5,9 @@ import { fetchBchHdfsFsImage, HdfsFsImageStats } from "../../controllers/bch-cli
 @customElement("bch-fsimage-dashboard")
 export class BchFsImageDashboard extends LitElement {
   @property({ type: Object }) host: any = null;
+  @property({ type: String }) activeNamespace = "NS1";
+  @property({ type: String }) timeRange = "24h";
 
-  @state() private activeNamespace = "NS1";
   @state() private stats: HdfsFsImageStats | null = null;
   @state() private loading = false;
   @state() private error: string | null = null;
@@ -215,6 +216,12 @@ export class BchFsImageDashboard extends LitElement {
   connectedCallback() {
     super.connectedCallback();
     this.loadData();
+  }
+
+  updated(changed: Map<string, unknown>) {
+    if (changed.has("activeNamespace") && this.host) {
+      void this.loadData();
+    }
   }
 
   async loadData() {

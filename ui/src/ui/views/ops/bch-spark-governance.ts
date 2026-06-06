@@ -25,12 +25,13 @@ import {
 @customElement("bch-spark-governance")
 export class BchSparkGovernance extends LitElement {
   @property({ type: Object }) host: any = null;
+  @property({ type: String }) selectedCluster = "all";
+  @property({ type: String }) timeRange = "24h";
 
   
   @state() private flinkJobs: FlinkJob[] = [];
   @state() private sparkJobs: SparkJob[] = [];
   @state() private clusters: BchClusterHealth[] = [];
-  @state() private selectedCluster = "all";
   @state() private loading = false;
   @state() private error: string | null = null;
 

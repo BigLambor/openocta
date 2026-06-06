@@ -1,19 +1,35 @@
-import { html, nothing, type TemplateResult } from "lit";
+import { html, nothing } from "lit";
 import { unsafeHTML } from "lit/directives/unsafe-html.js";
 import { icons } from "../icons.ts";
 import { toSanitizedMarkdownHtml } from "../markdown.ts";
 import { renderOpsError } from "../components/ops-status.ts";
-import "./ops/bch-flink-diagnosis.ts";
-import "./ops/bch-spark-governance.ts";
-import "./ops/bch-fsimage-dashboard.ts";
 import {
   renderOpsShellHeader,
   renderOpsShellStatGrid,
-  renderOpsViewNav,
   type OpsViewNavItem,
 } from "../components/ops-shell.ts";
 import { renderOpsContextSidebar, type SidebarItem } from "../components/ops-context-sidebar.ts";
-import { effectiveOpsDomain } from "../components/domain-filter.ts";
+import { normalizeOpsDomain, opsDomainLabel, type OpsDomainKey } from "../components/domain-filter.ts";
+import type { OpsClusterRecord } from "../controllers/ops-clusters.ts";
+import {
+  findWorkbenchScenario,
+  filterWorkbenchScenarios,
+  scenarioCatalogStats,
+  scenariosForWorkbench,
+  WORKBENCH_TIME_RANGES,
+  type OpsScenario,
+  type OpsScenarioMaturityFilter,
+  type WorkbenchTimeRange,
+} from "../ops/scenario-registry.ts";
+import { renderScenarioComponent } from "../ops/scenario-components.ts";
+import { buildScenarioResult, type OpsScenarioResult } from "../ops/scenario-results.ts";
+import {
+  formatWorkbenchObjectScope,
+  normalizeWorkbenchObjectScope,
+  normalizeWorkbenchTimeRange,
+  objectOptionsForScenario,
+  type WorkbenchObjectOption,
+} from "../ops/workbench-context.ts";
 
 export type WorkbenchAlertGroup = {
   id: string;
@@ -52,8 +68,13 @@ export type WorkbenchProps = {
   };
   assistantName?: string;
   assistantPersona?: string;
-  domainFilter?: TemplateResult;
   activeView?: WorkbenchView;
+  selectedScenarioId?: string | null;
+  scenarioSearch?: string | null;
+  scenarioMaturityFilter?: string | null;
+  selectedObjectScope?: string | null;
+  selectedTimeRange?: string | null;
+  domainClusters?: OpsClusterRecord[];
   alertsLoading?: boolean;
   alertsError?: string | null;
   alertGroups: WorkbenchAlertGroup[];
@@ -76,6 +97,14 @@ export type WorkbenchProps = {
   aiError?: string | null;
   onRetryAi?: () => void;
   onViewChange?: (view: WorkbenchView) => void;
+  onSelectScenario?: (id: string | null) => void;
+  onScenarioSearchChange?: (query: string) => void;
+  onScenarioMaturityFilterChange?: (maturity: OpsScenarioMaturityFilter) => void;
+  onObjectScopeChange?: (scope: string) => void;
+  onTimeRangeChange?: (range: WorkbenchTimeRange) => void;
+  onOpenScenarioAi?: (scenario: OpsScenario, mode: "root-cause" | "similar" | "action") => void;
+  onRecordScenarioSuggestion?: (scenario: OpsScenario) => void;
+  onOpenScenarioTasks?: (scenario: OpsScenario) => void;
   onRefreshAlerts?: () => void;
   onSelectAlertGroup?: (id: string) => void;
   onSelectInspection?: (id: string) => void;
@@ -441,6 +470,399 @@ function renderSkeletonView(props: WorkbenchProps, view: WorkbenchView) {
   `;
 }
 
+function maturityLabel(maturity: OpsScenario["maturity"]): string {
+  switch (maturity) {
+    case "automated":
+      return "自动化闭环";
+    case "connected":
+      return "已接入";
+    case "beta":
+      return "Beta";
+    default:
+      return "规划中";
+  }
+}
+
+function normalizeScenarioMaturityFilter(value: string | null | undefined): OpsScenarioMaturityFilter {
+  if (value === "planned" || value === "beta" || value === "connected" || value === "automated") {
+    return value;
+  }
+  return "all";
+}
+
+function automationLabel(level: OpsScenario["automationLevel"]): string {
+  switch (level) {
+    case "closed-loop":
+      return "闭环执行";
+    case "approval":
+      return "审批后执行";
+    case "recommendation":
+      return "建议采纳";
+    default:
+      return "手动分析";
+  }
+}
+
+function triggerLabel(trigger: OpsScenario["triggers"][number]): string {
+  switch (trigger) {
+    case "alert":
+      return "告警触发";
+    case "schedule":
+      return "定时巡检";
+    case "change":
+      return "变更触发";
+    default:
+      return "手动触发";
+  }
+}
+
+function renderTagList(label: string, items: string[]) {
+  return html`
+    <div style="margin-top:8px;">
+      <div class="stat-label" style="margin-bottom:4px;">${label}</div>
+      <div class="detail-meta" style="flex-wrap:wrap;">
+        ${items.map((item) => html`<span>${item}</span>`)}
+      </div>
+    </div>
+  `;
+}
+
+function renderAiStatusBlock(props: WorkbenchProps) {
+  const status = props.aiStatus ?? "idle";
+  if (status === "loading") {
+    return html`<div class="detail-section__content highlight">${icons.loader} 正在调用专项数字员工分析...</div>`;
+  }
+  if (status === "streaming") {
+    return html`
+      <div class="detail-section__content highlight">
+        ${props.aiStream ? renderRichText(props.aiStream) : html`<span class="muted">${icons.loader} 分析中...</span>`}
+      </div>
+    `;
+  }
+  if (status === "done") {
+    return html`
+      <div class="detail-section__content highlight">
+        ${props.aiResult ? renderRichText(props.aiResult) : html`<span class="muted">本次专项分析未返回内容。</span>`}
+      </div>
+    `;
+  }
+  if (status === "error") {
+    return html`<div class="detail-section__content" style="color: var(--danger, #d33);">${props.aiError ?? "AI 分析失败。"}</div>`;
+  }
+  return html`<div class="detail-section__content highlight">选择一个 AI 操作后，系统会基于当前技术域、对象范围、时间范围和专项证据生成建议。</div>`;
+}
+
+function renderScenarioClosurePanel(
+  props: WorkbenchProps,
+  scenario: OpsScenario,
+  result: OpsScenarioResult,
+  selectedObjectScope: string,
+  selectedTimeRange: WorkbenchTimeRange,
+) {
+  const busy = props.aiStatus === "loading" || props.aiStatus === "streaming";
+  return html`
+    <section class="ops-card" style="margin-bottom:14px;">
+      <div class="column-header">专项闭环</div>
+      <div style="padding:16px; display:grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 0.9fr); gap:16px;">
+        <div>
+          <div class="detail-section">
+            <div class="detail-section__header">${icons.activity} 健康信号</div>
+            <div class="detail-section__content highlight">${result.healthSignal}</div>
+          </div>
+          <div class="detail-section">
+            <div class="detail-section__header">${icons.alertTriangle} 风险证据</div>
+            <div class="detail-section__content">
+              <ul style="margin:0; padding-left:18px;">
+                ${result.riskEvidence.map((item) => html`<li>${item}</li>`)}
+              </ul>
+            </div>
+          </div>
+          <div class="detail-section">
+            <div class="detail-section__header">${icons.scrollText} 输出结构</div>
+            <div class="detail-section__content">
+              <ul style="margin:0; padding-left:18px;">
+                ${result.outputs.map((item) => html`<li>${item}</li>`)}
+              </ul>
+            </div>
+          </div>
+          <div class="detail-section">
+            <div class="detail-section__header">${icons.zap} 建议动作</div>
+            <div class="detail-section__content">
+              <ul style="margin:0; padding-left:18px;">
+                ${result.recommendedActions.map((item) => html`<li>${item}</li>`)}
+              </ul>
+            </div>
+          </div>
+          <div class="detail-section">
+            <div class="detail-section__header">${icons.usageBars} 预期收益</div>
+            <div class="detail-section__content highlight">${result.expectedBenefit}</div>
+          </div>
+          <div class="detail-section">
+            <div class="detail-section__header">${icons.historyClock} Runbook</div>
+            <div class="detail-meta" style="flex-wrap:wrap;">
+              ${result.runbooks.map((item) => html`<span>${item}</span>`)}
+            </div>
+          </div>
+        </div>
+        <aside class="detail-section" style="margin:0;">
+          <div class="detail-section__header">${icons.messageSquare} AI 操作</div>
+          ${renderAiStatusBlock(props)}
+          <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:12px;">
+            <button
+              class="ops-btn ops-btn--primary"
+              type="button"
+              ?disabled=${busy}
+              @click=${() => props.onOpenScenarioAi?.(scenario, "root-cause")}
+            >
+              分析风险
+            </button>
+            <button class="ops-btn" type="button" ?disabled=${busy} @click=${() => props.onOpenScenarioAi?.(scenario, "action")}>
+              生成建议
+            </button>
+            <button class="ops-btn" type="button" ?disabled=${busy} @click=${() => props.onRecordScenarioSuggestion?.(scenario)}>
+              记录闭环
+            </button>
+            <button class="ops-btn ops-btn--ghost" type="button" @click=${() => props.onOpenScenarioTasks?.(scenario)}>
+              执行记录
+            </button>
+          </div>
+          <div class="muted" style="margin-top:10px;">
+            对象 ${selectedObjectScope || "all"} · 时间 ${selectedTimeRange}
+          </div>
+        </aside>
+      </div>
+    </section>
+  `;
+}
+
+function renderWorkbenchContextBar(
+  view: WorkbenchView,
+  selectedDomain: OpsDomainKey,
+  objectOptions: WorkbenchObjectOption[],
+  selectedObjectScope: string,
+  selectedTimeRange: WorkbenchTimeRange,
+  props: WorkbenchProps,
+  scenario?: OpsScenario,
+) {
+  const objectScope = formatWorkbenchObjectScope(selectedObjectScope, objectOptions);
+  const scopeLabel = scenario ? scenario.title : WORKBENCH_VIEW_META[view].title;
+  return html`
+    <section class="ops-card" style="margin-bottom: 14px;">
+      <div style="display:grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; padding: 14px;">
+        <div>
+          <div class="stat-label">技术域</div>
+          <div class="detail-section__title" style="font-size:14px;">${opsDomainLabel(selectedDomain)}</div>
+        </div>
+        <div>
+          <div class="stat-label">工作中心</div>
+          <div class="detail-section__title" style="font-size:14px;">${WORKBENCH_VIEW_META[view].title}</div>
+        </div>
+        <div>
+          <div class="stat-label">对象范围</div>
+          <label class="select" style="display:block; margin-top:4px;">
+            <select
+              .value=${selectedObjectScope}
+              @change=${(e: Event) => props.onObjectScopeChange?.((e.target as HTMLSelectElement).value)}
+            >
+              ${objectOptions.map(
+                (option) => html`<option value=${option.id} ?selected=${option.id === selectedObjectScope}>
+                  ${option.label}${option.subtitle ? ` · ${option.subtitle}` : ""}
+                </option>`,
+              )}
+            </select>
+          </label>
+        </div>
+        <div>
+          <div class="stat-label">时间范围</div>
+          <label class="select" style="display:block; margin-top:4px;">
+            <select
+              .value=${selectedTimeRange}
+              @change=${(e: Event) =>
+                props.onTimeRangeChange?.(normalizeWorkbenchTimeRange((e.target as HTMLSelectElement).value))}
+            >
+              ${WORKBENCH_TIME_RANGES.map(
+                (range) => html`<option value=${range.id} ?selected=${range.id === selectedTimeRange}>${range.label}</option>`,
+              )}
+            </select>
+          </label>
+        </div>
+      </div>
+      <div class="detail-section__content highlight" style="margin: 0 14px 14px;">
+        当前上下文：${opsDomainLabel(selectedDomain)} / ${WORKBENCH_VIEW_META[view].title} / ${scopeLabel} /
+        ${objectScope.title} / ${WORKBENCH_TIME_RANGES.find((range) => range.id === selectedTimeRange)?.label ?? selectedTimeRange}
+      </div>
+    </section>
+  `;
+}
+
+function renderScenarioDirectory(props: WorkbenchProps, view: WorkbenchView, selectedDomain: OpsDomainKey) {
+  const scenarios = scenariosForWorkbench(selectedDomain, view);
+  if (scenarios.length === 0) {
+    return renderSkeletonView(props, view);
+  }
+  const stats = scenarioCatalogStats(selectedDomain);
+  const connectedCount = stats.maturity.beta + stats.maturity.connected + stats.maturity.automated;
+  const activeCenterCount = stats.centers[view] ?? scenarios.length;
+  const scenarioSearch = props.scenarioSearch ?? "";
+  const maturityFilter = normalizeScenarioMaturityFilter(props.scenarioMaturityFilter);
+  const filteredScenarios = filterWorkbenchScenarios(scenarios, scenarioSearch, maturityFilter);
+
+  return html`
+    <div class="ops-summary-cards" style="margin-bottom: 14px;">
+      <div class="ops-card stat-card">
+        <div class="stat-icon-slot">${icons.folder}</div>
+        <div class="stat-body">
+          <div class="stat-label">场景总数</div>
+          <div class="stat-value">${stats.total}</div>
+          <div class="muted">${selectedDomain === "all" ? "跨域已注册场景" : `${opsDomainLabel(selectedDomain)} 已注册场景`}</div>
+        </div>
+      </div>
+      <div class="ops-card stat-card">
+        <div class="stat-icon-slot">${icons.layout}</div>
+        <div class="stat-body">
+          <div class="stat-label">当前中心</div>
+          <div class="stat-value">${activeCenterCount}</div>
+          <div class="muted">${WORKBENCH_VIEW_META[view].title} 可用场景</div>
+        </div>
+      </div>
+      <div class="ops-card stat-card">
+        <div class="stat-icon-slot">${icons.checkCircle}</div>
+        <div class="stat-body">
+          <div class="stat-label">试点/已接入</div>
+          <div class="stat-value ok">${connectedCount}</div>
+          <div class="muted">Beta、已接入或自动化闭环</div>
+        </div>
+      </div>
+      <div class="ops-card stat-card">
+        <div class="stat-icon-slot">${icons.info}</div>
+        <div class="stat-body">
+          <div class="stat-label">规划中</div>
+          <div class="stat-value info">${stats.maturity.planned}</div>
+          <div class="muted">已有对象、输入、输出和 Runbook 骨架</div>
+        </div>
+      </div>
+    </div>
+    <section class="ops-card" style="margin-bottom: 14px;">
+      <div class="column-header" style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+        <span>场景目录</span>
+        <span class="muted">当前显示 ${filteredScenarios.length} / ${scenarios.length}</span>
+      </div>
+      <div style="display:grid; grid-template-columns: minmax(220px, 1fr) minmax(180px, 240px); gap:12px; padding:14px;">
+        <label class="input" style="display:block;">
+          <input
+            type="search"
+            autocomplete="off"
+            placeholder="搜索场景、对象、输入证据或输出成果"
+            .value=${scenarioSearch}
+            @input=${(e: Event) => props.onScenarioSearchChange?.((e.target as HTMLInputElement).value)}
+          />
+        </label>
+        <label class="select" style="display:block;">
+          <select
+            .value=${maturityFilter}
+            @change=${(e: Event) =>
+              props.onScenarioMaturityFilterChange?.(
+                normalizeScenarioMaturityFilter((e.target as HTMLSelectElement).value),
+              )}
+          >
+            <option value="all" ?selected=${maturityFilter === "all"}>全部成熟度</option>
+            <option value="planned" ?selected=${maturityFilter === "planned"}>规划中</option>
+            <option value="beta" ?selected=${maturityFilter === "beta"}>Beta</option>
+            <option value="connected" ?selected=${maturityFilter === "connected"}>已接入</option>
+            <option value="automated" ?selected=${maturityFilter === "automated"}>自动化闭环</option>
+          </select>
+        </label>
+      </div>
+      ${filteredScenarios.length === 0
+        ? html`<div class="empty-placeholder" style="margin: 0 14px 14px;">没有匹配的场景，可调整关键字或成熟度过滤。</div>`
+        : html`
+            <div class="ops-summary-cards">
+              ${filteredScenarios.map(
+                (scenario) => html`
+                  <article class="ops-card stat-card" style="align-items: flex-start;">
+                    <div class="stat-icon-slot">${icons[scenario.icon] ?? icons.folder}</div>
+                    <div class="stat-body">
+                      <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:4px;">
+                        <h3 style="margin:0;">${scenario.title}</h3>
+                        <span class="score-badge score-badge--${scenario.maturity === "planned" ? "unknown" : "ok"}">
+                          ${maturityLabel(scenario.maturity)}
+                        </span>
+                      </div>
+                      <p class="muted" style="margin:0 0 10px;">${scenario.summary}</p>
+                      <div class="detail-meta" style="margin-bottom:10px; flex-wrap:wrap;">
+                        <span>${opsDomainLabel(scenario.domain, true)}</span>
+                        <span>${automationLabel(scenario.automationLevel)}</span>
+                        ${scenario.triggers.map((trigger) => html`<span>${triggerLabel(trigger)}</span>`)}
+                        <span>${scenario.primaryMetric ?? scenario.objectTypes.join(" / ")}</span>
+                      </div>
+                      ${renderTagList("输入证据", scenario.inputs)}
+                      ${renderTagList("输出成果", scenario.outputs)}
+                      <button
+                        class="ops-btn ops-btn--primary"
+                        type="button"
+                        style="margin-top: 12px;"
+                        @click=${() => {
+                          if (selectedDomain === "all") {
+                            props.onDomainChange?.(scenario.domain);
+                          }
+                          props.onSelectScenario?.(scenario.id);
+                        }}
+                      >
+                        进入专项
+                      </button>
+                    </div>
+                  </article>
+                `,
+              )}
+            </div>
+          `}
+    </section>
+  `;
+}
+
+function renderScenarioDetail(
+  props: WorkbenchProps,
+  view: WorkbenchView,
+  selectedDomain: OpsDomainKey,
+  selectedObjectScope: string,
+  selectedTimeRange: WorkbenchTimeRange,
+) {
+  const scenario = findWorkbenchScenario(props.selectedScenarioId);
+  if (!scenario || scenario.center !== view) {
+    return renderScenarioDirectory(props, view, selectedDomain);
+  }
+  if (selectedDomain === "all") {
+    return renderScenarioDirectory(props, view, selectedDomain);
+  }
+  if (scenario.domain !== selectedDomain) {
+    return renderScenarioDirectory(props, view, selectedDomain);
+  }
+
+  const back = html`
+    <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:12px;">
+      <div class="detail-meta" style="flex-wrap:wrap;">
+        <span>${opsDomainLabel(scenario.domain)}</span>
+        <span>${scenario.objectTypes.join(" / ")}</span>
+        <span>${automationLabel(scenario.automationLevel)}</span>
+      </div>
+      <button class="ops-btn ops-btn--ghost" type="button" @click=${() => props.onSelectScenario?.(null)}>
+        返回场景目录
+      </button>
+    </div>
+  `;
+
+  const result = buildScenarioResult(scenario, selectedObjectScope, selectedTimeRange);
+  return html`
+    ${back}
+    ${renderScenarioClosurePanel(props, scenario, result, selectedObjectScope, selectedTimeRange)}
+    ${renderScenarioComponent(scenario, {
+      host: props.host,
+      objectScope: selectedObjectScope,
+      timeRange: selectedTimeRange,
+    })}
+  `;
+}
+
 function renderEventsView(props: WorkbenchProps, active: WorkbenchAlertGroup | undefined, originalTotal: number, criticalCount: number, warningCount: number) {
   return html`
     ${props.alertsError
@@ -562,8 +984,18 @@ export function renderWorkbench(props: WorkbenchProps) {
   const criticalCount = props.alertGroups.filter((g) => g.severity === "critical").length;
   const warningCount = props.alertGroups.filter((g) => g.severity === "warning").length;
   const activeView = props.activeView ?? "events";
-  const effectiveDomain = effectiveOpsDomain(props.selectedDomain || "all");
-  const isHadoopDomain = effectiveDomain === "hadoop";
+  const selectedDomain = normalizeOpsDomain(props.selectedDomain || "all");
+  const selectedScenarioRaw = findWorkbenchScenario(props.selectedScenarioId);
+  const selectedScenario =
+    selectedScenarioRaw &&
+    selectedScenarioRaw.center === activeView &&
+    selectedDomain !== "all" &&
+    selectedScenarioRaw.domain === selectedDomain
+      ? selectedScenarioRaw
+      : undefined;
+  const objectOptions = objectOptionsForScenario(selectedScenario, props.domainClusters ?? []);
+  const selectedObjectScope = normalizeWorkbenchObjectScope(props.selectedObjectScope, objectOptions);
+  const selectedTimeRange = normalizeWorkbenchTimeRange(props.selectedTimeRange);
 
   const meta = WORKBENCH_VIEW_META[activeView];
 
@@ -606,17 +1038,20 @@ export function renderWorkbench(props: WorkbenchProps) {
                   `
                 : nothing,
           })}
+          ${renderWorkbenchContextBar(
+            activeView,
+            selectedDomain,
+            objectOptions,
+            selectedObjectScope,
+            selectedTimeRange,
+            props,
+            selectedScenario,
+          )}
           ${activeView === "events"
             ? renderEventsView(props, active, originalTotal, criticalCount, warningCount)
             : activeView === "inspection"
               ? renderInspectionView(props)
-              : activeView === "diagnosis" && isHadoopDomain
-                ? html`<bch-flink-diagnosis .host=${props.host}></bch-flink-diagnosis>`
-              : activeView === "governance" && isHadoopDomain
-                ? html`<bch-spark-governance .host=${props.host}></bch-spark-governance>`
-              : activeView === "capacity" && isHadoopDomain
-                ? html`<bch-fsimage-dashboard .host=${props.host}></bch-fsimage-dashboard>`
-              : renderSkeletonView(props, activeView)}
+              : renderScenarioDetail(props, activeView, selectedDomain, selectedObjectScope, selectedTimeRange)}
         </main>
       </div>
     </div>

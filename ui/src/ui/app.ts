@@ -1059,12 +1059,17 @@ export class OpenClawApp extends LitElement implements NativeDialogInvoker {
   }
 
   async openDomainAlertsFromDashboard(domain: string) {
-    const tab = domain as import("./navigation.ts").Tab;
-    this.opsActiveSubTabs = { ...this.opsActiveSubTabs, [tab]: "observability" };
-    void this.setTab(tab);
-    void this.loadOpsDomainAlerts(domain);
-    const { opsDomainLabel } = await import("./components/domain-filter.ts");
-    this.setOpsDashboardToast(`已打开 ${opsDomainLabel(domain)} 告警列表`);
+    const { normalizeOpsDomain, opsDomainLabel } = await import("./components/domain-filter.ts");
+    const targetDomain = normalizeOpsDomain(domain);
+    this.applySettings({ ...this.settings, opsDomain: targetDomain });
+    this.opsSelectedEntityIds = {
+      ...this.opsSelectedEntityIds,
+      workbenchView: "events",
+      workbenchScenario: "",
+    };
+    void this.setTab("workbench");
+    void this.loadOpsDomainAlerts(targetDomain);
+    this.setOpsDashboardToast(`已打开 ${opsDomainLabel(targetDomain)} 告警列表`);
   }
 
   async ackOpsAlertGroup(domain: string, groupId: string) {
@@ -1089,14 +1094,14 @@ export class OpenClawApp extends LitElement implements NativeDialogInvoker {
 
   openPendingAlertsFromDashboard() {
     const summary = this.opsDashboardSummary;
-    const firstDomain =
-      summary?.domains.find((d) => d.clusterCount > 0)?.domain ??
-      summary?.domains[0]?.domain ??
-      "hadoop";
-    const tab = firstDomain as import("./navigation.ts").Tab;
-    this.opsActiveSubTabs = { ...this.opsActiveSubTabs, [tab]: "observability" };
-    void this.setTab(tab);
-    void this.loadOpsDomainAlerts(tab);
+    this.applySettings({ ...this.settings, opsDomain: "all" });
+    this.opsSelectedEntityIds = {
+      ...this.opsSelectedEntityIds,
+      workbenchView: "events",
+      workbenchScenario: "",
+    };
+    void this.setTab("workbench");
+    void this.loadOpsDomainAlerts("all");
     const pending = summary?.pendingAlerts ?? 0;
     const msg =
       pending > 0

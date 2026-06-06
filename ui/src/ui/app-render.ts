@@ -73,12 +73,10 @@ import { renderProductTour } from "./views/product-tour.ts";
 import { nativeAlert, nativeConfirm, nativePrompt } from "./native-dialog-bridge.ts";
 import {
   canAccessOpsDomain,
-  effectiveOpsDomain,
   firstAccessibleOpsDomain,
   normalizeOpsDomain,
   opsAssistantForDomain,
   opsDomainLabel,
-  renderDomainFilter,
   type OpsDomainKey,
 } from "./components/domain-filter.ts";
 import { t } from "./strings.js";
@@ -414,6 +412,8 @@ import { renderNodes } from "./views/nodes.ts";
 import { renderOverview } from "./views/overview.ts";
 import { renderDomainInsight } from "./views/domain-insight.ts";
 import { renderWorkbench, type WorkbenchInspection, type WorkbenchView } from "./views/workbench.ts";
+import { normalizeWorkbenchTimeRange } from "./ops/workbench-context.ts";
+import { buildScenarioResult, scenarioResultInputText, scenarioResultOutputText } from "./ops/scenario-results.ts";
 import { runWorkbenchAi } from "./controllers/ops-workbench-ai.ts";
 import { renderAssetsView } from "./views/assets-view.ts";
 import { renderTechOpsDomain } from "./views/tech-ops-domain.ts";
@@ -757,7 +757,6 @@ export function renderApp(state: AppViewState) {
     state.tab === "opsCapabilities" ||
     state.tab === "assetManagement";
   const selectedOpsDomain = normalizeOpsDomain(state.settings.opsDomain);
-  const effectiveWorkbenchDomain = effectiveOpsDomain(selectedOpsDomain);
   const userCanAccessAnyOpsDomain = canAccessOpsDomain(state.rbacUser, "all");
   const setGlobalOpsDomain = (domain: OpsDomainKey) => {
     const nextDomain = canAccessOpsDomain(state.rbacUser, domain)
@@ -773,6 +772,40 @@ export function renderApp(state: AppViewState) {
       }
       window.history.replaceState({}, "", url.toString());
     }
+  };
+  const openWorkbench = (opts: {
+    domain?: string | null;
+    view?: WorkbenchView | string | null;
+    scenarioId?: string | null;
+    alertGroupId?: string | null;
+  } = {}) => {
+    const nextDomain = opts.domain ? normalizeOpsDomain(opts.domain) : selectedOpsDomain;
+    if (opts.domain) {
+      setGlobalOpsDomain(nextDomain);
+    }
+    const nextView =
+      opts.view === "inspection" ||
+      opts.view === "diagnosis" ||
+      opts.view === "governance" ||
+      opts.view === "capacity" ||
+      opts.view === "change"
+        ? opts.view
+        : "events";
+    state.opsSelectedEntityIds = {
+      ...state.opsSelectedEntityIds,
+      workbenchView: nextView,
+      workbenchScenario: opts.scenarioId ?? "",
+      workbenchObjectScope: "all",
+      workbenchScenarioSearch: "",
+      workbenchScenarioMaturity: "all",
+    };
+    if (opts.alertGroupId) {
+      state.opsSelectedAlertGroupIds = {
+        ...state.opsSelectedAlertGroupIds,
+        [nextDomain]: opts.alertGroupId,
+      };
+    }
+    void state.setTab("workbench");
   };
   const openClusterAssetManagement = (domain?: string) => {
     if (domain) {
@@ -1626,15 +1659,17 @@ export function renderApp(state: AppViewState) {
                   scenarioSummary: domain === "hadoop" ? state.opsBchScenarioSummary : null,
                   scenarioSummaryLoading: domain === "hadoop" ? state.opsBchScenarioSummaryLoading : false,
                   scenarioSummaryError: domain === "hadoop" ? state.opsBchScenarioSummaryError : null,
-                  onNavigateTab: (tab, domainContext, view) => {
+                  onNavigateTab: (tab, domainContext, view, scenarioId) => {
+                    if (tab === "workbench") {
+                      openWorkbench({
+                        domain: domainContext,
+                        view,
+                        scenarioId,
+                      });
+                      return;
+                    }
                     if (domainContext) {
                       setGlobalOpsDomain(normalizeOpsDomain(domainContext));
-                    }
-                    if (view && tab === "workbench") {
-                      state.opsSelectedEntityIds = {
-                        ...state.opsSelectedEntityIds,
-                        workbenchView: view as any,
-                      };
                     }
                     state.setTab(tab as any);
                   },
@@ -1680,7 +1715,7 @@ export function renderApp(state: AppViewState) {
           state.tab === "workbench"
             ? (() => {
                 const domainForAlerts = selectedOpsDomain;
-                const domain = effectiveWorkbenchDomain;
+                const domain = selectedOpsDomain;
                 if (
                   !state.opsAlertsLoading?.[domainForAlerts] &&
                   state.opsAlertsByDomain?.[domainForAlerts] === undefined &&
@@ -1689,6 +1724,17 @@ export function renderApp(state: AppViewState) {
                   (state as any)._loadingWorkbenchAlerts = true;
                   state.loadOpsDomainAlerts(domainForAlerts).finally(() => {
                     (state as any)._loadingWorkbenchAlerts = false;
+                  });
+                }
+                if (
+                  domain !== "all" &&
+                  !state.opsDomainClustersLoading?.[domain] &&
+                  state.opsDomainClusters?.[domain] === undefined &&
+                  !(state as any)._loadingWorkbenchClusters
+                ) {
+                  (state as any)._loadingWorkbenchClusters = domain;
+                  state.loadOpsDomainClusters(domain).finally(() => {
+                    (state as any)._loadingWorkbenchClusters = null;
                   });
                 }
                 const selectedId = state.opsSelectedAlertGroupIds[domainForAlerts] || null;
@@ -1706,6 +1752,11 @@ export function renderApp(state: AppViewState) {
                   workbenchViewRaw === "change"
                     ? workbenchViewRaw
                     : "events";
+                const selectedObjectScope = state.opsSelectedEntityIds?.workbenchObjectScope || "all";
+                const selectedTimeRange = normalizeWorkbenchTimeRange(state.opsSelectedEntityIds?.workbenchTimeRange);
+                const scenarioSearch = state.opsSelectedEntityIds?.workbenchScenarioSearch || "";
+                const scenarioMaturityFilter = state.opsSelectedEntityIds?.workbenchScenarioMaturity || "all";
+                const scenarioAiObjectId = `${state.opsSelectedEntityIds?.workbenchScenario || ""}:${selectedObjectScope}:${selectedTimeRange}`;
                 const inspectionJobId = `job-inspect-${domain}`;
                 if (
                   workbenchView === "inspection" &&
@@ -1770,7 +1821,7 @@ export function renderApp(state: AppViewState) {
                           ? `处置建议${isAccepted ? "已确认" : "已驳回"}：${trimmedNote}`
                           : `根因分析建议${isAccepted ? "已确认" : "已驳回"}：${trimmedNote}`;
                     
-                    const actualDomain = alert.domain || domain;
+                    const actualDomain = alert.domain || (domain === "all" ? "hadoop" : domain);
                     const employeeId = opsAssistantForDomain(actualDomain).employeeId;
 
                     const taskId = await createEmployeeTask(state, {
@@ -1828,15 +1879,23 @@ export function renderApp(state: AppViewState) {
                   clustersCount: domainSummaryRaw?.clusterCount ?? 0,
                   alertsCount: alertGroups.length,
                 };
-                const workbenchAssistant = opsAssistantForDomain(
-                  alertGroups.find((g) => g.id === selectedId)?.domain || domainForAlerts,
-                );
+                const assistantDomain = alertGroups.find((g) => g.id === selectedId)?.domain || (domainForAlerts === "all" ? "hadoop" : domainForAlerts);
+                const workbenchAssistant = opsAssistantForDomain(assistantDomain);
                 return renderWorkbench({
                   domainName: opsDomainLabel(domainForAlerts),
                   selectedDomain: selectedOpsDomain,
                   user: state.rbacUser,
                   host: state,
-                  onDomainChange: setGlobalOpsDomain,
+                  onDomainChange: (nextDomain) => {
+                    setGlobalOpsDomain(normalizeOpsDomain(nextDomain));
+                    state.opsSelectedEntityIds = {
+                      ...state.opsSelectedEntityIds,
+                      workbenchScenario: "",
+                      workbenchObjectScope: "all",
+                      workbenchScenarioSearch: "",
+                      workbenchScenarioMaturity: "all",
+                    };
+                  },
                   domainSummary,
                   assistantName: workbenchAssistant.name,
                   assistantPersona: workbenchAssistant.persona,
@@ -1844,6 +1903,12 @@ export function renderApp(state: AppViewState) {
                   alertsError: state.opsAlertsError?.[domainForAlerts] ?? null,
                   alertGroups,
                   activeView: workbenchView,
+                  selectedScenarioId: state.opsSelectedEntityIds?.workbenchScenario || null,
+                  scenarioSearch,
+                  scenarioMaturityFilter,
+                  selectedObjectScope,
+                  selectedTimeRange,
+                  domainClusters: domain === "all" ? [] : state.opsDomainClusters?.[domain] ?? [],
                   inspectionsLoading: state.cronLoading,
                   inspections,
                   selectedInspectionId: state.opsSelectedInspectionIds[domain] || (inspections[0]?.id ?? null),
@@ -1854,10 +1919,21 @@ export function renderApp(state: AppViewState) {
                   aiPanelOpen: state.opsSelectedEntityIds?.workbenchAiPanel === "open",
                   aiPanelMode: aiMode,
                   aiStatus:
-                    state.workbenchAiObjectId === selectedId ? state.workbenchAiStatus : "idle",
-                  aiStream: state.workbenchAiObjectId === selectedId ? state.workbenchAiStream : null,
-                  aiResult: state.workbenchAiObjectId === selectedId ? state.workbenchAiResult : null,
-                  aiError: state.workbenchAiObjectId === selectedId ? state.workbenchAiError : null,
+                    state.workbenchAiObjectId === selectedId || state.workbenchAiObjectId === scenarioAiObjectId
+                      ? state.workbenchAiStatus
+                      : "idle",
+                  aiStream:
+                    state.workbenchAiObjectId === selectedId || state.workbenchAiObjectId === scenarioAiObjectId
+                      ? state.workbenchAiStream
+                      : null,
+                  aiResult:
+                    state.workbenchAiObjectId === selectedId || state.workbenchAiObjectId === scenarioAiObjectId
+                      ? state.workbenchAiResult
+                      : null,
+                  aiError:
+                    state.workbenchAiObjectId === selectedId || state.workbenchAiObjectId === scenarioAiObjectId
+                      ? state.workbenchAiError
+                      : null,
                   onRetryAi: () => {
                     const target = alertGroups.find((g) => g.id === selectedId) || alertGroups[0];
                     if (!target) return;
@@ -1872,7 +1948,103 @@ export function renderApp(state: AppViewState) {
                     state.opsSelectedEntityIds = {
                       ...state.opsSelectedEntityIds,
                       workbenchView: view,
+                      workbenchScenario: "",
+                      workbenchObjectScope: "all",
+                      workbenchScenarioSearch: "",
+                      workbenchScenarioMaturity: "all",
                     };
+                  },
+                  onSelectScenario: (id) => {
+                    state.opsSelectedEntityIds = {
+                      ...state.opsSelectedEntityIds,
+                      workbenchScenario: id ?? "",
+                      workbenchObjectScope: "all",
+                    };
+                  },
+                  onScenarioSearchChange: (query) => {
+                    state.opsSelectedEntityIds = {
+                      ...state.opsSelectedEntityIds,
+                      workbenchScenarioSearch: query,
+                    };
+                  },
+                  onScenarioMaturityFilterChange: (maturity) => {
+                    state.opsSelectedEntityIds = {
+                      ...state.opsSelectedEntityIds,
+                      workbenchScenarioMaturity: maturity,
+                    };
+                  },
+                  onObjectScopeChange: (scope) => {
+                    state.opsSelectedEntityIds = {
+                      ...state.opsSelectedEntityIds,
+                      workbenchObjectScope: scope,
+                    };
+                  },
+                  onTimeRangeChange: (range) => {
+                    state.opsSelectedEntityIds = {
+                      ...state.opsSelectedEntityIds,
+                      workbenchTimeRange: range,
+                    };
+                  },
+                  onOpenScenarioAi: (scenario, mode) => {
+                    void runWorkbenchAi(state as any, {
+                      domain: scenario.domain,
+                      mode,
+                      assistantTemplate: opsAssistantForDomain(scenario.domain).employeeId,
+                      alert: {
+                        id: `${scenario.id}:${selectedObjectScope}:${selectedTimeRange}`,
+                        title: scenario.title,
+                        severity: "info",
+                        domain: scenario.domain,
+                        objectType: scenario.objectTypes.join("/"),
+                        objectId: selectedObjectScope,
+                        scenarioTitle: scenario.title,
+                        scenarioSummary: scenario.summary,
+                        evidence: scenario.inputs,
+                        expectedOutputs: scenario.outputs,
+                      },
+                    });
+                  },
+                  onRecordScenarioSuggestion: async (scenario) => {
+                    const note = await nativePrompt(
+                      `记录 ${scenario.title} 闭环备注：`,
+                      `${scenario.title} 已完成专项分析，按建议动作推进。`,
+                    );
+                    if (note === null) return;
+                    const trimmed = note.trim();
+                    if (!trimmed) {
+                      await nativeAlert("必须填写闭环备注。");
+                      return;
+                    }
+                    const result = buildScenarioResult(scenario, selectedObjectScope, selectedTimeRange);
+                    const taskId = await createEmployeeTask(state, {
+                      employeeId: opsAssistantForDomain(scenario.domain).employeeId,
+                      domainKey: scenario.domain,
+                      capabilityKey: scenario.center,
+                      scenarioKey: scenario.id,
+                      objectRef: selectedObjectScope,
+                      triggerType: "manual",
+                      executionStatus: "succeeded",
+                      workflowStatus: "closed",
+                      input: scenarioResultInputText(result),
+                      output: scenarioResultOutputText(result, trimmed),
+                      conclusion: `${scenario.title} 专项建议已记录：${trimmed}`,
+                      operator: state.rbacUser?.username ?? "operator",
+                      evaluation: "accepted",
+                      artifacts: result.artifacts,
+                      metrics: {
+                        savedHours: 0.5,
+                      },
+                    });
+                    state.opsSelectedEntityIds = {
+                      ...state.opsSelectedEntityIds,
+                      lastWorkbenchTaskId: taskId ?? "",
+                    };
+                    await nativeAlert(taskId ? "专项闭环已写入执行记录。" : "专项备注已处理，但执行记录写入失败，请检查连接。");
+                  },
+                  onOpenScenarioTasks: (scenario) => {
+                    state.employeeTaskFilterQuery = scenario.id;
+                    state.setTab("employeeTasks");
+                    void loadEmployeeTasks(state);
                   },
                   onRefreshAlerts: () => state.loadOpsDomainAlerts(domainForAlerts),
                   onSelectAlertGroup: (id) => {

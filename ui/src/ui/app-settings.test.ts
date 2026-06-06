@@ -8,7 +8,7 @@ vi.mock("./app-chat.ts", () => ({
 vi.mock("./controllers/logs.ts", () => ({
   loadLogs: loadLogsMock,
 }));
-import { setTab, setTabFromRoute } from "./app-settings.ts";
+import { setTab, setTabFromRoute, syncUrlWithTab } from "./app-settings.ts";
 
 type SettingsHost = Parameters<typeof setTabFromRoute>[0] & {
   logsPollInterval: number | null;
@@ -30,6 +30,7 @@ const createHost = (tab: Tab, content?: HTMLElement): SettingsHost => ({
     splitRatio: 0.6,
     navCollapsed: false,
     navGroupsCollapsed: {},
+    opsDomain: "all",
   },
   theme: "system",
   themeResolved: "dark",
@@ -49,6 +50,45 @@ const createHost = (tab: Tab, content?: HTMLElement): SettingsHost => ({
   logsScrollFrame: null,
   updateComplete: Promise.resolve(),
   querySelector: vi.fn((selector: string) => (selector === ".content" ? content ?? null : null)),
+});
+
+describe("syncUrlWithTab ops domain", () => {
+  const originalUrl = "/chat";
+
+  beforeEach(() => {
+    window.history.replaceState({}, "", originalUrl);
+  });
+
+  it("omits domain query for all-domain workbench", () => {
+    const host = createHost("workbench");
+    host.settings.opsDomain = "all";
+
+    syncUrlWithTab(host, "workbench", true);
+
+    expect(window.location.pathname).toBe("/workbench");
+    expect(window.location.search).toBe("");
+  });
+
+  it("preserves explicit technical domain query for workbench", () => {
+    const host = createHost("workbench");
+    host.settings.opsDomain = "hadoop";
+
+    syncUrlWithTab(host, "workbench", true);
+
+    expect(window.location.pathname).toBe("/workbench");
+    expect(window.location.search).toBe("?domain=hadoop");
+  });
+
+  it("removes ops domain query outside ops-shell pages", () => {
+    const host = createHost("chat");
+    host.settings.opsDomain = "gbase";
+    window.history.replaceState({}, "", "/workbench?domain=gbase");
+
+    syncUrlWithTab(host, "chat", true);
+
+    expect(window.location.pathname).toBe("/chat");
+    expect(new URLSearchParams(window.location.search).has("domain")).toBe(false);
+  });
 });
 
 describe("setTabFromRoute", () => {

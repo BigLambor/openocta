@@ -108,7 +108,7 @@ export type DomainInsightProps = {
   scenarioSummary?: BchDomainScenarioSummary | null;
   scenarioSummaryLoading?: boolean;
   scenarioSummaryError?: string | null;
-  onNavigateTab?: (tab: string, domain?: string, view?: string) => void;
+  onNavigateTab?: (tab: string, domain?: string, view?: string, scenarioId?: string) => void;
   onRunInspection?: () => void;
   isInspecting?: boolean;
   canInspect?: boolean;
@@ -143,6 +143,19 @@ function statusClass(status: BchScenarioCardSummary["status"]): string {
       return "danger";
     default:
       return "unknown";
+  }
+}
+
+function workbenchScenarioId(scenario: BchScenarioCardSummary, view?: string): string | null {
+  switch (scenario.id) {
+    case "flink-health":
+      return view === "diagnosis" ? "bch-flink-health" : null;
+    case "spark-tuning":
+      return view === "governance" ? "bch-spark-tuning" : null;
+    case "hdfs-storage":
+      return view === "capacity" ? "bch-hdfs-capacity" : null;
+    default:
+      return null;
   }
 }
 
@@ -184,7 +197,7 @@ function renderBchScenarioCard(
         <button
           type="button"
           class="ops-btn ops-btn--primary domain-card-link"
-          @click=${() => props.onNavigateTab?.("workbench", domain, scenario.primaryView)}
+          @click=${() => props.onNavigateTab?.("workbench", domain, scenario.primaryView, workbenchScenarioId(scenario, scenario.primaryView) ?? undefined)}
         >
           ${scenario.primaryActionLabel}
         </button>
@@ -193,7 +206,7 @@ function renderBchScenarioCard(
               <button
                 type="button"
                 class="ops-btn domain-card-link domain-card-link--secondary"
-                @click=${() => props.onNavigateTab?.("workbench", domain, scenario.secondaryView)}
+                @click=${() => props.onNavigateTab?.("workbench", domain, scenario.secondaryView, workbenchScenarioId(scenario, scenario.secondaryView) ?? undefined)}
               >
                 ${scenario.secondaryActionLabel}
               </button>
