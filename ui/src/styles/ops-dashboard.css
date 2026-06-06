@@ -1684,7 +1684,7 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .ops-workbench-layout .ops-inspection-detail__body {
@@ -1745,4 +1745,372 @@
   padding: 8px 12px;
   border-left: 3px solid var(--accent);
   background: color-mix(in srgb, var(--accent) 5%, var(--bg));
+}
+
+/* ==========================================
+   Ops Interactive Map & Satellite Dots Styling
+   ========================================== */
+
+.ops-map-section {
+  margin-bottom: 28px;
+}
+
+.ops-map-card {
+  padding: 24px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--ops-radius-md, 10px);
+  position: relative;
+  overflow: hidden;
+}
+
+.ops-map-container {
+  position: relative;
+  width: 100%;
+  background: linear-gradient(135deg, rgba(20, 24, 35, 0.95) 0%, rgba(10, 12, 18, 0.98) 100%);
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  box-shadow: inset 0 0 40px rgba(0, 0, 0, 0.6);
+  padding: 12px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.ops-map-svg {
+  width: 100%;
+  max-width: 900px;
+  height: auto;
+  min-height: 400px;
+  overflow: visible;
+  user-select: none;
+}
+
+/* Map Grid & Background Graphics */
+.ops-map__grid-pattern {
+  opacity: 0.15;
+}
+
+/* Stylized China boundaries (Detailed Province Mesh) */
+.ops-map-svg .province path {
+  fill: rgba(30, 41, 59, 0.3) !important;
+  stroke: rgba(71, 85, 105, 0.35) !important;
+  stroke-width: 0.8px !important;
+  stroke-linejoin: round;
+  transition: fill 0.2s ease, stroke 0.2s ease;
+}
+
+.ops-map-svg .province path:hover {
+  fill: rgba(59, 130, 246, 0.12) !important;
+  stroke: rgba(59, 130, 246, 0.6) !important;
+}
+
+.ops-map-svg .disputed path,
+.ops-map-svg #pXJd,
+.ops-map-svg #pXZd1,
+.ops-map-svg #pXZd2,
+.ops-map-svg [id^="pXZd"] {
+  fill: rgba(47, 55, 71, 0.25) !important;
+  stroke: rgba(71, 85, 105, 0.25) !important;
+  stroke-width: 0.8px !important;
+  stroke-dasharray: 2, 2 !important;
+}
+
+.ops-map-svg [id^="bAksai"],
+.ops-map-svg [id^="bSouth"] {
+  stroke: rgba(71, 85, 105, 0.35) !important;
+  stroke-width: 0.8px !important;
+  stroke-dasharray: 2, 2 !important;
+  fill: none !important;
+}
+
+.ops-map-svg #Yellow\ River,
+.ops-map-svg #Yangzi\ River {
+  stroke: rgba(59, 130, 246, 0.25) !important;
+  stroke-width: 1px !important;
+  fill: none !important;
+  pointer-events: none;
+}
+
+/* Glowing Network Links */
+.ops-map__link {
+  stroke: rgba(59, 130, 246, 0.45);
+  stroke-width: 1.5px;
+  stroke-dasharray: 6, 6;
+  animation: ops-map-link-dash 30s linear infinite;
+  opacity: 0.7;
+}
+
+@keyframes ops-map-link-dash {
+  to {
+    stroke-dashoffset: -1000;
+  }
+}
+
+/* Main City Node */
+.ops-map__node-group {
+  cursor: pointer;
+}
+
+.ops-map__node-center {
+  stroke-width: 1.5px;
+}
+
+.ops-map__node-halo {
+  fill: none;
+  stroke-width: 1.5px;
+  transform-origin: center;
+}
+
+.ops-map__node-group:hover .ops-map__node-center {
+  transform: scale(1.15);
+  transition: transform 0.2s ease;
+}
+
+/* Label styling */
+.ops-map__node-label {
+  font-size: 11px;
+  font-weight: 600;
+  fill: #e5e7eb !important;
+  text-anchor: middle;
+  pointer-events: none;
+  font-family: Inter, system-ui, sans-serif;
+  letter-spacing: 0.5px;
+}
+
+/* Satellite dots representing business domains */
+.ops-map__sat-dot {
+  cursor: pointer;
+  transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.ops-map__sat-dot:hover {
+  transform: scale(1.4);
+}
+
+.ops-map__sat-core {
+  stroke: rgba(10, 12, 18, 0.8);
+  stroke-width: 1px;
+}
+
+.ops-map__sat-ring {
+  fill: none;
+  stroke-width: 1.5px;
+  opacity: 0;
+  transform-origin: center;
+}
+
+/* Health status colors and animations (Supports parent-child satellite dots AND compound city center nodes) */
+/* Healthy (Green) */
+.ops-map__sat-dot--healthy .ops-map__sat-core,
+circle.ops-map__sat-dot--healthy.ops-map__node-center {
+  fill: #10b981 !important;
+  stroke: rgba(16, 185, 129, 0.4);
+}
+.ops-map__sat-dot--healthy .ops-map__sat-ring,
+circle.ops-map__sat-dot--healthy.ops-map__node-halo {
+  stroke: #10b981 !important;
+  animation: ops-map-pulse 3s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+}
+
+/* Warning (Yellow) */
+.ops-map__sat-dot--warning .ops-map__sat-core,
+circle.ops-map__sat-dot--warning.ops-map__node-center {
+  fill: #f59e0b !important;
+  stroke: rgba(245, 158, 11, 0.4);
+}
+.ops-map__sat-dot--warning .ops-map__sat-ring,
+circle.ops-map__sat-dot--warning.ops-map__node-halo {
+  stroke: #f59e0b !important;
+  animation: ops-map-pulse 1.6s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+}
+
+/* Critical (Red) */
+.ops-map__sat-dot--critical .ops-map__sat-core,
+circle.ops-map__sat-dot--critical.ops-map__node-center {
+  fill: #ef4444 !important;
+  stroke: rgba(239, 68, 68, 0.4);
+}
+.ops-map__sat-dot--critical .ops-map__sat-ring,
+circle.ops-map__sat-dot--critical.ops-map__node-halo {
+  stroke: #ef4444 !important;
+  animation: ops-map-pulse 0.8s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+}
+
+/* Unknown (Gray) */
+.ops-map__sat-dot--unknown .ops-map__sat-core,
+circle.ops-map__sat-dot--unknown.ops-map__node-center {
+  fill: #6b7280 !important;
+  stroke: rgba(107, 114, 128, 0.4);
+}
+.ops-map__sat-dot--unknown .ops-map__sat-ring,
+circle.ops-map__sat-dot--unknown.ops-map__node-halo {
+  stroke: #6b7280 !important;
+  animation: none;
+}
+
+@keyframes ops-map-pulse {
+  0% {
+    r: 9px;
+    opacity: 0.8;
+  }
+  75%, 100% {
+    r: 20px;
+    opacity: 0;
+  }
+}
+
+/* Glassmorphic Floating Tooltip */
+.ops-map__tooltip {
+  position: absolute;
+  z-index: 50;
+  width: 250px;
+  background: rgba(17, 24, 39, 0.85);
+  backdrop-filter: blur(12px) saturate(160%);
+  -webkit-backdrop-filter: blur(12px) saturate(160%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  padding: 14px;
+  pointer-events: none;
+  font-family: system-ui, -apple-system, sans-serif;
+  color: #f3f4f6;
+  opacity: 0;
+  transform: scale(0.95) translateY(5px);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.ops-map__tooltip--visible {
+  opacity: 1;
+  transform: scale(1) translateY(0);
+}
+
+.ops-map__tooltip-header {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  padding-bottom: 8px;
+  margin-bottom: 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.ops-map__tooltip-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ops-map__tooltip-title-icon {
+  color: var(--accent, #3b82f6);
+  display: flex;
+  align-items: center;
+}
+
+.ops-map__tooltip-title-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.ops-map__tooltip-subtitle {
+  font-size: 11px;
+  color: #9ca3af;
+  background: rgba(255, 255, 255, 0.06);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.ops-map__tooltip-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ops-map__tooltip-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.02);
+}
+
+.ops-map__tooltip-item-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ops-map__tooltip-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.ops-map__tooltip-status-dot--healthy {
+  background: #10b981;
+  box-shadow: 0 0 6px #10b981;
+}
+.ops-map__tooltip-status-dot--warning {
+  background: #f59e0b;
+  box-shadow: 0 0 6px #f59e0b;
+}
+.ops-map__tooltip-status-dot--critical {
+  background: #ef4444;
+  box-shadow: 0 0 6px #ef4444;
+}
+.ops-map__tooltip-status-dot--unknown {
+  background: #6b7280;
+}
+
+.ops-map__tooltip-item-name {
+  font-weight: 500;
+}
+
+.ops-map__tooltip-item-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+}
+
+.ops-map__tooltip-score {
+  font-weight: 600;
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+.ops-map__tooltip-score--ok {
+  color: #10b981;
+  background: rgba(16, 185, 129, 0.1);
+}
+.ops-map__tooltip-score--warning {
+  color: #f59e0b;
+  background: rgba(245, 158, 11, 0.1);
+}
+.ops-map__tooltip-score--danger {
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.ops-map__tooltip-alerts {
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-weight: 600;
+}
+
+.ops-map__tooltip-no-clusters {
+  font-size: 11px;
+  color: #9ca3af;
+  text-align: center;
+  padding: 8px 0;
+  font-style: italic;
 }

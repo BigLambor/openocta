@@ -23,12 +23,8 @@ export type AssetsContextSidebarProps<T extends string = string> = {
   selectedDomain: string;
   views: AssetsViewSidebarItem<T>[];
   activeView: T;
-  searchQuery: string;
-  statusFilter: string;
   onDomainChange?: (domain: string) => void;
   onViewChange?: (view: T) => void;
-  onSearchChange?: (query: string) => void;
-  onStatusFilterChange?: (status: string) => void;
 };
 
 function renderNavItem(params: {
@@ -90,32 +86,6 @@ export function renderAssetsContextSidebar<T extends string>(props: AssetsContex
         </nav>
       </div>
 
-      <div class="ops-sidebar-filters">
-        <div>
-          <div class="ops-sidebar-section__label">搜索过滤</div>
-          <input
-            type="text"
-            class="ops-sidebar-filter-input"
-            placeholder="搜名称 / 负责人 / 组件..."
-            .value=${props.searchQuery}
-            @input=${(e: Event) => props.onSearchChange?.((e.target as HTMLInputElement).value)}
-          />
-        </div>
-
-        <div>
-          <div class="ops-sidebar-section__label">资产运行状态</div>
-          <select
-            class="ops-sidebar-filter-select"
-            .value=${props.statusFilter}
-            @change=${(e: Event) => props.onStatusFilterChange?.((e.target as HTMLSelectElement).value)}
-          >
-            <option value="all">全部状态</option>
-            <option value="healthy">健康</option>
-            <option value="warning">亚健康</option>
-            <option value="critical">异常</option>
-          </select>
-        </div>
-      </div>
     </aside>
   `;
 }

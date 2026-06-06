@@ -244,7 +244,7 @@ export function renderTechOpsDomain(props: TechOpsDomainProps) {
 
           </div>
           
-          <div style="flex: 1; overflow: hidden; position: relative;">
+          <div style="flex: 1; overflow: visible; position: relative;">
           ${props.activeSubTab === "diagnosis"
             ? html`
                 <div class="ops-agent-view">

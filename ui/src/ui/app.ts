@@ -445,6 +445,9 @@ export class OpenClawApp extends LitElement implements NativeDialogInvoker {
   @state() opsClusters: import("./controllers/ops-clusters.ts").OpsClusterRecord[] = [];
   @state() opsClustersLoading = false;
   @state() opsClustersError: string | null = null;
+  @state() opsHealthSnapshots: import("./controllers/ops-clusters.ts").OpsHealthSnapshot[] = [];
+  @state() opsHealthSnapshotsLoading = false;
+  @state() opsHealthSnapshotsError: string | null = null;
   @state() opsFlinkJobs: import("./controllers/bch-client.ts").FlinkJob[] = [];
   @state() opsFlinkJobsLoading = false;
   @state() opsSparkJobs: import("./controllers/bch-client.ts").SparkJob[] = [];
@@ -946,6 +949,20 @@ export class OpenClawApp extends LitElement implements NativeDialogInvoker {
     }
   }
 
+  async loadOpsHealthSnapshots() {
+    this.opsHealthSnapshotsLoading = true;
+    this.opsHealthSnapshotsError = null;
+    try {
+      const { fetchOpsHealthSnapshots } = await import("./controllers/ops-clusters.ts");
+      this.opsHealthSnapshots = await fetchOpsHealthSnapshots(this);
+    } catch (err) {
+      this.opsHealthSnapshotsError = err instanceof Error ? err.message : String(err);
+      this.opsHealthSnapshots = [];
+    } finally {
+      this.opsHealthSnapshotsLoading = false;
+    }
+  }
+
   async loadOpsFlinkJobs() {
     this.opsFlinkJobsLoading = true;
     try {
@@ -997,6 +1014,8 @@ export class OpenClawApp extends LitElement implements NativeDialogInvoker {
     try {
       const { fetchOpsDashboardSummary } = await import("./controllers/ops-clusters.ts");
       this.opsDashboardSummary = await fetchOpsDashboardSummary(this);
+      void this.loadOpsClusters();
+      void this.loadOpsHealthSnapshots();
       void this.loadOpsDashboardFeed();
     } catch (err) {
       this.opsDashboardError = err instanceof Error ? err.message : String(err);

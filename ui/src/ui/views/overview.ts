@@ -1,7 +1,8 @@
 import { html, nothing } from "lit";
 import { icons } from "../icons.ts";
 import { renderOpsEmpty, renderOpsError, renderOpsSkeleton } from "../components/ops-status.ts";
-import type { OpsDashboardSummary } from "../controllers/ops-clusters.ts";
+import type { OpsDashboardSummary, OpsClusterRecord } from "../controllers/ops-clusters.ts";
+import "../components/ops-map.ts";
 import {
   computeRollupHealthScore,
   distributionFromCounts,
@@ -46,6 +47,8 @@ export type OverviewStats = {
 export type OverviewProps = {
   connected?: boolean;
   loading?: boolean;
+  clusters?: OpsClusterRecord[];
+  snapshots?: any[];
   dashboardSummary?: OpsDashboardSummary | null;
   dashboardError?: string | null;
   stats?: OverviewStats | null;
@@ -804,6 +807,36 @@ export function renderOverview(props: OverviewProps) {
                 </div>
               `
             : nothing}
+
+      ${hasStats && !awaitingData
+        ? html`
+            <section class="ops-map-section">
+              <div class="ops-map-card">
+                <h2 class="section-title" style="margin-bottom: 16px;">
+                  <span class="section-title__icon">${icons.network}</span>
+                  业务地域拓扑与健康状态
+                </h2>
+                <ops-map 
+                  .clusters=${props.clusters || []}
+                  .snapshots=${props.snapshots || []}
+                  .onNavigateDomain=${(domain: string) => {
+                    const tabMap: Record<string, Tab> = {
+                      hadoop: "hadoop",
+                      fi: "fi",
+                      gbase: "gbase",
+                      governance: "governance",
+                      dataapps: "dataapps",
+                    };
+                    const targetTab = tabMap[domain];
+                    if (targetTab && props.onNavigateDomain) {
+                      props.onNavigateDomain(targetTab);
+                    }
+                  }}
+                ></ops-map>
+              </div>
+            </section>
+          `
+        : nothing}
 
       <div class="ops-dashboard-main ops-dashboard-main--full">
         <section class="domain-status-section">

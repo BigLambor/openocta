@@ -39,6 +39,30 @@ describe("renderAssetsView", () => {
 
     expect(container.textContent).not.toContain("作业资产");
     expect(container.textContent).toContain("服务资产（规划中）");
+    expect(container.textContent).not.toContain("搜索过滤");
+    expect(container.textContent).not.toContain("资产运行状态");
+  });
+
+  it("renders all cluster rows instead of limiting the table to eight", () => {
+    const clusters = Array.from({ length: 12 }, (_, index) =>
+      cluster({
+        id: `cluster-${index + 1}`,
+        name: `测试集群-${index + 1}`,
+      }),
+    );
+
+    render(
+      renderAssetsView({
+        clusters,
+        activeAssetView: "clusters",
+        canManage: true,
+        user: { roleName: "admin", permissions: [] },
+      }),
+      container,
+    );
+
+    expect(container.querySelectorAll(".asset-table tbody tr")).toHaveLength(12);
+    expect(container.textContent).toContain("测试集群-12");
   });
 
   it("weakens service assets view with planning preview", () => {

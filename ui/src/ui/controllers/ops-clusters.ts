@@ -92,6 +92,34 @@ export async function fetchOpsDashboardSummary(host: OpsClusterHost): Promise<Op
   return (await res.json()) as OpsDashboardSummary;
 }
 
+export type OpsHealthSnapshot = {
+  schemaVersion: string;
+  aggregationPolicyVersion: string;
+  objectType: string;
+  objectId: string;
+  clusterId: string;
+  domain: string;
+  scoreStatus: "ok" | "warning" | "critical" | "partial" | "degraded" | "unknown" | string;
+  score?: number | null;
+  coverage: number;
+  missingSources?: string[];
+  presentSources?: string[];
+  observedAt: string;
+};
+
+export async function fetchOpsHealthSnapshots(host: OpsClusterHost): Promise<OpsHealthSnapshot[]> {
+  const res = await fetch(`${baseUrl(host)}/api/ops/health/snapshots`, {
+    headers: authHeaders(host),
+  });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(body.error || `加载健康快照失败 (${res.status})`);
+  }
+  const data = (await res.json()) as { snapshots: OpsHealthSnapshot[] };
+  return data.snapshots ?? [];
+}
+
+
 export type OpsCMDBSyncResult = {
   created: number;
   updated: number;

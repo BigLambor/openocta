@@ -308,31 +308,6 @@
   display: none;
 }
 
-.ops-sidebar-filters {
-  margin-top: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  border-top: 1px solid var(--border);
-  padding-top: 12px;
-}
-
-.ops-sidebar-filter-input,
-.ops-sidebar-filter-select {
-  width: 100%;
-  padding: 6px 8px;
-  font-size: 12px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--bg-surface, #fff);
-  box-sizing: border-box;
-}
-
-.ops-sidebar-filter-select {
-  padding: 6px;
-  cursor: pointer;
-}
-
 .asset-table-toolbar {
   display: flex;
   align-items: center;
@@ -937,18 +912,18 @@
 
 .ops-workbench-shell .ops-shell-columns,
 .ops-workbench-shell .ops-main-columns {
-  min-height: clamp(420px, 58vh, 720px);
-  max-height: clamp(420px, 70vh, 1000px);
+  min-height: 0;
+  max-height: none;
+  align-items: start;
 }
 
 .ops-workbench-shell .list-column,
 .ops-workbench-shell .detail-column {
   min-height: 0;
-  overflow: hidden;
 }
 
 .ops-workbench-shell .detail-column {
-  overflow-y: auto;
+  overflow: visible;
 }
 
 .ops-workbench-shell .alert-list,
@@ -1055,9 +1030,9 @@
 .workbench-inspection-layout {
   gap: 32px;
   margin-top: 16px;
-  flex: 1;
+  flex: initial;
   min-height: 0;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .workbench-inspection-layout .ops-inspection-list-column,
@@ -1065,8 +1040,15 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
-  overflow: hidden;
   padding: 0;
+}
+
+.workbench-events-layout .list-column,
+.workbench-inspection-layout .ops-inspection-list-column {
+  position: sticky;
+  top: 16px;
+  max-height: calc(100vh - var(--shell-topbar-height, 52px) - 112px);
+  overflow: hidden;
 }
 
 .workbench-inspection-layout .minimal-inspection-list {
@@ -1096,9 +1078,9 @@
 }
 
 .workbench-inspection-layout .ops-inspection-detail__body {
-  flex: 1;
+  flex: initial;
   min-height: 0;
-  overflow-y: auto;
+  overflow: visible;
   padding: 0 0 24px;
 }
 

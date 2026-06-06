@@ -1675,6 +1675,8 @@ export function renderApp(state: AppViewState) {
                 }
                 return renderOverview({
                 connected: state.connected,
+                clusters: state.opsClusters,
+                snapshots: state.opsHealthSnapshots,
                 loading: state.opsDashboardLoading,
                 dashboardSummary: state.opsDashboardSummary,
                 dashboardError: state.opsDashboardError,
@@ -2347,22 +2349,6 @@ export function renderApp(state: AppViewState) {
                     ...state.opsSelectedEntityIds,
                     assetsView: view,
                   };
-                },
-                searchQuery: state.opsSelectedEntityIds?.assetsSearch || "",
-                statusFilter: state.opsSelectedEntityIds?.assetsStatus || "all",
-                onSearchChange: (q) => {
-                  state.opsSelectedEntityIds = {
-                    ...state.opsSelectedEntityIds,
-                    assetsSearch: q,
-                  };
-                  state.requestUpdate();
-                },
-                onStatusFilterChange: (s) => {
-                  state.opsSelectedEntityIds = {
-                    ...state.opsSelectedEntityIds,
-                    assetsStatus: s,
-                  };
-                  state.requestUpdate();
                 },
                 onSyncCmdb:
                   state.rbacUser?.roleName === "admin" ||

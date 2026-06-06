@@ -31,10 +31,6 @@ export type AssetsViewProps = AssetManagementProps & {
   user?: DomainFilterUser;
   onDomainChange?: (domain: string) => void;
   onAssetViewChange?: (view: AssetViewId) => void;
-  searchQuery?: string;
-  statusFilter?: string;
-  onSearchChange?: (query: string) => void;
-  onStatusFilterChange?: (status: string) => void;
 };
 
 const ASSET_VIEWS: OpsViewNavItem<AssetViewId>[] = [
@@ -66,32 +62,14 @@ function normalizeAssetView(raw?: string | null): AssetViewId {
 export function renderAssetsView(props: AssetsViewProps) {
   const selectedDomain = props.selectedDomain || "all";
   const normalized = normalizeOpsDomain(selectedDomain);
-  const searchQuery = props.searchQuery || "";
-  const statusFilter = props.statusFilter || "all";
 
-  const domainClusters =
+  const filteredClusters =
     normalized === "all"
       ? (props.clusters ?? [])
       : (props.clusters ?? []).filter((cluster) => cluster.domain === normalized);
 
-  let statusClusters = domainClusters;
-  if (statusFilter !== "all") {
-    statusClusters = statusClusters.filter((c) => c.status === statusFilter);
-  }
-
-  let filteredClusters = statusClusters;
-  if (searchQuery.trim()) {
-    const q = searchQuery.toLowerCase().trim();
-    filteredClusters = filteredClusters.filter((c) => {
-      const nameMatch = c.name?.toLowerCase().includes(q) || false;
-      const ownerMatch = c.owner?.toLowerCase().includes(q) || false;
-      const componentMatch = c.components?.some((comp: string) => comp.toLowerCase().includes(q)) || false;
-      return nameMatch || ownerMatch || componentMatch;
-    });
-  }
-
   const activeAssetView = normalizeAssetView(props.activeAssetView);
-  const { healthy, warning, critical } = clusterHealthCounts(domainClusters);
+  const { healthy, warning, critical } = clusterHealthCounts(filteredClusters);
 
   const componentRows = filteredClusters.flatMap((cluster) =>
     (cluster.components || []).map((component) => ({ cluster, component })),
@@ -129,16 +107,12 @@ export function renderAssetsView(props: AssetsViewProps) {
         selectedDomain: normalized,
         views: sidebarViews,
         activeView: activeAssetView,
-        searchQuery,
-        statusFilter,
         onDomainChange: props.onDomainChange,
         onViewChange: props.onAssetViewChange,
-        onSearchChange: props.onSearchChange,
-        onStatusFilterChange: props.onStatusFilterChange,
       })}
 
-      <div style="flex: 1; min-width: 0; overflow-y: auto;">
-        <main class="ops-dashboard ops-shell" style="height: 100%; box-sizing: border-box; display: flex; flex-direction: column;">
+      <div style="flex: 1; min-width: 0;">
+        <main class="ops-dashboard ops-shell" style="min-height: 100%; box-sizing: border-box;">
           ${renderOpsShellHeader({
             kicker: `服务与资产 · ${opsDomainLabel(selectedDomain)}`,
             title: "资产目录",
