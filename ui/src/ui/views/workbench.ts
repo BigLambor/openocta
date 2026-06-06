@@ -3,6 +3,7 @@ import { unsafeHTML } from "lit/directives/unsafe-html.js";
 import { icons } from "../icons.ts";
 import { toSanitizedMarkdownHtml } from "../markdown.ts";
 import { renderOpsError } from "../components/ops-status.ts";
+import { buildInspectionListPreview } from "../ops/inspection-report.ts";
 import {
   renderOpsShellHeader,
   renderOpsShellStatGrid,
@@ -126,6 +127,8 @@ export type WorkbenchProps = {
   onOpenTasks?: (id: string) => void;
 };
 
+type WorkbenchAiMode = NonNullable<WorkbenchProps["aiPanelMode"]>;
+
 const WORKBENCH_VIEWS: OpsViewNavItem<WorkbenchView>[] = [
   { id: "events", label: "事件中心", icon: "messageSquare" },
   { id: "inspection", label: "巡检中心", icon: "historyClock" },
@@ -235,34 +238,145 @@ function renderAiConclusion(props: WorkbenchProps, active: WorkbenchAlertGroup, 
   return html`<div class="detail-section__content highlight">${fallback}</div>`;
 }
 
-function renderAiPanel(props: WorkbenchProps, active: WorkbenchAlertGroup | undefined) {
-  if (!props.aiPanelOpen || !active) {
+function aiModeLabel(mode: WorkbenchAiMode): string {
+  switch (mode) {
+    case "similar":
+      return "相似聚合";
+    case "action":
+      return "处置建议";
+    default:
+      return "根因分析";
+  }
+}
+
+function aiModeDescription(mode: WorkbenchAiMode, isScenario: boolean): string {
+  if (mode === "similar") {
+    return isScenario
+      ? "识别可批量治理的相似对象、相似风险与聚合规则。"
+      : "解释告警降噪逻辑，判断是否还存在可合并的重复告警。";
+  }
+  if (mode === "action") {
+    return "输出可执行建议，并区分只读排查、审批变更和高风险操作。";
+  }
+  return isScenario
+    ? "结合专项证据给出风险根因、影响面和验证步骤。"
+    : "结合告警上下文给出根因候选、证据链和验证步骤。";
+}
+
+function renderAiTaskSwitch(
+  mode: WorkbenchAiMode,
+  busy: boolean,
+  onModeChange: (nextMode: WorkbenchAiMode) => void,
+) {
+  const modes: WorkbenchAiMode[] = ["root-cause", "similar", "action"];
+  return html`
+    <div class="ops-ai-task-switch" role="tablist" aria-label="AI 分析任务">
+      ${modes.map(
+        (item) => html`
+          <button
+            class="ops-ai-task-switch__item ${item === mode ? "is-active" : ""}"
+            type="button"
+            role="tab"
+            aria-selected=${item === mode ? "true" : "false"}
+            ?disabled=${busy && item !== mode}
+            @click=${() => {
+              if (item !== mode) {
+                onModeChange(item);
+              }
+            }}
+          >
+            ${aiModeLabel(item)}
+          </button>
+        `,
+      )}
+    </div>
+  `;
+}
+
+function renderScenarioAiConclusion(props: WorkbenchProps, scenario: OpsScenario, mode: WorkbenchAiMode) {
+  const status = props.aiStatus ?? "idle";
+  if (status === "loading") {
+    return html`<div class="detail-section__content highlight">${icons.loader} 正在调用专项数字员工分析...</div>`;
+  }
+  if (status === "streaming") {
+    return html`
+      <div class="detail-section__content highlight">
+        ${props.aiStream ? renderRichText(props.aiStream) : html`<span class="muted">${icons.loader} 分析中...</span>`}
+        <div class="muted" style="margin-top:6px;">${icons.loader} 正在生成...</div>
+      </div>
+    `;
+  }
+  if (status === "done") {
+    return html`
+      <div class="detail-section__content highlight">
+        ${props.aiResult ? renderRichText(props.aiResult) : html`<span class="muted">本次专项分析未返回内容。</span>`}
+      </div>
+    `;
+  }
+  if (status === "error") {
+    return html`
+      <div class="detail-section__content">
+        <p style="color: var(--danger, #d33);">${props.aiError ?? "AI 分析失败。"}</p>
+        ${props.onRetryAi
+          ? html`<button class="ops-btn" type="button" @click=${props.onRetryAi}>${icons.refreshCw} 重试</button>`
+          : nothing}
+      </div>
+    `;
+  }
+  const fallback =
+    mode === "similar"
+      ? `系统将围绕 ${scenario.title} 查找相似对象、相似风险和可批量治理机会。`
+      : mode === "action"
+        ? "系统将生成治理/诊断建议，并明确哪些动作需要审批后执行。"
+        : `系统将基于 ${scenario.inputs.join("、")} 分析风险根因、影响面和验证步骤。`;
+  return html`<div class="detail-section__content highlight">${fallback}</div>`;
+}
+
+function renderAiPanel(
+  props: WorkbenchProps,
+  active: WorkbenchAlertGroup | undefined,
+  scenario: OpsScenario | undefined,
+  scenarioContext?: { selectedObjectScope: string; selectedTimeRange: WorkbenchTimeRange },
+) {
+  if (!props.aiPanelOpen || (!active && !scenario)) {
     return nothing;
   }
   const mode = props.aiPanelMode ?? "root-cause";
-  const lines = markdownToLines(active.analysisMarkdown || active.rootCause);
-  const title =
-    mode === "similar"
-      ? "聚合相似告警"
-      : mode === "action"
-        ? "处置建议"
-        : "分析根因";
   const status = props.aiStatus ?? "idle";
   const busy = status === "loading" || status === "streaming";
+  const isScenario = !!scenario;
+  const title = isScenario ? "AI 辅助分析" : "告警 AI 分析";
+  const targetTitle = scenario?.title ?? active?.title ?? "";
+  const evidence = scenario
+    ? scenario.inputs
+    : markdownToLines(active?.analysisMarkdown || active?.rootCause || "");
+  const outputs = scenario?.outputs ?? [];
+  const onModeChange = (nextMode: WorkbenchAiMode) => {
+    if (scenario) {
+      props.onOpenScenarioAi?.(scenario, nextMode);
+    } else {
+      props.onOpenAiPanel?.(nextMode);
+    }
+  };
 
   return html`
     <div class="ops-ai-drawer__overlay" @click=${props.onCloseAiPanel}></div>
     <aside class="ops-ai-drawer">
       <div class="ops-ai-drawer__header">
-        <div style="display:flex; align-items:center; gap:8px;">
+        <div class="ops-ai-drawer__heading">
           <span class="ops-ai-drawer__icon">${icons.messageSquare}</span>
-          <span class="ops-ai-drawer__title">${title}</span>
+          <div>
+            <div class="ops-ai-drawer__title">${title}</div>
+            <div class="ops-ai-drawer__subtitle">${targetTitle}</div>
+          </div>
         </div>
         <button class="ops-btn ops-btn--icon" type="button" @click=${props.onCloseAiPanel} title="关闭">
           ${icons.x || "✕"}
         </button>
       </div>
       <div class="ops-ai-drawer__body">
+        ${renderAiTaskSwitch(mode, busy, onModeChange)}
+        <div class="ops-ai-mode-note">${aiModeDescription(mode, isScenario)}</div>
         <div class="detail-section">
           <div class="detail-section__header">${icons.users} 数字员工模板</div>
           <div class="detail-section__content">
@@ -272,37 +386,71 @@ function renderAiPanel(props: WorkbenchProps, active: WorkbenchAlertGroup | unde
         </div>
         <div class="detail-section">
           <div class="detail-section__header">${icons.zap} 结论</div>
-          ${renderAiConclusion(props, active, mode)}
+          ${scenario ? renderScenarioAiConclusion(props, scenario, mode) : renderAiConclusion(props, active!, mode)}
         </div>
         <div class="detail-section">
-          <div class="detail-section__header">${icons.scrollText} 告警证据</div>
+          <div class="detail-section__header">${icons.scrollText} ${scenario ? "专项上下文" : "告警证据"}</div>
           <div class="detail-section__content">
-            ${lines.length
-              ? html`<ul class="minimal-list">${lines.map((line) => html`<li>${line}</li>`)}</ul>`
+            ${scenarioContext
+              ? html`
+                  <div class="detail-meta" style="margin-bottom:10px; flex-wrap:wrap;">
+                    <span>对象 ${scenarioContext.selectedObjectScope || "all"}</span>
+                    <span>时间 ${scenarioContext.selectedTimeRange}</span>
+                  </div>
+                `
+              : nothing}
+            ${evidence.length
+              ? html`<ul class="minimal-list">${evidence.map((line) => html`<li>${line}</li>`)}</ul>`
               : html`<p class="muted">暂无可用分析证据。</p>`}
+            ${outputs.length
+              ? html`
+                  <div class="ops-ai-output-tags">
+                    ${outputs.map((item) => html`<span class="workbench-tag">${item}</span>`)}
+                  </div>
+                `
+              : nothing}
           </div>
         </div>
       </div>
       <div class="ops-ai-drawer__footer">
-        <button
-          class="ops-btn ops-btn--primary"
-          type="button"
-          ?disabled=${busy}
-          title=${busy ? "请等待 AI 分析完成后再确认" : ""}
-          @click=${() => props.onAcceptSuggestion?.(active.id)}
-        >
-          确认建议
-        </button>
-        <button
-          class="ops-btn"
-          type="button"
-          ?disabled=${busy}
-          @click=${() => props.onRejectSuggestion?.(active.id)}
-        >
-          驳回
-        </button>
+        ${active
+          ? html`
+              <button
+                class="ops-btn ops-btn--primary"
+                type="button"
+                ?disabled=${busy}
+                title=${busy ? "请等待 AI 分析完成后再确认" : ""}
+                @click=${() => props.onAcceptSuggestion?.(active.id)}
+              >
+                确认建议
+              </button>
+              <button
+                class="ops-btn"
+                type="button"
+                ?disabled=${busy}
+                @click=${() => props.onRejectSuggestion?.(active.id)}
+              >
+                驳回
+              </button>
+            `
+          : scenario
+            ? html`
+                <button
+                  class="ops-btn ops-btn--primary"
+                  type="button"
+                  ?disabled=${busy}
+                  @click=${() => props.onRecordScenarioSuggestion?.(scenario)}
+                >
+                  记录闭环
+                </button>
+              `
+            : nothing}
         <div style="flex-grow:1;"></div>
-        <button class="ops-btn ops-btn--ghost" type="button" @click=${() => props.onOpenTasks?.(active.id)}>
+        <button
+          class="ops-btn ops-btn--ghost"
+          type="button"
+          @click=${() => active ? props.onOpenTasks?.(active.id) : scenario ? props.onOpenScenarioTasks?.(scenario) : undefined}
+        >
           执行记录
         </button>
       </div>
@@ -326,62 +474,77 @@ function scoreClass(score: number | null | undefined): string {
   return "danger";
 }
 
+function renderInspectionToolbar(props: WorkbenchProps) {
+  const imHint =
+    props.inspectionImStatus && !props.inspectionImStatus.imConfigured
+      ? props.inspectionImStatus.hint ??
+        `健康分低于 ${props.inspectionImStatus.lowScoreThreshold} 时将推送 IM，需先配置飞书/钉钉。`
+      : null;
+  return html`
+    <div class="ops-inspection-toolbar">
+      ${imHint && props.onOpenChannels
+        ? html`
+            <button
+              type="button"
+              class="ops-btn ops-btn--ghost ops-inspection-toolbar__hint"
+              title=${imHint}
+              @click=${props.onOpenChannels}
+            >
+              ${icons.info} IM 通道
+            </button>
+          `
+        : nothing}
+      <button
+        class="ops-btn ops-btn--primary ${props.isInspecting ? "btn--loading" : ""}"
+        type="button"
+        ?disabled=${props.isInspecting || props.canInspect === false}
+        title=${props.canInspect === false ? "当前账号无 ops:inspect 权限" : ""}
+        @click=${props.onRunInspection}
+      >
+        ${props.isInspecting ? html`${icons.loader} 巡检中...` : html`${icons.zap} 一键巡检`}
+      </button>
+    </div>
+  `;
+}
+
+function renderInspectionSummaryBullets(summary: string) {
+  const bullets = summary
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (bullets.length <= 1) {
+    return html`<p class="ops-inspection-detail__summary-text">${summary}</p>`;
+  }
+  return html`
+    <ul class="ops-inspection-summary-list">
+      ${bullets.map((line) => html`<li>${line}</li>`)}
+    </ul>
+  `;
+}
+
 function renderInspectionView(props: WorkbenchProps) {
   const inspections = props.inspections ?? [];
   const active =
     inspections.find((item) => item.id === props.selectedInspectionId) || inspections[0];
   return html`
     <div class="ops-inspections-grid">
-      ${props.inspectionImStatus && !props.inspectionImStatus.imConfigured
-        ? html`
-            <div class="ops-banner" style="margin-bottom: 12px;">
-              <span class="ops-banner__icon">${icons.info}</span>
-              <span>
-                ${props.inspectionImStatus.hint ??
-                `健康分低于 ${props.inspectionImStatus.lowScoreThreshold} 时将尝试推送 IM，当前未配置通道。`}
-                ${props.onOpenChannels
-                  ? html`<button type="button" class="ops-btn" style="margin-left: 8px;" @click=${props.onOpenChannels}>前往通道配置</button>`
-                  : nothing}
-              </span>
-            </div>
-          `
-        : nothing}
-
-      <div class="ops-shell-panel" style="margin-bottom: 14px;">
-        <div class="ops-shell-panel__head">巡检控制台</div>
-        <div style="padding:16px;">
-        <div style="display:flex; justify-content:space-between; gap:18px; flex-wrap:wrap; align-items:center;">
-          <div>
-            <div class="detail-section__title">健康巡检</div>
-            <p class="muted">手动触发当前技术域巡检，结果用于风险解释和治理建议。</p>
+      <div class="ops-main-columns ops-shell-columns workbench-inspection-layout">
+        <div class="list-column ops-inspection-list-column">
+          <div class="minimal-column-header">
+            <span>巡检报告</span>
+            <span class="minimal-column-stats">${inspections.length} 条记录</span>
           </div>
-          <button
-            class="ops-btn ops-btn--primary ${props.isInspecting ? "btn--loading" : ""}"
-            type="button"
-            ?disabled=${props.isInspecting || props.canInspect === false}
-            title=${props.canInspect === false ? "当前账号无 ops:inspect 权限" : ""}
-            @click=${props.onRunInspection}
-          >
-            ${props.isInspecting ? html`${icons.loader} 巡检中...` : html`${icons.zap} 一键巡检`}
-          </button>
-        </div>
-        </div>
-      </div>
-
-      <div class="ops-main-columns ops-shell-columns ops-inspection-columns">
-        <div class="ops-card list-column">
-          <div class="column-header">巡检报告</div>
           ${props.inspectionsLoading
             ? html`<div class="loading-placeholder">${icons.loader} 加载中...</div>`
             : inspections.length === 0
-              ? html`<div class="empty-placeholder">暂无巡检记录，可先执行一次手动巡检。</div>`
+              ? html`<div class="empty-placeholder">暂无巡检记录，点击右上角「一键巡检」开始。</div>`
               : html`
-                  <div class="inspection-list">
+                  <div class="inspection-list minimal-inspection-list">
                     ${inspections.map(
                       (item) => html`
                         <button
                           type="button"
-                          class="inspection-item ${item.id === active?.id ? "inspection-item--active" : ""}"
+                          class="inspection-item minimal-inspection-item ${item.id === active?.id ? "inspection-item--active" : ""}"
                           @click=${() => props.onSelectInspection?.(item.id)}
                         >
                           <div class="inspection-item__meta">
@@ -390,32 +553,39 @@ function renderInspectionView(props: WorkbenchProps) {
                             </span>
                             <span class="inspection-time">${item.time}</span>
                           </div>
-                          <div class="inspection-summary">${item.reportSummary}</div>
+                          <div class="inspection-summary">
+                            ${buildInspectionListPreview(item.reportSummary)}
+                          </div>
                         </button>
                       `,
                     )}
                   </div>
                 `}
         </div>
-        <div class="ops-card detail-column ops-inspection-detail">
-          <div class="column-header">报告详情</div>
+        <div class="detail-column minimal-detail-column ops-inspection-detail">
+          <div class="minimal-column-header">
+            <span>报告详情</span>
+            ${active
+              ? html`
+                  <span class="score-badge score-badge--${scoreClass(active.score)}">
+                    ${active.score == null || active.score < 0 ? "健康分未知" : `${active.score}/100`}
+                  </span>
+                `
+              : nothing}
+          </div>
           ${!active
-            ? html`<div class="empty-placeholder">请选择一份巡检报告。</div>`
+            ? html`<div class="empty-placeholder">从左侧选择一份巡检报告。</div>`
             : html`
                 <div class="ops-inspection-detail__body">
-                  <div class="report-header">
-                    <h3>${props.domainName} 深度巡检报告</h3>
-                    <span class="score-badge score-badge--${scoreClass(active.score)}">
-                      ${active.score == null || active.score < 0 ? "健康分未知" : `健康分 ${active.score}/100`}
-                    </span>
-                  </div>
-                  <div class="detail-section">
-                    <div class="detail-section__header">发现摘要</div>
-                    <div class="detail-section__content">${active.reportSummary}</div>
+                  <div class="detail-section ops-inspection-detail__summary">
+                    <div class="detail-section__header">巡检结论</div>
+                    <div class="detail-section__content">
+                      ${renderInspectionSummaryBullets(active.reportSummary)}
+                    </div>
                   </div>
                   <div class="detail-section ops-inspection-detail__report">
                     <div class="detail-section__header">完整报告</div>
-                    <div class="detail-section__content highlight">
+                    <div class="detail-section__content ops-inspection-detail__report-body">
                       ${renderInspectionMarkdown(active.reportMarkdown)}
                     </div>
                   </div>
@@ -538,31 +708,6 @@ function renderTagList(label: string, items: string[]) {
   `;
 }
 
-function renderAiStatusBlock(props: WorkbenchProps) {
-  const status = props.aiStatus ?? "idle";
-  if (status === "loading") {
-    return html`<div class="detail-section__content highlight">${icons.loader} 正在调用专项数字员工分析...</div>`;
-  }
-  if (status === "streaming") {
-    return html`
-      <div class="detail-section__content highlight">
-        ${props.aiStream ? renderRichText(props.aiStream) : html`<span class="muted">${icons.loader} 分析中...</span>`}
-      </div>
-    `;
-  }
-  if (status === "done") {
-    return html`
-      <div class="detail-section__content highlight">
-        ${props.aiResult ? renderRichText(props.aiResult) : html`<span class="muted">本次专项分析未返回内容。</span>`}
-      </div>
-    `;
-  }
-  if (status === "error") {
-    return html`<div class="detail-section__content" style="color: var(--danger, #d33);">${props.aiError ?? "AI 分析失败。"}</div>`;
-  }
-  return html`<div class="detail-section__content highlight">选择一个 AI 操作后，系统会基于当前技术域、对象范围、时间范围和专项证据生成建议。</div>`;
-}
-
 function renderScenarioClosurePanel(
   props: WorkbenchProps,
   scenario: OpsScenario,
@@ -573,74 +718,67 @@ function renderScenarioClosurePanel(
   const busy = props.aiStatus === "loading" || props.aiStatus === "streaming";
   return html`
     <section class="ops-card" style="margin-bottom:14px;">
-      <div class="column-header">专项闭环</div>
-      <div style="padding:16px; display:grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 0.9fr); gap:16px;">
+      <div class="workbench-closure-header">
         <div>
-          <div class="detail-section">
-            <div class="detail-section__header">${icons.activity} 健康信号</div>
-            <div class="detail-section__content highlight">${result.healthSignal}</div>
-          </div>
-          <div class="detail-section">
-            <div class="detail-section__header">${icons.alertTriangle} 风险证据</div>
-            <div class="detail-section__content">
-              <ul style="margin:0; padding-left:18px;">
-                ${result.riskEvidence.map((item) => html`<li>${item}</li>`)}
-              </ul>
-            </div>
-          </div>
-          <div class="detail-section">
-            <div class="detail-section__header">${icons.scrollText} 输出结构</div>
-            <div class="detail-section__content">
-              <ul style="margin:0; padding-left:18px;">
-                ${result.outputs.map((item) => html`<li>${item}</li>`)}
-              </ul>
-            </div>
-          </div>
-          <div class="detail-section">
-            <div class="detail-section__header">${icons.zap} 建议动作</div>
-            <div class="detail-section__content">
-              <ul style="margin:0; padding-left:18px;">
-                ${result.recommendedActions.map((item) => html`<li>${item}</li>`)}
-              </ul>
-            </div>
-          </div>
-          <div class="detail-section">
-            <div class="detail-section__header">${icons.usageBars} 预期收益</div>
-            <div class="detail-section__content highlight">${result.expectedBenefit}</div>
-          </div>
-          <div class="detail-section">
-            <div class="detail-section__header">${icons.historyClock} Runbook</div>
-            <div class="detail-meta" style="flex-wrap:wrap;">
-              ${result.runbooks.map((item) => html`<span>${item}</span>`)}
-            </div>
+          <div class="column-header">专项闭环</div>
+          <div class="muted">对象 ${selectedObjectScope || "all"} · 时间 ${selectedTimeRange}</div>
+        </div>
+        <div class="workbench-closure-actions">
+          <button
+            class="ops-btn ops-btn--primary"
+            type="button"
+            ?disabled=${busy}
+            @click=${() => props.onOpenScenarioAi?.(scenario, "root-cause")}
+          >
+            ${icons.messageSquare} AI 辅助分析
+          </button>
+          <button class="ops-btn" type="button" ?disabled=${busy} @click=${() => props.onRecordScenarioSuggestion?.(scenario)}>
+            记录闭环
+          </button>
+          <button class="ops-btn ops-btn--ghost" type="button" @click=${() => props.onOpenScenarioTasks?.(scenario)}>
+            执行记录
+          </button>
+        </div>
+      </div>
+      <div class="workbench-closure-grid">
+        <div class="detail-section">
+          <div class="detail-section__header">${icons.activity} 健康信号</div>
+          <div class="detail-section__content highlight">${result.healthSignal}</div>
+        </div>
+        <div class="detail-section">
+          <div class="detail-section__header">${icons.alertTriangle} 风险证据</div>
+          <div class="detail-section__content">
+            <ul style="margin:0; padding-left:18px;">
+              ${result.riskEvidence.map((item) => html`<li>${item}</li>`)}
+            </ul>
           </div>
         </div>
-        <aside class="detail-section" style="margin:0;">
-          <div class="detail-section__header">${icons.messageSquare} AI 操作</div>
-          ${renderAiStatusBlock(props)}
-          <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:12px;">
-            <button
-              class="ops-btn ops-btn--primary"
-              type="button"
-              ?disabled=${busy}
-              @click=${() => props.onOpenScenarioAi?.(scenario, "root-cause")}
-            >
-              分析风险
-            </button>
-            <button class="ops-btn" type="button" ?disabled=${busy} @click=${() => props.onOpenScenarioAi?.(scenario, "action")}>
-              生成建议
-            </button>
-            <button class="ops-btn" type="button" ?disabled=${busy} @click=${() => props.onRecordScenarioSuggestion?.(scenario)}>
-              记录闭环
-            </button>
-            <button class="ops-btn ops-btn--ghost" type="button" @click=${() => props.onOpenScenarioTasks?.(scenario)}>
-              执行记录
-            </button>
+        <div class="detail-section">
+          <div class="detail-section__header">${icons.scrollText} 输出结构</div>
+          <div class="detail-section__content">
+            <ul style="margin:0; padding-left:18px;">
+              ${result.outputs.map((item) => html`<li>${item}</li>`)}
+            </ul>
           </div>
-          <div class="muted" style="margin-top:10px;">
-            对象 ${selectedObjectScope || "all"} · 时间 ${selectedTimeRange}
+        </div>
+        <div class="detail-section">
+          <div class="detail-section__header">${icons.zap} 建议动作</div>
+          <div class="detail-section__content">
+            <ul style="margin:0; padding-left:18px;">
+              ${result.recommendedActions.map((item) => html`<li>${item}</li>`)}
+            </ul>
           </div>
-        </aside>
+        </div>
+        <div class="detail-section">
+          <div class="detail-section__header">${icons.usageBars} 预期收益</div>
+          <div class="detail-section__content highlight">${result.expectedBenefit}</div>
+        </div>
+        <div class="detail-section">
+          <div class="detail-section__header">${icons.historyClock} Runbook</div>
+          <div class="detail-meta" style="flex-wrap:wrap;">
+            ${result.runbooks.map((item) => html`<span>${item}</span>`)}
+          </div>
+        </div>
       </div>
     </section>
   `;
@@ -932,7 +1070,6 @@ function renderEventsView(props: WorkbenchProps, active: WorkbenchAlertGroup | u
       </div>
     </div>
 
-    ${renderAiPanel(props, active)}
   `;
 }
 
@@ -1000,7 +1137,9 @@ export function renderWorkbench(props: WorkbenchProps) {
                       ${icons.refreshCw} 刷新告警
                     </button>
                   `
-                : nothing,
+                : activeView === "inspection"
+                  ? renderInspectionToolbar(props)
+                  : nothing,
           })}
           ${renderWorkbenchContextBar(
             activeView,
@@ -1016,6 +1155,14 @@ export function renderWorkbench(props: WorkbenchProps) {
             : activeView === "inspection"
               ? renderInspectionView(props)
               : renderScenarioDetail(props, activeView, selectedDomain, selectedObjectScope, selectedTimeRange)}
+          ${renderAiPanel(
+            props,
+            activeView === "events" ? active : undefined,
+            activeView === "events" ? undefined : selectedScenario,
+            activeView === "events"
+              ? undefined
+              : { selectedObjectScope, selectedTimeRange },
+          )}
         </main>
       </div>
     </div>

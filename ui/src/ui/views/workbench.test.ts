@@ -55,4 +55,57 @@ describe("workbench view scenario directory filtering", () => {
     expect(titles).toContain("FI 组件异常诊断");
     expect(titles).toContain("调度失败诊断");
   });
+
+  it("renders event AI operations inside the shared drawer task switch", async () => {
+    const container = document.createElement("div");
+    const props = buildProps({
+      activeView: "events",
+      selectedAlertGroupId: "alert-1",
+      aiPanelOpen: true,
+      aiPanelMode: "root-cause",
+      alertGroups: [
+        {
+          id: "alert-1",
+          title: "HDFS NameNode 内存占用过高",
+          severity: "warning",
+          timestamp: "2026-06-05 09:28:09",
+          originalCount: 3,
+          reducedTo: 1,
+          rootCause: "NameNode heap 使用率持续高于阈值。",
+        },
+      ],
+    });
+
+    render(renderWorkbench(props), container);
+    await Promise.resolve();
+
+    expect(container.querySelector(".ops-ai-drawer")).not.toBeNull();
+    const taskLabels = Array.from(container.querySelectorAll(".ops-ai-task-switch__item")).map((el) =>
+      el.textContent?.trim(),
+    );
+    expect(taskLabels).toEqual(["根因分析", "相似聚合", "处置建议"]);
+    expect(container.textContent).toContain("告警 AI 分析");
+  });
+
+  it("uses a single AI entry in scenario detail and opens the same drawer", async () => {
+    const container = document.createElement("div");
+    const props = buildProps({
+      selectedDomain: "hadoop",
+      domainName: "BCH 生态",
+      activeView: "diagnosis",
+      selectedScenarioId: "bch-flink-health",
+      aiPanelOpen: true,
+      aiPanelMode: "action",
+      selectedObjectScope: "all",
+      selectedTimeRange: "24h",
+    });
+
+    render(renderWorkbench(props), container);
+    await Promise.resolve();
+
+    expect(container.querySelector(".ops-ai-drawer")).not.toBeNull();
+    expect(container.textContent).toContain("AI 辅助分析");
+    expect(container.querySelectorAll(".workbench-closure-actions .ops-btn--primary")).toHaveLength(1);
+    expect(container.querySelector(".workbench-closure-grid")).not.toBeNull();
+  });
 });

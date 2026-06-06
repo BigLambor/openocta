@@ -414,6 +414,32 @@ type cronRunLogEntry struct {
 	Result      *ops.InspectionResult `json:"result,omitempty"`
 }
 
+func enrichInspectionCronRunLogEntry(entry *cronRunLogEntry, variant int) {
+	if entry == nil || !strings.HasPrefix(entry.JobID, "job-inspect-") {
+		return
+	}
+	if entry.Result == nil {
+		runAtMs := entry.Ts
+		if entry.RunAtMs != nil {
+			runAtMs = *entry.RunAtMs
+		}
+		durationMs := int64(0)
+		if entry.DurationMs != nil {
+			durationMs = *entry.DurationMs
+		}
+		parsed := ops.ParseInspectionResult(entry.SessionID, entry.JobID, entry.Summary, entry.Status, runAtMs, durationMs)
+		entry.Result = &parsed
+	}
+	runAtMs := entry.Ts
+	if entry.RunAtMs != nil {
+		runAtMs = *entry.RunAtMs
+	}
+	ops.EnrichInspectionCronRunResult(entry.Result, entry.JobID, runAtMs, variant)
+	if entry.Result != nil && strings.TrimSpace(entry.Result.ReportMarkdown) != "" {
+		entry.Summary = entry.Result.ReportMarkdown
+	}
+}
+
 // resolveCronRunLogPath returns path to job run log file (same layout as TS run-log).
 func resolveCronRunLogPath(storePath, jobID string) string {
 	dir := filepath.Dir(storePath)
@@ -557,6 +583,9 @@ func CronRunsHandler(opts HandlerOpts) error {
 			Message: err.Error(),
 		}, nil)
 		return nil
+	}
+	for i := range entries {
+		enrichInspectionCronRunLogEntry(&entries[i], i)
 	}
 	// Convert to []interface{} for response
 	out := make([]interface{}, len(entries))

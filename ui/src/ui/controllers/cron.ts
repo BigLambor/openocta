@@ -331,7 +331,7 @@ export async function loadCronRuns(state: CronState, jobId: string) {
   try {
     const res = await state.client.request<{ entries?: Array<CronRunLogEntry> }>("cron.runs", {
       id: jobId,
-      limit: 50,
+      limit: 200,
     });
     state.cronRunsJobId = jobId;
     state.cronRuns = Array.isArray(res.entries) ? res.entries : [];

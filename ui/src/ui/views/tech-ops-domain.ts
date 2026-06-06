@@ -6,6 +6,7 @@ import "./ops/bch-flink-diagnosis.ts";
 import "./ops/bch-fsimage-dashboard.ts";
 import "./ops/bch-employee-workstation.ts";
 import { renderOpsEmpty, renderOpsError } from "../components/ops-status.ts";
+import { buildInspectionListPreview } from "../ops/inspection-report.ts";
 import { toSanitizedMarkdownHtml } from "../markdown.ts";
 import {
   formatEntityContextFromClusters,
@@ -546,72 +547,65 @@ function renderInspectionsSubTab(props: TechOpsDomainProps) {
   const scoreDisplay = hasScore ? `${lastScore}` : "未知";
   const statusClass = hasScore ? (lastScore >= 90 ? "ok" : lastScore >= 75 ? "warning" : "danger") : "unknown";
 
+  const imHint =
+    props.inspectionImStatus && !props.inspectionImStatus.imConfigured
+      ? props.inspectionImStatus.hint ??
+        `健康分低于 ${props.inspectionImStatus.lowScoreThreshold} 时将推送 IM，需先配置飞书/钉钉。`
+      : null;
+
   return html`
     <div class="ops-inspections-grid">
-      ${props.inspectionImStatus && !props.inspectionImStatus.imConfigured
-        ? html`
-            <div class="ops-banner" style="margin-bottom: 12px;">
-              <span class="ops-banner__icon">${icons.info}</span>
-              <span>
-                ${props.inspectionImStatus.hint ??
-                `健康分低于 ${props.inspectionImStatus.lowScoreThreshold} 时将尝试推送 IM，当前未启用飞书/钉钉。`}
-                ${props.onOpenChannels
-                  ? html`
-                      <button
-                        type="button"
-                        class="ops-btn"
-                        style="margin-left: 8px;"
-                        @click=${() => props.onOpenChannels?.()}
-                      >
-                        前往通道配置
-                      </button>
-                    `
-                  : nothing}
-              </span>
-            </div>
-          `
-        : nothing}
-      <!-- 顶部控制面板 -->
-      <div class="ops-inspection-ctrl ops-card">
-        <div class="ctrl-left">
-          <div class="health-index-badge health-index-badge--${statusClass}">
-            <div class="health-score">${scoreDisplay}</div>
-            <div class="health-label">健康度得分</div>
-          </div>
-          <div class="ctrl-meta">
-            <h3>巡检自动化配置</h3>
-            <p>定时策略：每天 08:00 和 20:00 自动触发深度健康巡检。</p>
-            <p>最近一次执行：${props.inspections[0]?.time ?? "暂无执行记录"}</p>
-          </div>
+      <div class="ops-inspection-toolbar ops-inspection-toolbar--bar">
+        <div class="ops-inspection-toolbar__status">
+          <span class="health-index-badge health-index-badge--compact health-index-badge--${statusClass}">
+            <span class="health-score">${scoreDisplay}</span>
+            <span class="health-label">最新健康分</span>
+          </span>
+          <span class="ops-inspection-toolbar__meta muted">
+            最近：${props.inspections[0]?.time ?? "—"} · 定时 08:00 / 20:00
+          </span>
         </div>
-        <div class="ctrl-right">
-          <button 
-            class="btn primary large ${props.isInspecting ? "btn--loading" : ""}" 
-            type="button" 
+        <div class="ops-inspection-toolbar">
+          ${imHint && props.onOpenChannels
+            ? html`
+                <button
+                  type="button"
+                  class="ops-btn ops-btn--ghost ops-inspection-toolbar__hint"
+                  title=${imHint}
+                  @click=${() => props.onOpenChannels?.()}
+                >
+                  ${icons.info} IM 通道
+                </button>
+              `
+            : nothing}
+          <button
+            class="btn primary ${props.isInspecting ? "btn--loading" : ""}"
+            type="button"
             ?disabled=${props.isInspecting || props.canInspect === false}
             title=${props.canInspect === false ? "当前账号无 ops:inspect 权限" : ""}
             @click=${props.onRunInspection}
           >
-            ${props.isInspecting ? html`${icons.loader} 正在进行深度巡检...` : html`${icons.zap} 一键手动巡检`}
+            ${props.isInspecting ? html`${icons.loader} 巡检中...` : html`${icons.zap} 一键巡检`}
           </button>
         </div>
       </div>
 
-      <!-- 下方历史报告列表与详情 -->
-      <div class="ops-main-columns">
-        <!-- 左侧：历史巡检报告列表 -->
-        <div class="ops-card list-column">
-          <div class="column-header">历史巡检报告</div>
+      <div class="ops-main-columns workbench-inspection-layout">
+        <div class="list-column ops-inspection-list-column">
+          <div class="minimal-column-header">
+            <span>巡检报告</span>
+            <span class="minimal-column-stats">${props.inspections.length} 条记录</span>
+          </div>
           ${props.inspectionsLoading
             ? html`<div class="loading-placeholder">${icons.loader} 加载中...</div>`
             : props.inspections.length === 0
-            ? html`<div class="empty-placeholder">暂无巡检记录，请点击上方按钮开始首次巡检。</div>`
+            ? html`<div class="empty-placeholder">暂无巡检记录，点击「一键巡检」开始。</div>`
             : html`
-                <div class="inspection-list">
+                <div class="inspection-list minimal-inspection-list">
                   ${props.inspections.map(
                     ins => html`
                       <div 
-                        class="inspection-item ${ins.id === props.selectedInspectionId ? "inspection-item--active" : ""}"
+                        class="inspection-item minimal-inspection-item ${ins.id === props.selectedInspectionId ? "inspection-item--active" : ""}"
                         @click=${() => props.onSelectInspection(ins.id)}
                       >
                         <div class="inspection-item__meta">
@@ -620,7 +614,7 @@ function renderInspectionsSubTab(props: TechOpsDomainProps) {
                           </span>
                           <span class="inspection-time">${ins.time}</span>
                         </div>
-                        <div class="inspection-summary">${ins.reportSummary}</div>
+                        <div class="inspection-summary">${buildInspectionListPreview(ins.reportSummary)}</div>
                       </div>
                     `
                   )}
@@ -628,62 +622,55 @@ function renderInspectionsSubTab(props: TechOpsDomainProps) {
               `}
         </div>
 
-        <!-- 右侧：报告详情 -->
-        <div class="ops-card detail-column">
-          <div class="column-header">健康巡检报告详情</div>
+        <div class="detail-column minimal-detail-column ops-inspection-detail">
+          <div class="minimal-column-header">
+            <span>报告详情</span>
+            ${activeInspection
+              ? html`
+                  <span class="score-badge score-badge--${activeInspection.score !== undefined && activeInspection.score !== null && activeInspection.score >= 90 ? "ok" : activeInspection.score !== undefined && activeInspection.score !== null && activeInspection.score >= 75 ? "warning" : activeInspection.score !== undefined && activeInspection.score !== null && activeInspection.score >= 0 ? "danger" : "unknown"}">
+                    ${activeInspection.score !== undefined && activeInspection.score !== null && activeInspection.score >= 0 ? `${activeInspection.score}/100` : "未知"}
+                  </span>
+                `
+              : nothing}
+          </div>
           ${!activeInspection
-            ? html`<div class="empty-placeholder">请从左侧选择一份巡检报告以查看完整指标。</div>`
+            ? html`<div class="empty-placeholder">从左侧选择一份巡检报告。</div>`
             : html`
-                <div class="inspection-detail-report">
-                  <div class="report-header">
-                    <h3>${props.domainName} 巡检报告 (${activeInspection.time})</h3>
-                    <span class="report-score score-badge--${activeInspection.score !== undefined && activeInspection.score !== null && activeInspection.score >= 90 ? "ok" : activeInspection.score !== undefined && activeInspection.score !== null && activeInspection.score >= 75 ? "warning" : activeInspection.score !== undefined && activeInspection.score !== null && activeInspection.score >= 0 ? "danger" : "unknown"}">
-                      健康得分：${activeInspection.score !== undefined && activeInspection.score !== null && activeInspection.score >= 0 ? `${activeInspection.score} / 100` : "未知"}
-                    </span>
-                  </div>
-                  <div class="report-body">
-                    <!-- 使用简单的段落渲染巡检总结与指标 -->
-                    <div class="report-section">
-                      <div class="report-section__title">巡检发现摘要</div>
-                      <p>${activeInspection.reportSummary}</p>
+                <div class="ops-inspection-detail__body">
+                  <div class="detail-section ops-inspection-detail__summary">
+                    <div class="detail-section__header">巡检结论</div>
+                    <div class="detail-section__content">
+                      ${(() => {
+                        const bullets = activeInspection.reportSummary
+                          .split("\n")
+                          .map((line) => line.trim())
+                          .filter(Boolean);
+                        if (bullets.length <= 1) {
+                          return html`<p class="ops-inspection-detail__summary-text">${activeInspection.reportSummary}</p>`;
+                        }
+                        return html`
+                          <ul class="ops-inspection-summary-list">
+                            ${bullets.map((line) => html`<li>${line}</li>`)}
+                          </ul>
+                        `;
+                      })()}
                     </div>
+                  </div>
 
-                    ${(activeInspection as any).result?.errors && (activeInspection as any).result.errors.length > 0
-                      ? html`
-                          <div class="report-section report-section--errors">
-                            <div class="report-section__title">异常错误日志</div>
-                            <ul class="error-list">
-                              ${(activeInspection as any).result.errors.map((err: string) => html`<li>${err}</li>`)}
-                            </ul>
-                          </div>
-                        `
-                      : ""}
+                  ${(activeInspection as any).result?.errors && (activeInspection as any).result.errors.length > 0
+                    ? html`
+                        <div class="detail-section report-section--errors">
+                          <div class="detail-section__header">异常错误</div>
+                          <ul class="error-list">
+                            ${(activeInspection as any).result.errors.map((err: string) => html`<li>${err}</li>`)}
+                          </ul>
+                        </div>
+                      `
+                    : nothing}
 
-                    ${(activeInspection as any).result?.toolRuns && (activeInspection as any).result.toolRuns.length > 0
-                      ? html`
-                          <div class="report-section">
-                            <div class="report-section__title">工具执行证据</div>
-                            <div class="tool-runs-container">
-                              ${(activeInspection as any).result.toolRuns.map((run: any) => html`
-                                <div class="tool-run-card ${run.success ? "tool-run-card--success" : "tool-run-card--fail"}">
-                                  <div class="tool-run-card__header">
-                                    <span class="tool-run-card__name">${run.toolName}</span>
-                                    <span class="tool-run-card__badge">${run.success ? "成功" : "失败"}</span>
-                                  </div>
-                                  ${run.error
-                                    ? html`<div class="tool-run-card__error">${run.error}</div>`
-                                    : run.output
-                                      ? html`<pre class="tool-run-card__output"><code>${run.output}</code></pre>`
-                                      : ""}
-                                </div>
-                              `)}
-                            </div>
-                          </div>
-                        `
-                      : ""}
-
-                    <div class="report-section">
-                      <div class="report-section__title">完整巡检报告</div>
+                  <div class="detail-section ops-inspection-detail__report">
+                    <div class="detail-section__header">完整报告</div>
+                    <div class="detail-section__content ops-inspection-detail__report-body">
                       ${renderMarkdownBlock(activeInspection.reportMarkdown)}
                     </div>
                   </div>

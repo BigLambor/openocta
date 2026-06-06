@@ -164,32 +164,52 @@ export function handleWorkbenchAiEvent(host: WorkbenchAiHost, payload?: Workbenc
     return false;
   }
 
+  const anyHost = host as any;
+  const msgId = payload.message && typeof payload.message === "object" ? (payload.message as any).id : null;
+
   if (payload.state === "delta") {
     const next = extractText(payload.message);
     if (typeof next === "string") {
-      const current = host.workbenchAiStream ?? "";
-      if (!current || next.length >= current.length) {
-        host.workbenchAiStream = next;
+      if (msgId && anyHost._workbenchAiMsgId !== msgId) {
+        if (anyHost._workbenchAiMsgId && host.workbenchAiStream) {
+          anyHost._workbenchAiAccumulated = (anyHost._workbenchAiAccumulated || "") + host.workbenchAiStream + "\n\n";
+        }
+        anyHost._workbenchAiMsgId = msgId;
       }
+      host.workbenchAiStream = next;
     }
     host.workbenchAiStatus = "streaming";
   } else if (payload.state === "final") {
     const finalText = extractText(payload.message);
-    const acc = host.workbenchAiStream ?? "";
-    host.workbenchAiResult =
-      typeof finalText === "string" && finalText.length >= acc.length ? finalText : acc;
+    if (typeof finalText === "string") {
+      if (msgId && anyHost._workbenchAiMsgId !== msgId) {
+        if (anyHost._workbenchAiMsgId && host.workbenchAiStream) {
+          anyHost._workbenchAiAccumulated = (anyHost._workbenchAiAccumulated || "") + host.workbenchAiStream + "\n\n";
+        }
+        anyHost._workbenchAiMsgId = msgId;
+      }
+    }
+    const lastPart = typeof finalText === "string" ? finalText : (host.workbenchAiStream || "");
+    host.workbenchAiResult = (anyHost._workbenchAiAccumulated || "") + lastPart;
     host.workbenchAiStream = null;
     host.workbenchAiRunId = null;
     host.workbenchAiStatus = "done";
+    anyHost._workbenchAiAccumulated = "";
+    anyHost._workbenchAiMsgId = null;
   } else if (payload.state === "aborted") {
+    host.workbenchAiResult = (anyHost._workbenchAiAccumulated || "") + (host.workbenchAiStream || "");
     host.workbenchAiStream = null;
     host.workbenchAiRunId = null;
     host.workbenchAiStatus = host.workbenchAiResult ? "done" : "idle";
+    anyHost._workbenchAiAccumulated = "";
+    anyHost._workbenchAiMsgId = null;
   } else if (payload.state === "error") {
     host.workbenchAiStream = null;
     host.workbenchAiRunId = null;
     host.workbenchAiStatus = "error";
     host.workbenchAiError = payload.errorMessage ?? "AI 分析失败";
+    anyHost._workbenchAiAccumulated = "";
+    anyHost._workbenchAiMsgId = null;
   }
   return true;
 }

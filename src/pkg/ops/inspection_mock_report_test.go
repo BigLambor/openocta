@@ -15,7 +15,7 @@ func TestEnrichInspectionWithMockReport(t *testing.T) {
 	if res.ReportMarkdown == "" {
 		t.Fatal("expected structured markdown report")
 	}
-	for _, part := range []string{"执行摘要", "风险项", "后续动作"} {
+	for _, part := range []string{"执行摘要", "健康度评分", "风险项", "后续动作"} {
 		if !strings.Contains(res.ReportMarkdown, part) {
 			t.Fatalf("report missing section %q", part)
 		}

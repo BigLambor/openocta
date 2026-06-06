@@ -348,6 +348,113 @@
   line-height: 1.4;
 }
 
+.inspection-item .inspection-summary {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
+}
+
+.column-header--split {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.column-header__meta {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.ops-inspection-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ops-inspection-toolbar__hint {
+  font-size: 12px;
+}
+
+.ops-inspection-toolbar--bar {
+  justify-content: space-between;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-content);
+}
+
+.ops-inspection-toolbar__status {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.ops-inspection-toolbar__meta {
+  font-size: 12px;
+}
+
+.health-index-badge--compact {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+}
+
+.health-index-badge--compact .health-score {
+  font-size: 18px;
+  line-height: 1;
+}
+
+.health-index-badge--compact .health-label {
+  font-size: 11px;
+}
+
+.ops-inspection-detail__summary-text,
+.ops-inspection-summary-list {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--accent) 4%, var(--bg));
+  border: 1px solid var(--border);
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--text-primary);
+  word-break: break-word;
+}
+
+.ops-inspection-detail__summary-text {
+  white-space: pre-wrap;
+}
+
+.ops-inspection-summary-list {
+  padding-left: 28px;
+}
+
+.ops-inspection-summary-list li + li {
+  margin-top: 8px;
+}
+
+.ops-inspection-detail__report-body {
+  padding: 0;
+  border: none;
+  background: transparent;
+}
+
+.ops-inspection-detail__report-body .ops-inspection-report {
+  padding: 0;
+}
+
 /* Detail Section styling */
 .alert-detail,
 .inspection-detail-report {

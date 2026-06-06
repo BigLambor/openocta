@@ -116,21 +116,14 @@ function mapCronRunsToWorkbenchInspections(domain: string, runs: any[]): Workben
     } else if (entry?.error) {
       status = "critical";
     }
-    const rawReport = entry?.result?.reportMarkdown || entry?.summary || "";
-    const summary = String(rawReport)
-      .replace(/[#*`\-]/g, "")
-      .replace(/\s+/g, " ")
-      .trim();
+    const { reportSummary, reportMarkdown } = resolveInspectionSummaries(entry, score);
     return {
       id: entry?.sessionId || `inspection-${domain}-${idx}`,
       time: formatOpsTime(entry?.runAtMs || entry?.ts),
       score: score !== null && Number.isFinite(score) ? score : null,
       status,
-      reportSummary:
-        summary.length > 150
-          ? `${summary.slice(0, 150)}...`
-          : summary || (entry?.error ? `巡检执行失败: ${entry.error}` : "巡检记录暂无摘要。"),
-      reportMarkdown: String(rawReport || (entry?.error ? `巡检失败：${entry.error}` : "")),
+      reportSummary,
+      reportMarkdown,
     };
   });
 }
@@ -414,6 +407,7 @@ import { renderDomainInsight } from "./views/domain-insight.ts";
 import { renderWorkbench, type WorkbenchInspection, type WorkbenchView } from "./views/workbench.ts";
 import { normalizeWorkbenchTimeRange } from "./ops/workbench-context.ts";
 import { buildScenarioResult, scenarioResultInputText, scenarioResultOutputText } from "./ops/scenario-results.ts";
+import { findWorkbenchScenario } from "./ops/scenario-registry.ts";
 import { runWorkbenchAi } from "./controllers/ops-workbench-ai.ts";
 import { renderAssetsView } from "./views/assets-view.ts";
 import { renderTechOpsDomain } from "./views/tech-ops-domain.ts";
@@ -423,6 +417,7 @@ import {
   getDefaultEntityIdFromClusters,
   type OpsDomainKey,
 } from "./ops/entity-config.ts";
+import { resolveInspectionSummaries } from "./ops/inspection-report.ts";
 import { openTechDomain } from "./ops/navigation.ts";
 import { canAckAlerts, canRunInspection } from "./ops/rbac.ts";
 import { renderSessions } from "./views/sessions.ts";
@@ -1757,6 +1752,7 @@ export function renderApp(state: AppViewState) {
                 const scenarioSearch = state.opsSelectedEntityIds?.workbenchScenarioSearch || "";
                 const scenarioMaturityFilter = state.opsSelectedEntityIds?.workbenchScenarioMaturity || "all";
                 const selectedScenarioId = state.opsSelectedEntityIds?.workbenchScenario || "";
+                const currentScenario = findWorkbenchScenario(selectedScenarioId);
                 if (
                   selectedScenarioId === "bch-flink-health" &&
                   state.opsFlinkJobs.length === 0 &&
@@ -1894,7 +1890,10 @@ export function renderApp(state: AppViewState) {
                   clustersCount: domainSummaryRaw?.clusterCount ?? 0,
                   alertsCount: alertGroups.length,
                 };
-                const assistantDomain = alertGroups.find((g) => g.id === selectedId)?.domain || domainForAlerts;
+                const assistantDomain =
+                  workbenchView !== "events" && currentScenario
+                    ? currentScenario.domain
+                    : alertGroups.find((g) => g.id === selectedId)?.domain || domainForAlerts;
                 const workbenchAssistant = opsAssistantForDomain(assistantDomain);
                 return renderWorkbench({
                   domainName: opsDomainLabel(domainForAlerts),
@@ -1952,6 +1951,26 @@ export function renderApp(state: AppViewState) {
                       ? state.workbenchAiError
                       : null,
                   onRetryAi: () => {
+                    if (workbenchView !== "events" && currentScenario) {
+                      void runWorkbenchAi(state as any, {
+                        domain: currentScenario.domain,
+                        mode: aiMode,
+                        assistantTemplate: opsAssistantForDomain(currentScenario.domain).employeeId,
+                        alert: {
+                          id: `${currentScenario.id}:${selectedObjectScope}:${selectedTimeRange}`,
+                          title: currentScenario.title,
+                          severity: "info",
+                          domain: currentScenario.domain,
+                          objectType: currentScenario.objectTypes.join("/"),
+                          objectId: selectedObjectScope,
+                          scenarioTitle: currentScenario.title,
+                          scenarioSummary: currentScenario.summary,
+                          evidence: currentScenario.inputs,
+                          expectedOutputs: currentScenario.outputs,
+                        },
+                      });
+                      return;
+                    }
                     const target = alertGroups.find((g) => g.id === selectedId) || alertGroups[0];
                     if (!target) return;
                     void runWorkbenchAi(state as any, {
@@ -4135,24 +4154,20 @@ export function renderApp(state: AppViewState) {
                     status = "critical";
                   }
 
-                  let cleanSummary = reportMarkdown
-                    .replace(/[#*`\-]/g, "")
-                    .replace(/\s+/g, " ")
-                    .trim();
-                  if (cleanSummary.length > 150) {
-                    cleanSummary = cleanSummary.slice(0, 150) + "...";
-                  }
-                  if (!cleanSummary) {
-                    cleanSummary = entry.status === "ok" ? "巡检成功完成，系统各项指标正常。" : `巡检执行失败: ${entry.error || "未知错误"}`;
-                  }
+                  const { reportSummary, reportMarkdown: normalizedMarkdown } = resolveInspectionSummaries(
+                    entry,
+                    score,
+                  );
 
                   return {
                     id: entry.sessionId || `ins-${state.tab}-${idx}`,
                     time: timeStr,
                     score: score,
                     status: status,
-                    reportSummary: cleanSummary,
-                    reportMarkdown: reportMarkdown || (entry.error ? `### 巡检失败\n- **原因**：${entry.error}` : "暂无报告内容"),
+                    reportSummary,
+                    reportMarkdown:
+                      normalizedMarkdown ||
+                      (entry.error ? `### 巡检失败\n- **原因**：${entry.error}` : "暂无报告内容"),
                     result: entry.result,
                   };
                 });
