@@ -39,7 +39,7 @@ import {
   type Tab,
 } from "./navigation.ts";
 import { saveSettings, type UiSettings } from "./storage.ts";
-import { normalizeOpsDomain } from "./components/domain-filter.ts";
+import { effectiveOpsDomain, firstAccessibleOpsDomain, normalizeOpsDomain } from "./components/domain-filter.ts";
 import { applyOpsDeepLinkFromUrl } from "./ops/deeplink.ts";
 import { isOpsDomainTab } from "./ops/entity-config.ts";
 import { ensureDefaultOpsCapabilityTab } from "./ops/navigation.ts";
@@ -197,6 +197,16 @@ export function setTab(host: SettingsHost, next: Tab) {
     return;
   }
 
+  if (nextTab === "domainInsight") {
+    const domain = normalizeOpsDomain(host.settings.opsDomain);
+    if (domain === "all") {
+      applySettings(host, {
+        ...host.settings,
+        opsDomain: firstAccessibleOpsDomain(host.rbacUser ?? null),
+      });
+    }
+  }
+
   const tabChanged = host.tab !== nextTab;
   if (tabChanged) {
     host.tab = nextTab;
@@ -232,6 +242,10 @@ export function setTab(host: SettingsHost, next: Tab) {
       const app = host as unknown as { loadOpsDomainAlerts?: (d: string) => Promise<void> };
       void app.loadOpsDomainAlerts?.(nextTab);
     }
+  }
+  if (nextTab === "overview" || nextTab === "domainInsight") {
+    const app = host as unknown as { loadOpsDashboard?: () => Promise<void> };
+    void app.loadOpsDashboard?.();
   }
   void refreshActiveTab(host);
   syncUrlWithTab(host, nextTab, false);
@@ -271,22 +285,23 @@ export async function refreshActiveTab(host: SettingsHost) {
     ]);
   }
   if (host.tab === "overview" || host.tab === "techDomains" || host.tab === "domainInsight") {
-    await loadOverview(host);
     const app = host as unknown as {
       loadOpsDashboard?: () => Promise<void>;
       loadOpsDomainAlerts?: (d: string) => Promise<void>;
       loadOpsDomainClusters?: (d: string) => Promise<void>;
     };
-    if (app.loadOpsDashboard) {
-      await app.loadOpsDashboard();
-    }
+    const tasks: Array<Promise<unknown>> = [
+      loadOverview(host),
+      app.loadOpsDashboard?.() ?? Promise.resolve(),
+    ];
     if (host.tab === "domainInsight") {
-      const domain = normalizeOpsDomain(host.settings.opsDomain);
-      await Promise.allSettled([
+      const domain = effectiveOpsDomain(host.settings.opsDomain);
+      tasks.push(
         app.loadOpsDomainAlerts?.(domain) ?? Promise.resolve(),
         app.loadOpsDomainClusters?.(domain) ?? Promise.resolve(),
-      ]);
+      );
     }
+    await Promise.allSettled(tasks);
   }
   if (host.tab === "workbench") {
     const app = host as unknown as { loadOpsDomainAlerts?: (d: string) => Promise<void> };
@@ -525,6 +540,16 @@ function extractDomainIdFromPathname(pathname: string, basePath = ""): string | 
   return null;
 }
 
+function resolveDomainInsightFromPath(host: SettingsHost, pathname: string): Tab {
+  const domainId = extractDomainIdFromPathname(pathname, host.basePath);
+  const normalizedDomain = normalizeOpsDomain(domainId);
+  if (!domainId || normalizedDomain === "all") {
+    return "overview";
+  }
+  applySettings(host, { ...host.settings, opsDomain: normalizedDomain });
+  return "domainInsight";
+}
+
 export function syncTabWithLocation(host: SettingsHost, replace: boolean) {
   if (typeof window === "undefined") {
     return;
@@ -536,10 +561,7 @@ export function syncTabWithLocation(host: SettingsHost, replace: boolean) {
     resolved = "overview";
   }
   if (resolved === "domainInsight") {
-    const domainId = extractDomainIdFromPathname(window.location.pathname, host.basePath);
-    if (domainId) {
-      applySettings(host, { ...host.settings, opsDomain: normalizeOpsDomain(domainId) });
-    }
+    resolved = resolveDomainInsightFromPath(host, window.location.pathname);
   }
   resolved = collapseLegacyDomainRoute(host, resolved);
   setTabFromRoute(host, resolved);
@@ -581,10 +603,7 @@ export function onPopState(host: SettingsHost) {
   }
 
   if (resolved === "domainInsight") {
-    const domainId = extractDomainIdFromPathname(window.location.pathname, host.basePath);
-    if (domainId) {
-      applySettings(host, { ...host.settings, opsDomain: normalizeOpsDomain(domainId) });
-    }
+    resolved = resolveDomainInsightFromPath(host, window.location.pathname);
   }
 
   resolved = collapseLegacyDomainRoute(host, resolved);
@@ -621,16 +640,30 @@ export function setTabFromRoute(host: SettingsHost, next: Tab) {
   } else {
     stopDebugPolling(host as unknown as Parameters<typeof stopDebugPolling>[0]);
   }
-  if (host.connected) {
+  if (shouldRefreshTabOnRoute(host, next)) {
     void refreshActiveTab(host);
   }
+}
+
+const OVERVIEW_TABS: Tab[] = ["overview", "domainInsight"];
+
+function shouldRefreshTabOnRoute(host: SettingsHost, tab: Tab): boolean {
+  return host.connected || OVERVIEW_TABS.includes(tab);
 }
 
 export function syncUrlWithTab(host: SettingsHost, tab: Tab, replace: boolean) {
   if (typeof window === "undefined") {
     return;
   }
-  const targetPath = normalizePath(pathForTab(tab, host.basePath));
+  const domainPathId =
+    tab === "domainInsight"
+      ? effectiveOpsDomain(
+          normalizeOpsDomain(host.settings.opsDomain) === "all"
+            ? firstAccessibleOpsDomain(host.rbacUser ?? null)
+            : host.settings.opsDomain,
+        )
+      : undefined;
+  const targetPath = normalizePath(pathForTab(tab, host.basePath, domainPathId));
   const currentPath = normalizePath(window.location.pathname);
   const url = new URL(window.location.href);
 
@@ -676,7 +709,7 @@ export function syncUrlWithSessionKey(host: SettingsHost, sessionKey: string, re
 }
 
 export async function loadOverview(host: SettingsHost) {
-  await Promise.all([
+  await Promise.allSettled([
     loadChannels(host as unknown as OpenClawApp, false),
     loadPresence(host as unknown as OpenClawApp),
     loadSessions(host as unknown as OpenClawApp, { includeLastMessage: true }),

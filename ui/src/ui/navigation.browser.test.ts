@@ -113,7 +113,7 @@ describe("control UI routing", () => {
 
   it("highlights the active top tab for catalog routes", async () => {
     const cases = [
-      ["/employee-market", "助手模板库"],
+      ["/employee-market", "自动化配置"],
       ["/skill-library", "技能库"],
       ["/tool-library", "工具库"],
       ["/model-library", "模型"],

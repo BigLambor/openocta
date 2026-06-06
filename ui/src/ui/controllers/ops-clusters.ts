@@ -147,3 +147,47 @@ export async function createOpsCluster(
   }
   return (await res.json()) as OpsClusterRecord;
 }
+
+export async function updateOpsCluster(
+  host: OpsClusterHost,
+  id: string,
+  body: Partial<{
+    name: string;
+    domain: string;
+    region: string;
+    nodeCount: number;
+    components: string[];
+    owner: string;
+    status: string;
+    description: string;
+    monitorLabels: string;
+    vmUrlRef: string;
+    metricsBaseUrl: string;
+    jmxUrl: string;
+    fiManagerUrl: string;
+    gbaseDsnRef: string;
+    credentialsRef: string;
+  }>,
+): Promise<OpsClusterRecord> {
+  const res = await fetch(`${baseUrl(host)}/api/ops/clusters/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { ...authHeaders(host), "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const err = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(err.error || `更新集群失败 (${res.status})`);
+  }
+  return (await res.json()) as OpsClusterRecord;
+}
+
+export async function deleteOpsCluster(host: OpsClusterHost, id: string): Promise<void> {
+  const res = await fetch(`${baseUrl(host)}/api/ops/clusters/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    headers: authHeaders(host),
+  });
+  if (!res.ok) {
+    const err = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(err.error || `删除集群失败 (${res.status})`);
+  }
+}

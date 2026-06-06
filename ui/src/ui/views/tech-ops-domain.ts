@@ -14,6 +14,7 @@ import {
 } from "../ops/entity-config.ts";
 import type { OpsClusterRecord } from "../controllers/ops-clusters.ts";
 import { renderChat, type ChatProps } from "./chat.ts";
+import { opsDomainIcon } from "../components/domain-filter.ts";
 import type { TechOpsCapabilityTab } from "../ops/navigation.ts";
 
 export type { TechOpsCapabilityTab } from "../ops/navigation.ts";
@@ -129,24 +130,28 @@ export function renderTechOpsDomain(props: TechOpsDomainProps) {
         <div class="ops-sidebar">
           <div class="ops-sidebar__header">
             <div class="ops-sidebar__domain-card ops-sidebar__domain-title">
-              <span class="ops-sidebar__domain-icon">${icons[props.domainKey === "hadoop" ? "network" : props.domainKey === "fi" ? "building" : props.domainKey === "gbase" ? "database" : props.domainKey === "governance" ? "layout" : props.domainKey === "dataapps" ? "activity" : "folder"]}</span>
+              <span class="ops-nav-icon" aria-hidden="true">${icons[opsDomainIcon(props.domainKey)]}</span>
               <span class="ops-sidebar__domain-name">${props.domainName}</span>
             </div>
           </div>
           <div class="ops-sidebar__menu">
-            <div class="ops-sidebar__group-label">运维能力域</div>
-            ${capabilities.map((capability) => {
-              const active = props.activeSubTab === capability.id;
-              const iconSvg = (icons as any)[capability.icon] || icons.globe;
-              return html`
-                <button 
-                  class="ops-sidebar__menu-item ${active ? "active" : ""}" 
-                  @click=${() => props.onSubTabChange(capability.id)}
-                >
-                  ${iconSvg} <span>${capability.label}</span>
-                </button>
-              `;
-            })}
+            <div class="ops-sidebar-section__label">运维能力域</div>
+            <nav class="ops-sidebar-nav">
+              ${capabilities.map((capability) => {
+                const active = props.activeSubTab === capability.id;
+                const iconSvg = (icons as Record<string, typeof icons.globe>)[capability.icon] ?? icons.globe;
+                return html`
+                  <button
+                    type="button"
+                    class="ops-sidebar-nav-item ${active ? "ops-sidebar-nav-item--active" : ""}"
+                    @click=${() => props.onSubTabChange(capability.id)}
+                  >
+                    <span class="ops-nav-icon" aria-hidden="true">${iconSvg}</span>
+                    <span class="ops-sidebar-nav-item__label">${capability.label}</span>
+                  </button>
+                `;
+              })}
+            </nav>
           </div>
         </div>
 

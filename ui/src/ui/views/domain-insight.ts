@@ -4,18 +4,14 @@ import { opsDomainLabel } from "../components/domain-filter.ts";
 import {
   clusterStatusLabel,
   clusterStatusTone,
-  distributionFromClusters,
-  distributionFromCounts,
   formatClusterCount,
   pickTopRiskClusters,
-  renderHealthDistributionBar,
-  renderHealthDistributionLegend,
 } from "../components/ops-health-distribution.ts";
-import { renderOpsEmpty, renderOpsSkeleton } from "../components/ops-status.ts";
+import { renderOpsSkeleton } from "../components/ops-status.ts";
 import type { OpsClusterRecord } from "../controllers/ops-clusters.ts";
 import type { BchDomainScenarioSummary, BchScenarioCardSummary } from "../controllers/bch-scenario-summary.ts";
 
-const MOCK_SCENARIOS: BchScenarioCardSummary[] = [
+const FALLBACK_SCENARIOS: BchScenarioCardSummary[] = [
   {
     id: "flink-health",
     title: "Flink 作业健康度",
@@ -28,10 +24,9 @@ const MOCK_SCENARIOS: BchScenarioCardSummary[] = [
     description: "监控 Flink 实时作业运行状态，快速定位背压、倾斜与重启瓶颈。",
     primaryActionLabel: "查看异常作业",
     primaryView: "diagnosis",
-    secondaryActionLabel: "整体监控",
-    secondaryView: "governance",
     initialQuestion: "分析当前 Flink 集群中存在背压的作业情况",
-    summary: "当前 Flink 实时计算域整体得分为 82 分。存在 5 个高风险作业，其中 3 个作业发生严重背压，2 个作业 Checkpoint 连续失败。建议立即查看异常作业详情以进行针对性调优。",
+    summary:
+      "当前 Flink 实时计算域整体得分为 82 分。存在 5 个高风险作业，其中 3 个作业发生严重背压，2 个作业 Checkpoint 连续失败。",
   },
   {
     id: "spark-tuning",
@@ -46,7 +41,8 @@ const MOCK_SCENARIOS: BchScenarioCardSummary[] = [
     primaryActionLabel: "进入调优中心",
     primaryView: "governance",
     initialQuestion: "帮我找出昨天执行最慢的 5 个 Spark 作业并提供调优建议",
-    summary: "Spark 作业调优专项评估得分 65 分，低于健康水位。识别出 12 个作业存在严重的资源浪费与数据倾斜问题，累计消耗了 30% 的非必要计算资源。亟需进行参数优化。",
+    summary:
+      "Spark 作业调优专项评估得分 65 分，低于健康水位。识别出 12 个作业存在严重的资源浪费与数据倾斜问题。",
   },
   {
     id: "hdfs-storage",
@@ -61,24 +57,7 @@ const MOCK_SCENARIOS: BchScenarioCardSummary[] = [
     primaryActionLabel: "容量管理",
     primaryView: "capacity",
     initialQuestion: "检查 HDFS 存储的小文件分布情况，是否有需要合并的目录",
-    summary: "HDFS 存储域状态非常健康（95分）。容量使用率为 68%，无坏块产生。小文件占比已通过自动治理控制在 5% 以内。节点间数据分布均衡，目前无需人工介入。",
-  },
-  {
-    id: "alert-noise",
-    title: "告警降噪与收敛",
-    workflowType: "alert",
-    capability: "noise_reduction",
-    status: "warning",
-    score: 75,
-    primaryMetric: "当前收敛率 85%",
-    secondaryMetric: "昨日降噪 2.4万 条告警",
-    description: "基于 AI 的智能告警降噪，识别告警风暴，提取根因告警，减少运维干扰。",
-    primaryActionLabel: "配置降噪规则",
-    primaryView: "governance",
-    secondaryActionLabel: "降噪效果评估",
-    secondaryView: "events",
-    initialQuestion: "分析过去一周触发次数最多的 Top 3 告警，并给出降噪建议",
-    summary: "告警系统运行中，近 24 小时产生原始告警 28,000 条，经智能降噪收敛为 4,200 个告警组，收敛率达 85%。但某几个特定集群频繁报出 CPU 抖动告警，建议检查对应的降噪规则阈值。",
+    summary: "HDFS 存储域状态非常健康（95分）。容量使用率为 68%，无坏块产生。",
   },
 ];
 
@@ -104,14 +83,12 @@ export type DomainInsightProps = {
     title?: string;
     severity?: string;
     timestamp?: string;
+    status?: string;
   }>;
   scenarioSummary?: BchDomainScenarioSummary | null;
   scenarioSummaryLoading?: boolean;
   scenarioSummaryError?: string | null;
   onNavigateTab?: (tab: string, domain?: string, view?: string, scenarioId?: string) => void;
-  onRunInspection?: () => void;
-  isInspecting?: boolean;
-  canInspect?: boolean;
   onAnalyzeScenario?: (params: {
     scenario: string;
     capability: string;
@@ -146,6 +123,13 @@ function statusClass(status: BchScenarioCardSummary["status"]): string {
   }
 }
 
+function scenarioNeedsAttention(scenario: BchScenarioCardSummary): boolean {
+  if (scenario.status === "warning" || scenario.status === "critical") {
+    return true;
+  }
+  return scenario.score != null && scenario.score < 90;
+}
+
 function workbenchScenarioId(scenario: BchScenarioCardSummary, view?: string): string | null {
   switch (scenario.id) {
     case "flink-health":
@@ -159,138 +143,129 @@ function workbenchScenarioId(scenario: BchScenarioCardSummary, view?: string): s
   }
 }
 
-function renderBchScenarioCard(
-  props: DomainInsightProps,
-  domain: string,
-  scenario: BchScenarioCardSummary,
-) {
-  const tone = scenario.score != null ? scoreClass(scenario.score) : statusClass(scenario.status);
+function resolveScenarios(props: DomainInsightProps, isBch: boolean): BchScenarioCardSummary[] {
+  if (props.scenarioSummary?.scenarios?.length) {
+    return props.scenarioSummary.scenarios;
+  }
+  return isBch ? FALLBACK_SCENARIOS : [];
+}
+
+function renderStatusStrip(props: DomainInsightProps, domain: string, name: string) {
+  const score = props.score;
+  const latestInspection = props.inspections?.[0] ?? null;
+  const critical = props.criticalCount ?? 0;
+  const warning = props.warningCount ?? 0;
+
   return html`
-    <article class="domain-card">
-      <div class="domain-card-header">
-        <div class="domain-name">
-          <span class="domain-icon-wrapper">
-            ${scenario.id === "hdfs-storage"
-              ? icons.server
-              : scenario.id === "spark-tuning"
-                ? icons.zap
-                : scenario.id === "alert-noise"
-                  ? icons.bell
-                  : icons.activity}
-          </span>
-          <span class="domain-name__text">${scenario.title}</span>
-        </div>
-        <span class="domain-score ${tone}">${scenario.score != null ? `${scenario.score}分` : "—"}</span>
+    <section class="domain-insight-status-strip" aria-label="${name} 域状态">
+      <div class="domain-insight-status-strip__item">
+        <span class="domain-insight-status-strip__label">综合健康</span>
+        <span class="domain-insight-status-strip__value stat-value--${scoreClass(score)}">
+          ${score != null ? `${score}分` : "—"}
+        </span>
       </div>
-      <div class="health-bar-container">
-        <div
-          class="health-bar ${tone}"
-          style="width: ${scenario.score != null ? Math.max(0, Math.min(100, scenario.score)) : 0}%;"
-        ></div>
+      <div class="domain-insight-status-strip__item">
+        <span class="domain-insight-status-strip__label">集群</span>
+        <span class="domain-insight-status-strip__value">
+          ${formatClusterCount(props.clusterCount ?? 0)}
+          ${critical > 0
+            ? html`<span class="domain-insight-status-strip__meta domain-insight-status-strip__meta--danger">${critical} 异常</span>`
+            : warning > 0
+              ? html`<span class="domain-insight-status-strip__meta domain-insight-status-strip__meta--warn">${warning} 亚健康</span>`
+              : nothing}
+        </span>
       </div>
-      <div class="domain-stats domain-stats--stacked">
-        <div>${scenario.primaryMetric}</div>
-        <div class="domain-stats__hint">${scenario.secondaryMetric}</div>
-        <p class="domain-stats__hint">${scenario.description}</p>
+      <div class="domain-insight-status-strip__item">
+        <span class="domain-insight-status-strip__label">待处理告警</span>
+        <span class="domain-insight-status-strip__value">${props.alertCount ?? 0} 组</span>
       </div>
-      <div class="domain-card-actions">
-        <button
-          type="button"
-          class="ops-btn ops-btn--primary domain-card-link"
-          @click=${() => props.onNavigateTab?.("workbench", domain, scenario.primaryView, workbenchScenarioId(scenario, scenario.primaryView) ?? undefined)}
-        >
-          ${scenario.primaryActionLabel}
-        </button>
-        ${scenario.secondaryView && scenario.secondaryActionLabel
-          ? html`
-              <button
-                type="button"
-                class="ops-btn domain-card-link domain-card-link--secondary"
-                @click=${() => props.onNavigateTab?.("workbench", domain, scenario.secondaryView, workbenchScenarioId(scenario, scenario.secondaryView) ?? undefined)}
-              >
-                ${scenario.secondaryActionLabel}
-              </button>
-            `
-          : nothing}
-        <button
-          type="button"
-          class="ops-btn domain-card-link domain-card-link--secondary"
-          @click=${() =>
-            props.onAnalyzeScenario?.({
-              scenario: scenario.workflowType,
-              capability: scenario.capability,
-              initialQuestion: scenario.initialQuestion,
-              summary: scenario.summary,
-            })}
-        >
-          AI 分析
-        </button>
+      <div class="domain-insight-status-strip__item">
+        <span class="domain-insight-status-strip__label">最近巡检</span>
+        <span class="domain-insight-status-strip__value stat-value--${latestInspection ? scoreClass(latestInspection.score) : "unknown"}">
+          ${latestInspection?.score != null ? `${latestInspection.score}分` : "—"}
+          ${latestInspection?.time
+            ? html`<span class="domain-insight-status-strip__meta">${latestInspection.time}</span>`
+            : nothing}
+        </span>
       </div>
-    </article>
+    </section>
   `;
 }
 
-function renderTopRiskClusters(props: DomainInsightProps, domain: string) {
-  const clusters = props.clusters ?? [];
-  const risky = pickTopRiskClusters(clusters, 5);
-  const hasMany = clusters.length > 5;
+function renderImmediateActions(props: DomainInsightProps, domain: string) {
+  const alerts = (props.alertGroups ?? []).filter((g) => g.status !== "resolved").slice(0, 5);
+  const risky = pickTopRiskClusters(props.clusters ?? [], 5);
+  const loading = props.clustersLoading && risky.length === 0 && alerts.length === 0;
+  const hasItems = alerts.length > 0 || risky.length > 0;
 
   return html`
     <section class="ops-dashboard-panel domain-insight-section">
       <div class="domain-insight-section__head">
         <h2 class="section-title">
           <span class="section-title__icon">${icons.alertTriangle}</span>
-          风险集群 Top 5
+          需立即处理
         </h2>
-        ${hasMany
+        ${hasItems
           ? html`
               <button
                 type="button"
                 class="ops-btn ops-btn--ghost domain-insight-section__link"
-                @click=${() => props.onNavigateTab?.("assets", domain)}
+                @click=${() => props.onNavigateTab?.("workbench", domain, "events")}
               >
-                查看全部 ${formatClusterCount(clusters.length)} 个集群 ${icons.chevronRight}
+                进入工作台 ${icons.chevronRight}
               </button>
             `
           : nothing}
       </div>
       <div class="ops-panel ops-dashboard-panel__body">
-        ${props.clustersLoading
+        ${loading
           ? renderOpsSkeleton({ lines: 4 })
-          : risky.length === 0
+          : !hasItems
             ? html`
                 <p class="ops-dashboard-panel__empty">
-                  ${clusters.length === 0
+                  ${(props.clusterCount ?? 0) === 0
                     ? "该域尚未登记集群，请前往服务与资产纳管。"
-                    : "当前域内集群状态正常，暂无需要优先处理的风险集群。"}
+                    : "当前域内暂无待处理告警或风险集群。"}
                 </p>
               `
             : html`
-                <ul class="ops-risk-cluster-list">
-                  ${risky.map(
-                    (cluster) => html`
-                      <li class="ops-risk-cluster-item">
+                <ul class="ops-immediate-list">
+                  ${alerts.map(
+                    (g) => html`
+                      <li class="ops-immediate-item">
                         <button
                           type="button"
-                          class="ops-risk-cluster-item__btn"
+                          class="ops-immediate-item__btn"
+                          @click=${() => props.onNavigateTab?.("workbench", domain, "events")}
+                        >
+                          <span class="ops-immediate-item__type">告警</span>
+                          <span class="ops-feed-severity ops-feed-severity--${g.severity ?? "info"}">
+                            ${g.severity === "critical" ? "严重" : g.severity === "warning" ? "警告" : "信息"}
+                          </span>
+                          <span class="ops-immediate-item__title">${g.title ?? "未命名告警"}</span>
+                          <span class="ops-immediate-item__meta">${g.timestamp ?? "—"}</span>
+                          ${icons.chevronRight}
+                        </button>
+                      </li>
+                    `,
+                  )}
+                  ${risky.map(
+                    (cluster) => html`
+                      <li class="ops-immediate-item">
+                        <button
+                          type="button"
+                          class="ops-immediate-item__btn"
                           @click=${() => props.onNavigateTab?.("assets", domain)}
                         >
-                          <span class="ops-risk-cluster-item__head">
-                            <span class="ops-feed-severity ops-feed-severity--${clusterStatusTone(cluster.status)}">
-                              ${clusterStatusLabel(cluster.status)}
-                            </span>
-                            <span class="ops-risk-cluster-item__name">${cluster.name}</span>
-                            ${cluster.region
-                              ? html`<span class="ops-risk-cluster-item__meta">${cluster.region}</span>`
-                              : nothing}
+                          <span class="ops-immediate-item__type">集群</span>
+                          <span class="ops-feed-severity ops-feed-severity--${clusterStatusTone(cluster.status)}">
+                            ${clusterStatusLabel(cluster.status)}
                           </span>
-                          <span class="ops-risk-cluster-item__detail">
+                          <span class="ops-immediate-item__title">${cluster.name}</span>
+                          <span class="ops-immediate-item__meta">
                             ${formatClusterCount(cluster.nodeCount)} 节点
-                            ${cluster.owner ? ` · ${cluster.owner}` : nothing}
-                            ${cluster.components?.length
-                              ? ` · ${cluster.components.slice(0, 3).join(", ")}`
-                              : nothing}
                           </span>
+                          ${icons.chevronRight}
                         </button>
                       </li>
                     `,
@@ -302,218 +277,188 @@ function renderTopRiskClusters(props: DomainInsightProps, domain: string) {
   `;
 }
 
+function renderScenarioRow(
+  props: DomainInsightProps,
+  domain: string,
+  scenario: BchScenarioCardSummary,
+) {
+  const tone = scenario.score != null ? scoreClass(scenario.score) : statusClass(scenario.status);
+  return html`
+    <li class="domain-scenario-row domain-scenario-row--${tone}">
+      <div class="domain-scenario-row__main">
+        <span class="domain-scenario-row__title">${scenario.title}</span>
+        <span class="domain-scenario-row__metric">${scenario.primaryMetric}</span>
+      </div>
+      <span class="domain-scenario-row__score ${tone}">${scenario.score != null ? `${scenario.score}分` : "—"}</span>
+      <button
+        type="button"
+        class="ops-btn ops-btn--ghost domain-scenario-row__action"
+        @click=${() =>
+          props.onNavigateTab?.(
+            "workbench",
+            domain,
+            scenario.primaryView,
+            workbenchScenarioId(scenario, scenario.primaryView) ?? undefined,
+          )}
+      >
+        ${scenario.primaryActionLabel} ${icons.chevronRight}
+      </button>
+    </li>
+  `;
+}
+
+function renderScenarioSection(props: DomainInsightProps, domain: string, isBch: boolean) {
+  const scenarios = resolveScenarios(props, isBch);
+  const abnormal = scenarios.filter(scenarioNeedsAttention);
+  const healthy = scenarios.filter((s) => !scenarioNeedsAttention(s));
+
+  if (props.scenarioSummaryLoading && scenarios.length === 0) {
+    return html`
+      <section class="domain-insight-section">
+        <h2 class="section-title">
+          <span class="section-title__icon">${icons.zap}</span>
+          场景异常
+        </h2>
+        <div class="ops-panel">${renderOpsSkeleton({ lines: 3 })}</div>
+      </section>
+    `;
+  }
+
+  if (!isBch && scenarios.length === 0) {
+    return html`
+      <section class="domain-insight-section">
+        <h2 class="section-title">
+          <span class="section-title__icon">${icons.zap}</span>
+          场景异常
+        </h2>
+        <div class="ops-panel ops-dashboard-panel__body">
+          <p class="ops-dashboard-panel__empty">
+            该域业务场景接入中。可前往运维工作台查看事件与巡检。
+          </p>
+          <button
+            type="button"
+            class="ops-btn ops-dashboard-panel__action"
+            @click=${() => props.onNavigateTab?.("workbench", domain, "events")}
+          >
+            进入运维工作台
+          </button>
+        </div>
+      </section>
+    `;
+  }
+
+  return html`
+    <section class="domain-insight-section">
+      <h2 class="section-title">
+        <span class="section-title__icon">${icons.zap}</span>
+        场景异常
+      </h2>
+      ${abnormal.length > 0
+        ? html`
+            <ul class="domain-scenario-list">
+              ${abnormal.map((scenario) => renderScenarioRow(props, domain, scenario))}
+            </ul>
+          `
+        : html`
+            <div class="ops-panel ops-dashboard-panel__body">
+              <p class="ops-dashboard-panel__empty">各业务场景运行平稳，暂无异常项。</p>
+            </div>
+          `}
+      ${healthy.length > 0
+        ? html`
+            <details class="domain-collapse domain-collapse--scenarios">
+              <summary class="domain-collapse__summary">${healthy.length} 个场景运行正常</summary>
+              <ul class="domain-scenario-list domain-scenario-list--healthy">
+                ${healthy.map(
+                  (scenario) => html`
+                    <li class="domain-scenario-row domain-scenario-row--ok domain-scenario-row--compact">
+                      <span class="domain-scenario-row__title">${scenario.title}</span>
+                      <span class="domain-scenario-row__score ok">${scenario.score != null ? `${scenario.score}分` : "正常"}</span>
+                    </li>
+                  `,
+                )}
+              </ul>
+            </details>
+          `
+        : nothing}
+    </section>
+  `;
+}
+
+function renderFooterLinks(
+  props: DomainInsightProps,
+  domain: string,
+  latestInspection: NonNullable<DomainInsightProps["inspections"]>[number] | undefined,
+) {
+  return html`
+    <nav class="domain-insight-footer-links" aria-label="更多操作">
+      <button type="button" class="domain-insight-footer-links__link" @click=${() => props.onNavigateTab?.("assets", domain)}>
+        查看全部集群
+      </button>
+      <button
+        type="button"
+        class="domain-insight-footer-links__link"
+        @click=${() => props.onNavigateTab?.("workbench", domain, "inspection")}
+      >
+        ${latestInspection ? "查看巡检报告" : "进入巡检中心"}
+      </button>
+      <button
+        type="button"
+        class="domain-insight-footer-links__link"
+        @click=${() => props.onNavigateTab?.("workbench", domain, "events")}
+      >
+        进入事件中心
+      </button>
+    </nav>
+  `;
+}
+
 export function renderDomainInsight(props: DomainInsightProps) {
   const domain = props.domain || "hadoop";
   const name = opsDomainLabel(domain);
-  const score = props.score;
   const isBch = domain === "hadoop";
   const latestInspection = props.inspections?.[0] ?? null;
-  const dist =
-    (props.clusters?.length ?? 0) > 0
-      ? distributionFromClusters(props.clusters ?? [])
-      : distributionFromCounts(
-          props.healthyCount ?? 0,
-          props.warningCount ?? 0,
-          props.criticalCount ?? 0,
-        );
 
   return html`
     <div class="ops-page ops-dashboard domain-insight-page">
       <div class="ops-page-header ops-dashboard-header ops-dashboard-header--split">
         <div class="domain-insight-header__left">
-          <button
-            type="button"
-            class="ops-btn ops-btn--ghost domain-insight-header__back"
-            @click=${() => props.onNavigateTab?.("overview")}
-          >
-            ${icons.arrowLeft} <span>返回驾驶舱</span>
-          </button>
+          <nav class="domain-insight-breadcrumb" aria-label="面包屑">
+            <button
+              type="button"
+              class="domain-insight-breadcrumb__link"
+              @click=${() => props.onNavigateTab?.("overview")}
+            >
+              运维驾驶舱
+            </button>
+            <span class="domain-insight-breadcrumb__sep">${icons.chevronRight}</span>
+            <span class="domain-insight-breadcrumb__current">${name}</span>
+          </nav>
           <div class="domain-insight-header__title-wrapper">
-            <h1>${name} <span class="domain-insight-header__subtitle">详情</span></h1>
+            <h1>${name}</h1>
           </div>
           <p class="domain-insight-header__desc">
-            域级健康聚合视图：不展开全量集群，仅展示分布、风险 Top 5 与场景入口。全量清单请前往服务与资产。
+            域级异常清单：聚焦待处理事项与场景风险，全量集群与操作请前往工作台或服务与资产。
           </p>
         </div>
         <div class="ops-dashboard-header__actions">
-          <button
-            type="button"
-            class="ops-btn"
-            @click=${() => props.onNavigateTab?.("assets", domain)}
-          >
-            ${icons.server} 查看全部集群
+          <button type="button" class="ops-btn" @click=${() => props.onNavigateTab?.("assets", domain)}>
+            查看全部集群
           </button>
           <button
             type="button"
             class="ops-btn ops-btn--primary"
-            ?disabled=${props.isInspecting || props.canInspect === false}
-            @click=${() => props.onRunInspection?.()}
+            @click=${() => props.onNavigateTab?.("workbench", domain, "events")}
           >
-            ${props.isInspecting ? html`${icons.loader} 巡检中…` : html`${icons.zap} 触发域巡检`}
+            进入工作台
           </button>
         </div>
       </div>
 
-      <div class="stats-grid">
-        <div class="stat-card">
-          <div class="stat-icon stat-icon--blue">${icons.activity}</div>
-          <div class="stat-content">
-            <h3>健康综合得分</h3>
-            <div class="stat-value stat-value--${scoreClass(score)}">
-              ${score != null ? `${score}分` : "—"}
-            </div>
-          </div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-icon stat-icon--blue">${icons.server}</div>
-          <div class="stat-content">
-            <h3>域内集群数</h3>
-            <div class="stat-value">${formatClusterCount(props.clusterCount ?? 0)}</div>
-          </div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-icon stat-icon--danger">${icons.bell}</div>
-          <div class="stat-content">
-            <h3>待处理告警组</h3>
-            <div class="stat-value">${props.alertCount ?? 0}</div>
-          </div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-icon stat-icon--ok">${icons.checkCircle}</div>
-          <div class="stat-content">
-            <h3>最近巡检得分</h3>
-            <div class="stat-value stat-value--${latestInspection ? scoreClass(latestInspection.score) : "unknown"}">
-              ${latestInspection?.score != null ? `${latestInspection.score}分` : "—"}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <section class="ops-dashboard-panel domain-insight-section">
-        <h2 class="section-title">
-          <span class="section-title__icon">${icons.barChart}</span>
-          集群健康分布
-        </h2>
-        <div class="ops-panel ops-dashboard-panel__body domain-insight-distribution">
-          ${renderHealthDistributionBar(dist)}
-          ${renderHealthDistributionLegend(dist)}
-          <p class="domain-insight-distribution__hint">
-            共 ${formatClusterCount(props.clusterCount ?? 0)} 个集群。
-            ${(props.criticalCount ?? 0) > 0
-              ? `${formatClusterCount(props.criticalCount ?? 0)} 个异常需优先处理。`
-              : (props.warningCount ?? 0) > 0
-                ? `${formatClusterCount(props.warningCount ?? 0)} 个亚健康建议关注。`
-                : "当前域整体运行平稳。"}
-          </p>
-        </div>
-      </section>
-
-      ${renderTopRiskClusters(props, domain)}
-
-      <section class="domain-insight-section">
-        <h2 class="section-title">
-          <span class="section-title__icon">${icons.zap}</span>
-          业务场景看板
-        </h2>
-        ${isBch
-          ? html`
-              <div class="domain-grid domain-grid--managed">
-                ${MOCK_SCENARIOS.map((scenario) => renderBchScenarioCard(props, domain, scenario))}
-              </div>
-            `
-          : html`
-              <div class="domain-insight-section-empty">
-                <div class="empty-icon">${icons.activity}</div>
-                <div class="empty-title">暂无该域业务场景数据</div>
-                <div class="empty-desc">您可以联系管理员接入专属的业务场景监控卡片。</div>
-              </div>
-            `}
-      </section>
-
-      <div class="ops-dashboard-bottom domain-insight-bottom">
-        <section class="ops-dashboard-panel">
-          <div class="domain-insight-section__head">
-            <h2 class="section-title">
-              <span class="section-title__icon">${icons.bell}</span>
-              最新告警组
-            </h2>
-            <button
-              type="button"
-              class="domain-insight-section__action-link"
-              @click=${() => props.onNavigateTab?.("workbench", domain, "events")}
-            >
-              进入事件中心 ${icons.chevronRight}
-            </button>
-          </div>
-          <div class="ops-panel ops-dashboard-panel__body">
-            ${!props.alertGroups || props.alertGroups.length === 0
-              ? html`<p class="ops-dashboard-panel__empty">暂无活动告警。</p>`
-              : html`
-                  <ul class="ops-feed-list">
-                    ${props.alertGroups.slice(0, 5).map(
-                      (g) => html`
-                        <li class="ops-feed-item">
-                          <button
-                            type="button"
-                            class="ops-feed-item__btn"
-                            @click=${() => props.onNavigateTab?.("workbench", domain, "events")}
-                          >
-                            <span class="ops-feed-item__head">
-                              <span class="ops-feed-severity ops-feed-severity--${g.severity ?? "info"}">
-                                ${g.severity === "critical" ? "严重" : g.severity === "warning" ? "警告" : "信息"}
-                              </span>
-                              <span class="ops-feed-item__time">${g.timestamp ?? "—"}</span>
-                            </span>
-                            <span class="ops-feed-item__title">${g.title}</span>
-                          </button>
-                        </li>
-                      `,
-                    )}
-                  </ul>
-                `}
-          </div>
-        </section>
-
-        <section class="ops-dashboard-panel">
-          <div class="domain-insight-section__head">
-            <h2 class="section-title">
-              <span class="section-title__icon">${icons.historyClock}</span>
-              最近巡检摘要
-            </h2>
-            <button
-              type="button"
-              class="domain-insight-section__action-link"
-              @click=${() => props.onNavigateTab?.("workbench", domain, "inspection")}
-            >
-              进入巡检中心 ${icons.chevronRight}
-            </button>
-          </div>
-          <div class="ops-panel ops-dashboard-panel__body">
-            ${!latestInspection
-              ? html`
-                  <p class="ops-dashboard-panel__empty">该域暂无巡检记录，可点击右上角「触发域巡检」。</p>
-                `
-              : html`
-                  <div class="domain-insight-inspection">
-                    <div class="domain-insight-inspection__head">
-                      <span class="domain-insight-inspection__score stat-value--${scoreClass(latestInspection.score)}">
-                        ${latestInspection.score != null ? `${latestInspection.score}分` : "—"}
-                      </span>
-                      <span class="ops-feed-item__score ops-feed-item__score--${scoreClass(latestInspection.score)}">
-                        ${latestInspection.score != null && latestInspection.score >= 90
-                          ? "状态良好"
-                          : latestInspection.score != null && latestInspection.score >= 75
-                            ? "存在风险"
-                            : "需关注"}
-                      </span>
-                    </div>
-                    <p class="domain-insight-inspection__time">${latestInspection.time ?? "—"}</p>
-                    <p class="domain-insight-inspection__summary">${latestInspection.reportSummary ?? "—"}</p>
-                  </div>
-                `}
-          </div>
-        </section>
-      </div>
+      ${renderStatusStrip(props, domain, name)}
+      ${renderImmediateActions(props, domain)}
+      ${renderScenarioSection(props, domain, isBch)}
+      ${renderFooterLinks(props, domain, latestInspection)}
     </div>
   `;
 }

@@ -288,7 +288,7 @@ describe("Ops remediation E2E smoke tests", () => {
     expect(pageHeader?.textContent?.trim()).toBe("BCH生态");
 
     // 8. Test Manual Inspection
-    const subtabs = Array.from(app.querySelectorAll(".ops-sidebar__menu-item")) as HTMLButtonElement[];
+    const subtabs = Array.from(app.querySelectorAll(".ops-sidebar .ops-sidebar-nav-item")) as HTMLButtonElement[];
     // Click subtab index 3 -> "深度健康巡检"
     subtabs[3].click();
     await app.updateComplete;

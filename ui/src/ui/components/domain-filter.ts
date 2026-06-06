@@ -1,5 +1,14 @@
 export type OpsDomainKey = "all" | "hadoop" | "fi" | "gbase" | "governance" | "dataapps";
 
+export type OpsDomainIconName =
+  | "overviewGrid"
+  | "network"
+  | "building"
+  | "database"
+  | "layout"
+  | "activity"
+  | "folder";
+
 export type DomainFilterUser = {
   roleName?: string;
   permissions?: string[];
@@ -51,6 +60,26 @@ export function opsDomainLabel(domain: string, short = false): string {
   const normalized = normalizeOpsDomain(domain);
   const option = OPS_DOMAIN_OPTIONS.find((item) => item.key === normalized);
   return short ? option?.shortLabel ?? domain : option?.label ?? domain;
+}
+
+/** Icon key for a technical domain — aligned with 运维驾驶舱业务域卡片 */
+export function opsDomainIcon(domain: string): OpsDomainIconName {
+  switch (normalizeOpsDomain(domain)) {
+    case "all":
+      return "overviewGrid";
+    case "hadoop":
+      return "network";
+    case "fi":
+      return "building";
+    case "gbase":
+      return "database";
+    case "governance":
+      return "layout";
+    case "dataapps":
+      return "activity";
+    default:
+      return "folder";
+  }
 }
 
 export function effectiveOpsDomain(domain: string): Exclude<OpsDomainKey, "all"> {

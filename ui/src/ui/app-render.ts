@@ -73,6 +73,7 @@ import { renderProductTour } from "./views/product-tour.ts";
 import { nativeAlert, nativeConfirm, nativePrompt } from "./native-dialog-bridge.ts";
 import {
   canAccessOpsDomain,
+  effectiveOpsDomain,
   firstAccessibleOpsDomain,
   normalizeOpsDomain,
   opsAssistantForDomain,
@@ -387,7 +388,7 @@ import {
 import { renderChannels } from "./views/channels.ts";
 import { renderChat } from "./views/chat.ts";
 import { renderConfig } from "./views/config.ts";
-import { renderAssetManagement } from "./views/asset-management.ts";
+import { renderAssetManagement, type ClusterFormPayload } from "./views/asset-management.ts";
 import { renderEnvVars } from "./views/env-vars.ts";
 import { renderCronConfig, renderCronHistory } from "./views/cron.ts";
 import { renderDebug } from "./views/debug.ts";
@@ -526,6 +527,79 @@ function resolveDefaultModelRef(config: Record<string, unknown> | null | undefin
     return typeof primary === "string" && primary ? primary : null;
   }
   return null;
+}
+
+function clusterBodyFromFormPayload(payload: ClusterFormPayload) {
+  return {
+    name: payload.name,
+    domain: payload.domain,
+    region: payload.region,
+    nodeCount: payload.nodeCount,
+    components: payload.components
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean),
+    owner: payload.owner,
+    status: payload.status,
+    monitorLabels: payload.monitorLabels,
+    vmUrlRef: payload.vmUrlRef,
+    metricsBaseUrl: payload.metricsBaseUrl,
+    jmxUrl: payload.jmxUrl,
+    fiManagerUrl: payload.fiManagerUrl,
+    gbaseDsnRef: payload.gbaseDsnRef,
+    credentialsRef: payload.credentialsRef,
+  };
+}
+
+function parseAssetsDrawer(raw?: string) {
+  const value = raw ?? "";
+  if (value === "add") {
+    return { drawerOpen: true, drawerMode: "add" as const, editingClusterId: null };
+  }
+  if (value.startsWith("edit:")) {
+    return { drawerOpen: true, drawerMode: "edit" as const, editingClusterId: value.slice(5) };
+  }
+  return { drawerOpen: false, drawerMode: "add" as const, editingClusterId: null };
+}
+
+function setAssetsDrawer(state: AppViewState, value: string) {
+  state.opsSelectedEntityIds = {
+    ...state.opsSelectedEntityIds,
+    assetsDrawer: value,
+  };
+  state.requestUpdate();
+}
+
+async function reloadOpsClusterViews(state: AppViewState) {
+  await (state as any).loadOpsClusters();
+  await (state as any).loadOpsDashboard();
+}
+
+function buildAssetClusterHandlers(state: AppViewState) {
+  const drawer = parseAssetsDrawer(state.opsSelectedEntityIds?.assetsDrawer);
+  return {
+    ...drawer,
+    onOpenAddDrawer: () => setAssetsDrawer(state, "add"),
+    onOpenEditDrawer: (clusterId: string) => setAssetsDrawer(state, `edit:${clusterId}`),
+    onCloseDrawer: () => setAssetsDrawer(state, ""),
+    onAddCluster: async (payload: ClusterFormPayload) => {
+      const { createOpsCluster } = await import("./controllers/ops-clusters.ts");
+      await createOpsCluster(state as any, clusterBodyFromFormPayload(payload));
+      setAssetsDrawer(state, "");
+      await reloadOpsClusterViews(state);
+    },
+    onUpdateCluster: async (id: string, payload: ClusterFormPayload) => {
+      const { updateOpsCluster } = await import("./controllers/ops-clusters.ts");
+      await updateOpsCluster(state as any, id, clusterBodyFromFormPayload(payload));
+      setAssetsDrawer(state, "");
+      await reloadOpsClusterViews(state);
+    },
+    onDeleteCluster: async (id: string) => {
+      const { deleteOpsCluster } = await import("./controllers/ops-clusters.ts");
+      await deleteOpsCluster(state as any, id);
+      await reloadOpsClusterViews(state);
+    },
+  };
 }
 
 function resolveAssistantAvatarUrl(state: AppViewState): string | undefined {
@@ -964,7 +1038,15 @@ export function renderApp(state: AppViewState) {
               <button
                 class="top-tab topbar__no-drag ${active ? "top-tab--active" : ""} ${tourHighlight}"
                 data-tour-tab=${tab ?? ""}
-                @click=${() => state.setTab(tab!)}
+                @click=${() => {
+                  if (state.productTourActive) {
+                    state.productTourSkip();
+                  }
+                  if (tab === "overview") {
+                    void (state as any).loadOpsDashboard?.();
+                  }
+                  void state.setTab(tab!);
+                }}
                 type="button"
               >
                 ${iconEl}
@@ -988,36 +1070,51 @@ export function renderApp(state: AppViewState) {
             <div class="dropdown-menu-content">
                ${[
                  { tab: "automation", label: "自动化配置", adminOnly: true },
-                 { tab: "employeeMarket", label: "助手模板库", adminOnly: true },
-                 { tab: "digitalEmployee", label: "我的助手", adminOnly: true },
-                 { tab: "agentSwarm", label: "工作流编排", adminOnly: true },
-                 { tab: "employeeTasks", label: "执行记录", adminOnly: true },
-                 { tab: "employeeEffectiveness", label: "自动化效果", adminOnly: true },
-                 { tab: "channels", label: "通道配置", permission: "menu:channels" },
                  { tab: "scheduledTasks", label: "定时任务" },
                  { tab: "skillLibrary", label: "技能库" },
                  { tab: "toolLibrary", label: "工具库" },
                  { tab: "modelLibrary", label: "模型" },
                  { tab: "tutorials", label: "教程" },
-                 { tab: "config", label: "系统配置", permission: "menu:config" },
-                 { tab: "sandbox", label: "安全策略", permission: "menu:config" },
+                 {
+                   tab: "config",
+                   label: "系统配置",
+                   permissions: ["menu:config", "menu:channels"],
+                 },
                ].filter((item) => {
                  if (!state.rbacUser) return false;
                  if ((item as any).adminOnly) {
                    return state.rbacUser.roleName === "admin";
                  }
-                 const permission = (item as any).permission;
+                 const permissions = (item as any).permissions as string[] | undefined;
+                 const permission = (item as any).permission as string | undefined;
+                 if (permissions && state.rbacUser.roleName !== "admin") {
+                   return permissions.some((key) => state.rbacUser.permissions.includes(key));
+                 }
                  if (permission && state.rbacUser.roleName !== "admin") {
                    return state.rbacUser.permissions.includes(permission);
                  }
                  return true;
                }).map(item => {
                  const active =
+                   (item.tab === "automation" && isDigitalEmployeeArea) ||
+                   (item.tab === "config" && isConfigArea) ||
                    state.tab === item.tab ||
                    (item.tab === "scheduledTasks" && isScheduledTasks);
                  const iconName = iconForTab(item.tab as Tab, active);
                  return html`
-                   <button class="dropdown-item ${active ? 'active' : ''}" @click=${() => state.setTab(item.tab as Tab)}>
+                   <button
+                     class="dropdown-item ${active ? 'active' : ''}"
+                     @click=${() => {
+                       if (item.tab === "config" && state.rbacUser?.roleName !== "admin") {
+                         const perms = state.rbacUser.permissions ?? [];
+                         if (!perms.includes("menu:config") && perms.includes("menu:channels")) {
+                           void state.setTab("channels");
+                           return;
+                         }
+                       }
+                       void state.setTab(item.tab as Tab);
+                     }}
+                   >
                      <span class="dropdown-icon">${icons[iconName]}</span>
                      <span>${item.label}</span>
                    </button>
@@ -1367,7 +1464,6 @@ export function renderApp(state: AppViewState) {
                           <span class="nav-label__text">控制</span>
                         </button>
                         <div class="nav-group__items">
-                          ${renderTab(state, "overview")}
                           ${renderTab(state, "channels")}
                           ${renderTab(state, "sessions")}
                           ${renderTab(state, "usage")}
@@ -1563,7 +1659,16 @@ export function renderApp(state: AppViewState) {
 
         ${
           state.tab === "overview"
-            ? renderOverview({
+            ? (() => {
+                if (
+                  state.rbacUser &&
+                  !state.opsDashboardLoading &&
+                  !state.opsDashboardSummary &&
+                  !state.opsDashboardError
+                ) {
+                  void (state as any).loadOpsDashboard?.();
+                }
+                return renderOverview({
                 connected: state.connected,
                 loading: state.opsDashboardLoading,
                 dashboardSummary: state.opsDashboardSummary,
@@ -1588,14 +1693,20 @@ export function renderApp(state: AppViewState) {
                 onOpenDomainAlerts: (domain) => state.openDomainAlertsFromDashboard(domain),
                 onReloadFeed: () => state.loadOpsDashboardFeed(),
                 canInspect: canRunInspection(state.rbacUser),
-              })
+              });
+              })()
             : nothing
         }
 
         ${
           state.tab === "domainInsight"
             ? (() => {
-                const domain = normalizeOpsDomain(state.settings.opsDomain);
+                const rawDomain = normalizeOpsDomain(state.settings.opsDomain);
+                if (rawDomain === "all") {
+                  void state.setTab("overview");
+                  return nothing;
+                }
+                const domain = rawDomain;
                 if (
                   domain === "hadoop" &&
                   !state.opsBchScenarioSummary &&
@@ -1634,9 +1745,9 @@ export function renderApp(state: AppViewState) {
                   state.cronRunsJobId === inspectionJobId
                     ? mapCronRunsToWorkbenchInspections(domain, state.cronRuns)
                     : [];
-                
+
                 const alertGroups = state.opsAlertsByDomain?.[domain] ?? [];
-                
+
                 return renderDomainInsight({
                   domain,
                   connected: state.connected,
@@ -1667,39 +1778,6 @@ export function renderApp(state: AppViewState) {
                       setGlobalOpsDomain(normalizeOpsDomain(domainContext));
                     }
                     state.setTab(tab as any);
-                  },
-                  onRunInspection: () => {
-                    void import("./controllers/ops-inspection-run.ts").then(({ runDomainInspectionWithPoll }) => {
-                      return runDomainInspectionWithPoll(state as any, inspectionJobId, domain)
-                        .then(() => loadCronRuns(state as any, inspectionJobId))
-                        .then(() => nativeAlert("巡检已完成，请在报告中查看结果。"))
-                        .catch((err) => {
-                          console.error("Failed to run domain-insight inspection:", err);
-                          void nativeAlert(err instanceof Error ? err.message : String(err));
-                        });
-                    });
-                  },
-                  isInspecting: state.opsIsInspecting[domain] || false,
-                  canInspect: canRunInspection(state.rbacUser),
-                  onAnalyzeScenario: async ({ scenario, capability, initialQuestion, summary }) => {
-                    const sessionKey = `agent:main:ops:${domain}`;
-                    state.applySettings({
-                      ...state.settings,
-                      sessionKey,
-                      lastActiveSessionKey: sessionKey,
-                    });
-                    state.setTab("message");
-                    state.chatMessage = initialQuestion;
-                    await loadChatHistory(state);
-                    await sendChatMessage(state, initialQuestion, [], state.chatModelRef ?? null, {
-                      context: buildUnifiedAiContext({
-                        domain,
-                        scenario,
-                        capability,
-                        summary,
-                      }),
-                    });
-                    state.chatMessage = "";
                   },
                 });
               })()
@@ -2238,7 +2316,6 @@ export function renderApp(state: AppViewState) {
                 activeAssetView:
                   state.opsSelectedEntityIds?.assetsView === "services" ||
                   state.opsSelectedEntityIds?.assetsView === "components" ||
-                  state.opsSelectedEntityIds?.assetsView === "jobs" ||
                   state.opsSelectedEntityIds?.assetsView === "topology"
                     ? state.opsSelectedEntityIds.assetsView
                     : "clusters",
@@ -2276,53 +2353,7 @@ export function renderApp(state: AppViewState) {
                     ? () => (state as any).syncOpsClustersFromCMDB()
                     : undefined,
                 onOpenSettings: () => state.setTab("config"),
-                onAddCluster: async (payload) => {
-                  const { createOpsCluster } = await import("./controllers/ops-clusters.ts");
-                  await createOpsCluster(state as any, {
-                    name: payload.name,
-                    domain: payload.domain,
-                    region: payload.region,
-                    nodeCount: payload.nodeCount,
-                    components: payload.components
-                      .split(",")
-                      .map((s) => s.trim())
-                      .filter(Boolean),
-                    owner: payload.owner,
-                    status: payload.status,
-                    monitorLabels: payload.monitorLabels,
-                    vmUrlRef: payload.vmUrlRef,
-                    metricsBaseUrl: payload.metricsBaseUrl,
-                    jmxUrl: payload.jmxUrl,
-                    fiManagerUrl: payload.fiManagerUrl,
-                    gbaseDsnRef: payload.gbaseDsnRef,
-                    credentialsRef: payload.credentialsRef,
-                  });
-                  await (state as any).loadOpsClusters();
-                  await (state as any).loadOpsDashboard();
-                },
-                onAnalyzeAsset: async ({ domain, assetRef, type, summary }) => {
-                  const sessionKey = `agent:main:ops:${domain}`;
-                  state.applySettings({
-                    ...state.settings,
-                    sessionKey,
-                    lastActiveSessionKey: sessionKey,
-                  });
-                  state.setTab("message");
-                  const initialQuestion = `请分析${type === "cluster" ? "集群" : type === "service" ? "服务" : type === "component" ? "组件" : "作业"}资产：${assetRef}。`;
-                  state.chatMessage = initialQuestion;
-                  await loadChatHistory(state);
-                  await sendChatMessage(state, initialQuestion, [], state.chatModelRef ?? null, {
-                    context: buildUnifiedAiContext({
-                      domain,
-                      capability: "observability-alert",
-                      scenario: "diagnosis",
-                      objectRef: `${type}:${assetRef}`,
-                      assetRef,
-                      summary,
-                    }),
-                  });
-                  state.chatMessage = "";
-                },
+                ...buildAssetClusterHandlers(state),
               })
             : nothing
         }
@@ -4978,30 +5009,7 @@ export function renderApp(state: AppViewState) {
                     ? () => (state as any).syncOpsClustersFromCMDB()
                     : undefined,
                 onOpenSettings: () => state.setTab("config"),
-                onAddCluster: async (payload) => {
-                  const { createOpsCluster } = await import("./controllers/ops-clusters.ts");
-                  await createOpsCluster(state as any, {
-                    name: payload.name,
-                    domain: payload.domain,
-                    region: payload.region,
-                    nodeCount: payload.nodeCount,
-                    components: payload.components
-                      .split(",")
-                      .map((s) => s.trim())
-                      .filter(Boolean),
-                    owner: payload.owner,
-                    status: payload.status,
-                    monitorLabels: payload.monitorLabels,
-                    vmUrlRef: payload.vmUrlRef,
-                    metricsBaseUrl: payload.metricsBaseUrl,
-                    jmxUrl: payload.jmxUrl,
-                    fiManagerUrl: payload.fiManagerUrl,
-                    gbaseDsnRef: payload.gbaseDsnRef,
-                    credentialsRef: payload.credentialsRef,
-                  });
-                  await (state as any).loadOpsClusters();
-                  await (state as any).loadOpsDashboard();
-                },
+                ...buildAssetClusterHandlers(state),
               })
             : state.tab === "envVars"
             ? renderEnvVars({

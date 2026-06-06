@@ -1,6 +1,7 @@
-import { html } from "lit";
+import { html, nothing } from "lit";
 import { icons } from "../icons.ts";
 import type { IconName } from "../icons.ts";
+import { opsDomainIcon } from "./domain-filter.ts";
 
 export type AssetsDomainSidebarItem = {
   key: string;
@@ -12,7 +13,9 @@ export type AssetsViewSidebarItem<T extends string = string> = {
   id: T;
   label: string;
   icon: IconName;
-  count: number;
+  count?: number;
+  /** 弱化展示：靠后、次要样式 */
+  muted?: boolean;
 };
 
 export type AssetsContextSidebarProps<T extends string = string> = {
@@ -28,67 +31,81 @@ export type AssetsContextSidebarProps<T extends string = string> = {
   onStatusFilterChange?: (status: string) => void;
 };
 
+function renderNavItem(params: {
+  isActive: boolean;
+  icon: IconName;
+  label: string;
+  count?: number;
+  muted?: boolean;
+  onClick: () => void;
+}) {
+  const { isActive, icon, label, count, muted, onClick } = params;
+  return html`
+    <button
+      type="button"
+      class="ops-sidebar-nav-item ${isActive ? "ops-sidebar-nav-item--active" : ""} ${muted ? "ops-sidebar-nav-item--muted" : ""}"
+      title=${label}
+      @click=${onClick}
+    >
+      <span class="ops-nav-icon" aria-hidden="true">${icons[icon] ?? icons.folder}</span>
+      <span class="ops-sidebar-nav-item__label">${label}</span>
+      ${count != null
+        ? html`<span class="ops-sidebar-nav-item__badge">${count}</span>`
+        : nothing}
+    </button>
+  `;
+}
+
 export function renderAssetsContextSidebar<T extends string>(props: AssetsContextSidebarProps<T>) {
   return html`
-    <aside
-      class="ops-sidebar-container assets-context-sidebar"
-      style="width: 240px; background: var(--bg-surface, #fff); border-right: 1px solid var(--border-color, #eee); height: 100%; display: flex; flex-direction: column; flex-shrink: 0; box-sizing: border-box; padding: 12px 10px; gap: 16px;"
-    >
-      <div>
-        <div style="font-size: 11px; color: var(--text-muted, #777); font-weight: bold; text-transform: uppercase; margin-bottom: 6px; letter-spacing: 0.5px;">运维技术域</div>
-        <div style="display: flex; flex-direction: column; gap: 2px;">
-          ${props.domains.map((item) => {
-            const isActive = props.selectedDomain === item.key;
-            return html`
-              <button
-                type="button"
-                style="display: flex; justify-content: space-between; align-items: center; border: none; padding: 6px 10px; border-radius: 4px; font-size: 12px; font-weight: ${isActive ? "600" : "500"}; background: ${isActive ? "var(--bg-active, rgba(33,150,243,0.08))" : "transparent"}; color: ${isActive ? "var(--primary-color, #2196f3)" : "var(--text-color, #333)"}; cursor: pointer; text-align: left; transition: all 0.15s ease;"
-                @click=${() => props.onDomainChange?.(item.key)}
-              >
-                <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; margin-right: 8px;">${item.label}</span>
-                <span style="font-size: 10px; background: rgba(0,0,0,0.04); padding: 1px 5px; border-radius: 8px; color: #666; font-weight: 500;">${item.count}</span>
-              </button>
-            `;
-          })}
-        </div>
+    <aside class="ops-sidebar-container assets-context-sidebar">
+      <div class="ops-sidebar-section">
+        <div class="ops-sidebar-section__label">运维技术域</div>
+        <nav class="ops-sidebar-nav">
+          ${props.domains.map((item) =>
+            renderNavItem({
+              isActive: props.selectedDomain === item.key,
+              icon: opsDomainIcon(item.key),
+              label: item.label,
+              count: item.count,
+              onClick: () => props.onDomainChange?.(item.key),
+            }),
+          )}
+        </nav>
       </div>
 
-      <div>
-        <div style="font-size: 11px; color: var(--text-muted, #777); font-weight: bold; text-transform: uppercase; margin-bottom: 6px; letter-spacing: 0.5px;">资产分类</div>
-        <div style="display: flex; flex-direction: column; gap: 2px;">
-          ${props.views.map((item) => {
-            const isActive = props.activeView === item.id;
-            return html`
-              <button
-                type="button"
-                style="display: flex; align-items: center; border: none; padding: 6px 10px; border-radius: 4px; font-size: 12px; font-weight: ${isActive ? "600" : "500"}; background: ${isActive ? "var(--bg-active, rgba(33,150,243,0.08))" : "transparent"}; color: ${isActive ? "var(--primary-color, #2196f3)" : "var(--text-color, #333)"}; cursor: pointer; text-align: left; transition: all 0.15s ease;"
-                @click=${() => props.onViewChange?.(item.id)}
-              >
-                <span style="margin-right: 8px; display: flex; opacity: 0.7; font-size: 14px;">${icons[item.icon] ?? icons.folder}</span>
-                <span style="flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${item.label}</span>
-                <span style="font-size: 10px; opacity: 0.6; font-weight: bold;">${item.count}</span>
-              </button>
-            `;
-          })}
-        </div>
+      <div class="ops-sidebar-section">
+        <div class="ops-sidebar-section__label">资产分类</div>
+        <nav class="ops-sidebar-nav">
+          ${props.views.map((item) =>
+            renderNavItem({
+              isActive: props.activeView === item.id,
+              icon: item.icon,
+              label: item.label,
+              count: item.count,
+              muted: item.muted,
+              onClick: () => props.onViewChange?.(item.id),
+            }),
+          )}
+        </nav>
       </div>
 
-      <div style="margin-top: auto; display: flex; flex-direction: column; gap: 10px; border-top: 1px solid var(--border-color, #eee); padding-top: 12px;">
+      <div class="ops-sidebar-filters">
         <div>
-          <div style="font-size: 11px; color: var(--text-muted, #777); font-weight: bold; text-transform: uppercase; margin-bottom: 4px;">搜索过滤</div>
+          <div class="ops-sidebar-section__label">搜索过滤</div>
           <input
             type="text"
+            class="ops-sidebar-filter-input"
             placeholder="搜名称 / 负责人 / 组件..."
-            style="width: 100%; padding: 6px 8px; font-size: 12px; border: 1px solid var(--border-color, #ccc); border-radius: 4px; background: var(--bg-surface, #fff); box-sizing: border-box;"
             .value=${props.searchQuery}
             @input=${(e: Event) => props.onSearchChange?.((e.target as HTMLInputElement).value)}
           />
         </div>
 
         <div>
-          <div style="font-size: 11px; color: var(--text-muted, #777); font-weight: bold; text-transform: uppercase; margin-bottom: 4px;">资产运行状态</div>
+          <div class="ops-sidebar-section__label">资产运行状态</div>
           <select
-            style="width: 100%; padding: 6px; font-size: 12px; border: 1px solid var(--border-color, #ccc); border-radius: 4px; background: var(--bg-surface, #fff); cursor: pointer;"
+            class="ops-sidebar-filter-select"
             .value=${props.statusFilter}
             @change=${(e: Event) => props.onStatusFilterChange?.((e.target as HTMLSelectElement).value)}
           >

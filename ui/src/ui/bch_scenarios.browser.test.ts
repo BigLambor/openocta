@@ -157,7 +157,7 @@ describe("BCH ecosystem ops scenarios tests", () => {
     await app.updateComplete;
 
     // Verify subtabs exist in domain view
-    const subtabs = Array.from(app.querySelectorAll(".ops-sidebar__menu-item")) as HTMLButtonElement[];
+    const subtabs = Array.from(app.querySelectorAll(".ops-sidebar .ops-sidebar-nav-item")) as HTMLButtonElement[];
     expect(subtabs.length).toBeGreaterThan(0);
 
     // 1. Overview Tab

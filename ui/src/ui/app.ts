@@ -829,6 +829,10 @@ export class OpenClawApp extends LitElement implements NativeDialogInvoker {
     // Verify authentication state
     await this.checkRbacSession();
 
+    if (this.rbacUser && (this.tab === "overview" || this.tab === "domainInsight")) {
+      void this.loadOpsDashboard();
+    }
+
     // If session is valid, establish WebSocket and start polling
     if (this.rbacUser) {
       connectGatewayInternal(this as any);
@@ -1627,6 +1631,9 @@ export class OpenClawApp extends LitElement implements NativeDialogInvoker {
         // Trigger connect and polling
         connectGatewayInternal(this as any);
         startNodesPollingInternal(this as any);
+        if (this.tab === "overview" || this.tab === "domainInsight") {
+          void this.loadOpsDashboard();
+        }
         if (this.tab === "logs") startLogsPollingInternal(this as any);
         if (this.tab === "debug") startDebugPollingInternal(this as any);
       } else {

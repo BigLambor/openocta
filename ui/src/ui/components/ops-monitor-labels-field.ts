@@ -10,10 +10,28 @@ import {
 export class OpsMonitorLabelsField extends LitElement {
   @property({ type: String }) domain = "hadoop";
   @property({ type: String }) status = "unknown";
+  @property({ type: String }) initialLabels = "";
 
   @state() private value = "";
   @state() private touched = false;
   @state() private error: string | null = null;
+
+  connectedCallback() {
+    super.connectedCallback();
+    this.syncInitialLabels();
+  }
+
+  updated(changed: Map<string, unknown>) {
+    if (changed.has("initialLabels")) {
+      this.syncInitialLabels();
+    }
+  }
+
+  private syncInitialLabels() {
+    this.value = this.initialLabels ?? "";
+    this.touched = false;
+    this.error = null;
+  }
 
   get inputValue(): string {
     const result = validateMonitorLabelsForCluster(this.domain, this.status, this.value);

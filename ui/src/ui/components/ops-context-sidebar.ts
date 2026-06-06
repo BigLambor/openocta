@@ -66,10 +66,7 @@ export function renderOpsContextSidebar<T extends string>(props: OpsContextSideb
   };
 
   return html`
-    <aside
-      class="ops-sidebar-container ${isCollapsed ? "ops-sidebar--collapsed" : ""}"
-      style="display: flex; flex-direction: column; width: ${isCollapsed ? "56px" : "240px"}; background: var(--bg-surface, #fff); border-right: 1px solid var(--border-color, #eee); height: 100%; transition: width 0.2s cubic-bezier(0.4, 0, 0.2, 1); box-sizing: border-box; flex-shrink: 0;"
-    >
+    <aside class="ops-sidebar-container ${isCollapsed ? "ops-sidebar--collapsed" : ""}">
       <!-- Domain Dropdown / Selector -->
       <div style="padding: 12px; border-bottom: 1px solid var(--border-color, #eee);">
         ${isCollapsed
@@ -144,31 +141,22 @@ export function renderOpsContextSidebar<T extends string>(props: OpsContextSideb
         : nothing}
 
       <!-- Sidebar Nav Items -->
-      <nav style="flex: 1; overflow-y: auto; padding: 12px 6px; display: flex; flex-direction: column; gap: 4px;">
+      <nav class="ops-sidebar-nav" style="flex: 1; overflow-y: auto; padding: 12px 6px;">
         ${props.items.map((item) => {
           const isActive = props.activeItemId === item.id;
           return html`
             <button
               type="button"
-              class="ops-sidebar-item ${isActive ? "ops-sidebar-item--active" : ""}"
-              style="display: flex; align-items: center; width: 100%; border: none; padding: 8px 10px; border-radius: 4px; cursor: pointer; text-align: left; transition: all 0.15s ease; font-size: 13px; font-weight: ${isActive ? "600" : "500"}; background: ${isActive ? "var(--bg-active, rgba(33,150,243,0.08))" : "transparent"}; color: ${isActive ? "var(--primary-color, #2196f3)" : "var(--text-color, #333)"};"
+              class="ops-sidebar-nav-item ${isActive ? "ops-sidebar-nav-item--active" : ""}"
               title=${item.label}
               @click=${() => props.onItemChange?.(item.id)}
             >
-              <span style="display: flex; align-items: center; justify-content: center; width: 20px; margin-right: ${isCollapsed ? "0" : "10px"}; opacity: ${isActive ? 1 : 0.7}; flex-shrink: 0;">
-                ${icons[item.icon] ?? icons.folder}
-              </span>
+              <span class="ops-nav-icon" aria-hidden="true">${icons[item.icon] ?? icons.folder}</span>
               ${!isCollapsed
                 ? html`
-                    <span style="flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${item.label}</span>
+                    <span class="ops-sidebar-nav-item__label">${item.label}</span>
                     ${item.badge != null && item.badge !== 0
-                      ? html`
-                          <span
-                            style="font-size: 10px; font-weight: bold; padding: 2px 6px; border-radius: 10px; background: ${isActive ? "var(--primary-color, #2196f3)" : "var(--border-color, #ccc)"}; color: #fff; margin-left: 6px;"
-                          >
-                            ${item.badge}
-                          </span>
-                        `
+                      ? html`<span class="ops-sidebar-nav-item__badge">${item.badge}</span>`
                       : nothing}
                   `
                 : nothing}

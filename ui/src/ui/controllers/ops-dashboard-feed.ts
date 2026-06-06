@@ -9,7 +9,7 @@ import {
 } from "./ops-alerts.ts";
 import { GLOBAL_INSPECT_JOB_IDS } from "./ops-dashboard.ts";
 
-export const DOMAIN_TABLE_THRESHOLD = 6;
+export const DOMAIN_TABLE_THRESHOLD = 3;
 export const ALERT_FETCH_CONCURRENCY = 2;
 export const ALERTS_PER_DOMAIN = 2;
 export const MAX_ALERT_HIGHLIGHTS = 6;

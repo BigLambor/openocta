@@ -301,10 +301,14 @@ function domainStatusLabel(d: OverviewDomainCard): string {
   return "运行平稳";
 }
 
-function partitionDomains(domains: OverviewDomainCard[]): {
+function partitionDomains(
+  domains: OverviewDomainCard[],
+  pendingByDomain?: Record<string, number>,
+): {
   managed: OverviewDomainCard[];
   unmanaged: OverviewDomainCard[];
   attention: OverviewDomainCard[];
+  stable: OverviewDomainCard[];
 } {
   const managed = domains.filter((d) => (d.clusterCount ?? 0) > 0);
   const unmanaged = domains.filter((d) => (d.clusterCount ?? 0) === 0);
@@ -322,16 +326,20 @@ function partitionDomains(domains: OverviewDomainCard[]): {
     return a.name.localeCompare(b.name, "zh-CN");
   });
   const attention = managed.filter((d) => {
+    const pending = pendingAlertsForDomain(d, pendingByDomain);
     const { value } = effectiveDomainScore(d);
     return (
+      pending > 0 ||
       (d.warningCount ?? 0) > 0 ||
       (d.criticalCount ?? 0) > 0 ||
       d.scoreStatus === "degraded" ||
       d.scoreStatus === "partial" ||
-      (value != null && value < 85)
+      (value != null && value < 90)
     );
   });
-  return { managed, unmanaged, attention };
+  const attentionTabs = new Set(attention.map((d) => d.tab));
+  const stable = managed.filter((d) => !attentionTabs.has(d.tab));
+  return { managed, unmanaged, attention, stable };
 }
 
 function pendingAlertsForDomain(d: OverviewDomainCard, pendingByDomain?: Record<string, number>): number {
@@ -536,90 +544,107 @@ function renderDomainCard(
   `;
 }
 
-function renderQuickLinks(props: OverviewProps) {
+function renderUnmanagedInline(domains: OverviewDomainCard[], props: OverviewProps) {
+  if (domains.length === 0) {
+    return nothing;
+  }
+  const names = domains.map((d) => d.name).join("、");
   return html`
-    <nav class="ops-dashboard-quicklinks" aria-label="快捷操作">
-      <button
-        type="button"
-        class="ops-dashboard-quicklink"
-        ?disabled=${!props.onOpenPendingAlerts}
-        title="跳转到业务域「告警降噪与影响评估」子页"
-        @click=${() => props.onOpenPendingAlerts?.()}
-      >
-        <span class="ops-dashboard-quicklink__icon">${icons.bell}</span>
-        <span class="ops-dashboard-quicklink__label">未处理告警</span>
-      </button>
-      <button
-        type="button"
-        class="ops-dashboard-quicklink"
-        ?disabled=${!props.onOpenScheduledTasks}
-        @click=${() => props.onOpenScheduledTasks?.()}
-      >
-        <span class="ops-dashboard-quicklink__icon">${icons.historyClock}</span>
-        <span class="ops-dashboard-quicklink__label">定时任务</span>
-      </button>
-      <button
-        type="button"
-        class="ops-dashboard-quicklink"
-        @click=${() => props.onOpenConfig?.()}
-      >
-        <span class="ops-dashboard-quicklink__icon">${icons.monitor}</span>
-        <span class="ops-dashboard-quicklink__label">系统配置</span>
-      </button>
-      <button
-        type="button"
-        class="ops-dashboard-quicklink"
-        title="顶部导航「服务与资产」中的集群登记与管理"
-        @click=${() => props.onOpenAssets?.()}
-      >
-        <span class="ops-dashboard-quicklink__icon">${icons.server}</span>
-        <span class="ops-dashboard-quicklink__label">集群资产管理</span>
-      </button>
-    </nav>
+    <div class="domain-pending-inline">
+      <span class="domain-pending-inline__text">
+        待接入 ${domains.length} 个域：${names}
+      </span>
+      ${props.onOpenAssets
+        ? html`
+            <button type="button" class="ops-btn ops-btn--ghost domain-pending-inline__action" @click=${props.onOpenAssets}>
+              去登记
+            </button>
+          `
+        : nothing}
+    </div>
   `;
 }
 
-function renderAttentionPanel(
-  attention: OverviewDomainCard[],
-  stats: OverviewStats | null,
-  props: OverviewProps,
-) {
+function renderRecentActivityFeed(props: OverviewProps, stats: OverviewStats | null) {
+  const highlights = props.alertHighlights ?? [];
+  const runs = props.recentInspections ?? [];
+  const loading = props.feedLoading && highlights.length === 0 && runs.length === 0;
   const pending = stats?.pendingAlerts ?? 0;
+
   return html`
-    <section class="ops-dashboard-panel">
+    <section class="ops-dashboard-panel ops-dashboard-panel--feed">
       <h2 class="section-title">
-        <span class="section-title__icon">${icons.alertTriangle}</span>
-        需关注
+        <span class="section-title__icon">${icons.historyClock}</span>
+        最近动态
       </h2>
       <div class="ops-panel ops-dashboard-panel__body">
-        ${attention.length > 0
+        ${props.feedError
           ? html`
-              <ul class="ops-attention-list">
-                ${attention.map(
-                  (d) => html`
-                    <li class="ops-attention-item">
-                      <button
-                        type="button"
-                        class="ops-attention-item__btn"
-                        @click=${() => props.onNavigateDomain?.(d.tab)}
-                      >
-                        <span class="ops-attention-item__name">${d.name}</span>
-                        <span class="ops-attention-item__meta">
-                          ${d.score != null ? `${d.score}分` : "—"} · ${domainStatusLabel(d)}
-                        </span>
-                      </button>
-                    </li>
-                  `,
-                )}
-              </ul>
+              <p class="ops-dashboard-panel__empty">${props.feedError}</p>
+              ${props.onReloadFeed
+                ? html`
+                    <button type="button" class="ops-btn ops-dashboard-panel__action" @click=${props.onReloadFeed}>
+                      重新加载
+                    </button>
+                  `
+                : nothing}
             `
-          : html`
-              <p class="ops-dashboard-panel__empty">
-                ${pending > 0
-                  ? `当前有 ${pending} 组待处理告警，建议优先查看。`
-                  : "各业务域运行平稳，暂无需要优先处理的事项。"}
-              </p>
-            `}
+          : loading
+            ? renderOpsSkeleton({ lines: 4 })
+            : highlights.length === 0 && runs.length === 0
+              ? html`
+                  <p class="ops-dashboard-panel__empty">
+                    ${pending > 0
+                      ? `当前有 ${pending} 组待处理告警，建议优先查看。`
+                      : "各业务域运行平稳，暂无新的告警或巡检动态。"}
+                  </p>
+                `
+              : html`
+                  <ul class="ops-feed-list">
+                    ${highlights.slice(0, 3).map(
+                      (item) => html`
+                        <li class="ops-feed-item">
+                          <button
+                            type="button"
+                            class="ops-feed-item__btn"
+                            @click=${() => props.onOpenDomainAlerts?.(item.domain)}
+                          >
+                            <span class="ops-feed-item__head">
+                              <span class="ops-feed-item__type">告警</span>
+                              <span class="ops-feed-severity ops-feed-severity--${item.severity}">
+                                ${item.severity === "critical" ? "严重" : item.severity === "warning" ? "警告" : "信息"}
+                              </span>
+                              <span class="ops-feed-item__domain">${item.domainLabel}</span>
+                              <span class="ops-feed-item__time">${item.timestamp}</span>
+                            </span>
+                            <span class="ops-feed-item__title">${item.title}</span>
+                          </button>
+                        </li>
+                      `,
+                    )}
+                    ${runs.slice(0, 2).map(
+                      (run) => html`
+                        <li class="ops-feed-item">
+                          <button
+                            type="button"
+                            class="ops-feed-item__btn"
+                            @click=${() => props.onOpenScheduledTasks?.()}
+                          >
+                            <span class="ops-feed-item__head">
+                              <span class="ops-feed-item__type">巡检</span>
+                              <span class="ops-feed-item__domain">${run.domainLabel}</span>
+                              <span class="ops-feed-item__score ops-feed-item__score--${run.status}">
+                                ${run.score != null ? `${run.score}分` : inspectionStatusLabel(run.status)}
+                              </span>
+                              <span class="ops-feed-item__time">${run.time}</span>
+                            </span>
+                            <span class="ops-feed-item__title">${run.summary}</span>
+                          </button>
+                        </li>
+                      `,
+                    )}
+                  </ul>
+                `}
         ${pending > 0 && props.onOpenPendingAlerts
           ? html`
               <button
@@ -651,171 +676,6 @@ function inspectionStatusLabel(status: DashboardInspectionRun["status"]): string
   }
 }
 
-function renderAlertSummaryPanel(props: OverviewProps) {
-  const highlights = props.alertHighlights ?? [];
-  const loading = props.feedLoading && highlights.length === 0;
-  return html`
-    <section class="ops-dashboard-panel">
-      <h2 class="section-title">
-        <span class="section-title__icon">${icons.bell}</span>
-        告警摘要
-      </h2>
-      <div class="ops-panel ops-dashboard-panel__body">
-        ${props.feedError
-          ? html`
-              <p class="ops-dashboard-panel__empty">${props.feedError}</p>
-              ${props.onReloadFeed
-                ? html`
-                    <button type="button" class="ops-btn ops-dashboard-panel__action" @click=${props.onReloadFeed}>
-                      重新加载
-                    </button>
-                  `
-                : nothing}
-            `
-          : loading
-            ? renderOpsSkeleton({ lines: 3 })
-            : highlights.length > 0
-              ? html`
-                  <ul class="ops-feed-list">
-                    ${highlights.map(
-                      (item) => html`
-                        <li class="ops-feed-item">
-                          <button
-                            type="button"
-                            class="ops-feed-item__btn"
-                            @click=${() => props.onOpenDomainAlerts?.(item.domain)}
-                          >
-                            <span class="ops-feed-item__head">
-                              <span class="ops-feed-severity ops-feed-severity--${item.severity}">
-                                ${item.severity === "critical" ? "严重" : item.severity === "warning" ? "警告" : "信息"}
-                              </span>
-                              <span class="ops-feed-item__domain">${item.domainLabel}</span>
-                              <span class="ops-feed-item__time">${item.timestamp}</span>
-                            </span>
-                            <span class="ops-feed-item__title">${item.title}</span>
-                          </button>
-                        </li>
-                      `,
-                    )}
-                  </ul>
-                `
-              : html`
-                  <p class="ops-dashboard-panel__empty">各业务域暂无待处理告警组。</p>
-                `}
-        ${!loading && highlights.length > 0 && props.onOpenPendingAlerts
-          ? html`
-              <button
-                type="button"
-                class="ops-btn ops-dashboard-panel__action"
-                @click=${() => props.onOpenPendingAlerts?.()}
-              >
-                查看全部告警
-              </button>
-            `
-          : nothing}
-      </div>
-    </section>
-  `;
-}
-
-function renderRecentInspectionsPanel(props: OverviewProps) {
-  const runs = props.recentInspections ?? [];
-  const loading = props.feedLoading && runs.length === 0;
-  return html`
-    <section class="ops-dashboard-panel">
-      <h2 class="section-title">
-        <span class="section-title__icon">${icons.historyClock}</span>
-        最近巡检
-      </h2>
-      <div class="ops-panel ops-dashboard-panel__body">
-        ${props.feedError && runs.length === 0
-          ? html`<p class="ops-dashboard-panel__empty">暂无巡检记录</p>`
-          : loading
-            ? renderOpsSkeleton({ lines: 3 })
-            : runs.length > 0
-              ? html`
-                  <ul class="ops-feed-list">
-                    ${runs.map(
-                      (run) => html`
-                        <li class="ops-feed-item">
-                          <button
-                            type="button"
-                            class="ops-feed-item__btn"
-                            @click=${() => props.onOpenScheduledTasks?.()}
-                          >
-                            <span class="ops-feed-item__head">
-                              <span class="ops-feed-item__domain">${run.domainLabel}</span>
-                              <span class="ops-feed-item__score ops-feed-item__score--${run.status}">
-                                ${run.score != null ? `${run.score}分` : inspectionStatusLabel(run.status)}
-                              </span>
-                              <span class="ops-feed-item__time">${run.time}</span>
-                            </span>
-                            <span class="ops-feed-item__title">${run.summary}</span>
-                          </button>
-                        </li>
-                      `,
-                    )}
-                  </ul>
-                `
-              : html`
-                  <p class="ops-dashboard-panel__empty">
-                    尚未有全局巡检记录。点击页头「启动全局深度巡检」后将在此展示最近结果。
-                  </p>
-                `}
-        ${runs.length > 0 && props.onOpenScheduledTasks
-          ? html`
-              <button
-                type="button"
-                class="ops-btn ops-dashboard-panel__action"
-                @click=${() => props.onOpenScheduledTasks?.()}
-              >
-                查看定时任务与历史
-              </button>
-            `
-          : nothing}
-      </div>
-    </section>
-  `;
-}
-
-function renderOpsSnapshot(summary: OpsDashboardSummary | null | undefined, stats: OverviewStats | null) {
-  const vmConfigured = summary?.vmConfigured ?? false;
-  const criticalClusters = summary?.criticalClusters ?? 0;
-  return html`
-    <section class="ops-dashboard-panel">
-      <h2 class="section-title">
-        <span class="section-title__icon">${icons.barChart}</span>
-        运营概览
-      </h2>
-      <div class="ops-panel ops-dashboard-panel__body">
-        <dl class="ops-snapshot-list">
-          <div class="ops-snapshot-row">
-            <dt>监控接入</dt>
-            <dd class=${vmConfigured ? "ops-snapshot-row--ok" : "ops-snapshot-row--warn"}>
-              ${vmConfigured ? "VictoriaMetrics 已配置" : "未配置 VictoriaMetrics"}
-            </dd>
-          </div>
-          <div class="ops-snapshot-row">
-            <dt>集群健康分布</dt>
-            <dd>
-              ${stats
-                ? `${stats.healthyClusters} 健康 / ${stats.warningClusters} 亚健康${criticalClusters > 0 ? ` / ${criticalClusters} 严重` : ""}`
-                : "—"}
-            </dd>
-          </div>
-          <div class="ops-snapshot-row">
-            <dt>业务域覆盖</dt>
-            <dd>
-              ${summary?.domains.filter((d) => d.clusterCount > 0).length ?? 0} /
-              ${summary?.domains.length ?? DOMAIN_PLACEHOLDERS.length} 已纳管
-            </dd>
-          </div>
-        </dl>
-      </div>
-    </section>
-  `;
-}
-
 export function renderOverview(props: OverviewProps) {
   const fromApi = props.dashboardSummary ? summaryToCards(props.dashboardSummary) : null;
   const stats = fromApi?.stats ?? props.stats ?? null;
@@ -824,9 +684,11 @@ export function renderOverview(props: OverviewProps) {
     fromApi?.domains ??
     (props.domains?.length ? props.domains : hasStats && stats && stats.totalClusters > 0 ? [] : null);
   const showEmptyMetrics = fromApi != null && stats != null && stats.totalClusters === 0;
-  const partitioned = domains ? partitionDomains(domains) : null;
-  const useDomainTable = (domains?.length ?? 0) > DOMAIN_TABLE_THRESHOLD;
   const pendingByDomain = props.domainPendingAlerts;
+  const partitioned = domains ? partitionDomains(domains, pendingByDomain) : null;
+  const useDomainTable = (partitioned?.managed.length ?? 0) >= DOMAIN_TABLE_THRESHOLD;
+  const awaitingData =
+    props.loading || (!props.dashboardSummary && !props.dashboardError);
 
   return html`
     <div class="ops-page ops-dashboard">
@@ -874,13 +736,13 @@ export function renderOverview(props: OverviewProps) {
           `
         : nothing}
 
-      ${props.loading
+      ${awaitingData
         ? html`
             <div class="ops-panel" style="margin-bottom: 24px;">${renderOpsSkeleton({ lines: 4 })}</div>
           `
         : nothing}
 
-      ${!hasStats && !props.loading && !showEmptyMetrics
+      ${!hasStats && !awaitingData && !showEmptyMetrics
         ? html`
             <div class="ops-panel ops-panel--empty">
               ${renderOpsEmpty({
@@ -943,7 +805,7 @@ export function renderOverview(props: OverviewProps) {
               `
             : nothing}
 
-      <div class="ops-dashboard-main">
+      <div class="ops-dashboard-main ops-dashboard-main--full">
         <section class="domain-status-section">
           <div class="domain-status-section__head">
             <h2 class="section-title">
@@ -953,34 +815,26 @@ export function renderOverview(props: OverviewProps) {
             ${domains !== null && domains.length > 0
               ? html`<span class="domain-status-section__hint">
                   ${partitioned && partitioned.managed.length > 0
-                    ? useDomainTable
-                      ? "按综合健康分排序（监控分优先，否则资产聚合分），点击行查看详情"
-                      : "按综合健康分排序（监控分优先，否则资产聚合分），点击卡片查看详情"
-                    : "以下业务域尚未纳管，点击「登记集群」前往资产管理"}
+                    ? "默认展示需关注的业务域，运行平稳的域可展开查看"
+                    : "以下业务域尚未纳管，请前往资产管理登记集群"}
                 </span>`
               : domains === null
                 ? html`<span class="domain-status-section__hint">完成资产登记与监控接入后，将在此展示各域健康分</span>`
                 : nothing}
           </div>
-          ${domains === null
+          ${awaitingData
+            ? html`
+                <div class="domain-subsection">
+                  <p class="domain-subsection__desc">正在加载业务域健康数据…</p>
+                </div>
+              `
+            : domains === null
             ? html`
                 <div class="domain-subsection domain-subsection--pending">
-                  <div class="domain-subsection__head">
-                    <h3 class="domain-subsection__title">待接入业务域</h3>
-                    ${props.onOpenAssets
-                      ? html`
-                          <button type="button" class="ops-btn ops-btn--primary" @click=${props.onOpenAssets}>
-                            前往集群资产管理
-                          </button>
-                        `
-                      : nothing}
-                  </div>
                   <p class="domain-subsection__desc">
                     在顶部导航 <strong>服务与资产</strong> 中登记集群，接入后即可在此查看健康分与告警概况。
                   </p>
-                  <div class="domain-grid domain-grid--unmanaged">
-                    ${DOMAIN_PLACEHOLDERS.map((d) => renderDomainCard(d, props, { placeholder: true }))}
-                  </div>
+                  ${renderUnmanagedInline(DOMAIN_PLACEHOLDERS, props)}
                 </div>
               `
             : domains.length === 0
@@ -998,66 +852,58 @@ export function renderOverview(props: OverviewProps) {
                   ${partitioned && partitioned.managed.length > 0
                     ? html`
                         <div class="domain-subsection">
-                          <h3 class="domain-subsection__title">
-                            已纳管业务域（${partitioned.managed.length}）
-                          </h3>
-                          ${useDomainTable
-                            ? renderDomainTable(partitioned.managed, props, pendingByDomain)
+                          ${partitioned.attention.length > 0
+                            ? html`
+                                <h3 class="domain-subsection__title">
+                                  需关注（${partitioned.attention.length}）
+                                </h3>
+                                ${useDomainTable
+                                  ? renderDomainTable(partitioned.attention, props, pendingByDomain)
+                                  : html`
+                                      <div class="domain-grid domain-grid--managed">
+                                        ${partitioned.attention.map((d) => renderDomainCard(d, props))}
+                                      </div>
+                                    `}
+                              `
                             : html`
-                                <div class="domain-grid domain-grid--managed">
-                                  ${partitioned.managed.map((d) => renderDomainCard(d, props))}
-                                </div>
+                                <p class="domain-subsection__desc domain-subsection__desc--ok">
+                                  各业务域运行平稳，暂无需要优先处理的事项。
+                                </p>
                               `}
+                          ${partitioned.stable.length > 0
+                            ? html`
+                                <details class="domain-collapse">
+                                  <summary class="domain-collapse__summary">
+                                    运行平稳（${partitioned.stable.length}）
+                                  </summary>
+                                  ${useDomainTable
+                                    ? renderDomainTable(partitioned.stable, props, pendingByDomain)
+                                    : html`
+                                        <div class="domain-grid domain-grid--managed">
+                                          ${partitioned.stable.map((d) => renderDomainCard(d, props))}
+                                        </div>
+                                      `}
+                                </details>
+                              `
+                            : nothing}
                         </div>
                       `
                     : nothing}
                   ${partitioned && partitioned.unmanaged.length > 0
-                    ? html`
-                        <div class="domain-subsection domain-subsection--pending">
-                          <div class="domain-subsection__head">
-                            <h3 class="domain-subsection__title">
-                              待接入业务域（${partitioned.unmanaged.length}）
-                            </h3>
-                            ${props.onOpenAssets
-                              ? html`
-                                  <button type="button" class="ops-btn" @click=${props.onOpenAssets}>
-                                    集群资产管理
-                                  </button>
-                                `
-                              : nothing}
-                          </div>
-                          <p class="domain-subsection__desc">
-                            点击域卡片或「登记集群」，在 <strong>服务与资产</strong> 中为该业务域添加集群。
-                          </p>
-                          <div class="domain-grid domain-grid--unmanaged">
-                            ${partitioned.unmanaged.map((d) => renderDomainCard(d, props))}
-                          </div>
-                        </div>
-                      `
+                    ? renderUnmanagedInline(partitioned.unmanaged, props)
                     : nothing}
                 `}
         </section>
-
-        <aside class="ops-dashboard-aside">
-          <h2 class="section-title">
-            <span class="section-title__icon">${icons.zap}</span>
-            快捷操作
-          </h2>
-          ${renderQuickLinks(props)}
-        </aside>
       </div>
 
       ${props.dashboardToast
         ? html`<div class="ops-dashboard-toast" role="status">${props.dashboardToast}</div>`
         : nothing}
 
-      ${hasStats && !props.loading
+      ${hasStats && !awaitingData
         ? html`
             <div class="ops-dashboard-bottom ops-dashboard-bottom--feed">
-              ${renderAttentionPanel(partitioned?.attention ?? [], stats, props)}
-              ${renderAlertSummaryPanel(props)}
-              ${renderRecentInspectionsPanel(props)}
-              ${renderOpsSnapshot(props.dashboardSummary, stats)}
+              ${renderRecentActivityFeed(props, stats)}
             </div>
           `
         : nothing}

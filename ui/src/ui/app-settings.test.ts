@@ -89,6 +89,24 @@ describe("syncUrlWithTab ops domain", () => {
     expect(window.location.pathname).toBe("/chat");
     expect(new URLSearchParams(window.location.search).has("domain")).toBe(false);
   });
+
+  it("uses concrete domain path for domain insight", () => {
+    const host = createHost("overview");
+    host.settings.opsDomain = "hadoop";
+
+    syncUrlWithTab(host, "domainInsight", true);
+
+    expect(window.location.pathname).toBe("/overview/domain/hadoop");
+  });
+
+  it("never writes /overview/domain/all to the URL", () => {
+    const host = createHost("overview");
+    host.settings.opsDomain = "all";
+
+    syncUrlWithTab(host, "domainInsight", true);
+
+    expect(window.location.pathname).toBe("/overview/domain/hadoop");
+  });
 });
 
 describe("setTabFromRoute", () => {
@@ -153,5 +171,24 @@ describe("setTabFromRoute", () => {
     setTabFromRoute(host, "logs");
 
     expect(content.scrollTop).toBe(0);
+  });
+
+  it("normalizes all-domain context when opening domain insight", () => {
+    const host = createHost("overview");
+    host.settings.opsDomain = "all";
+
+    setTab(host, "domainInsight");
+
+    expect(host.tab).toBe("domainInsight");
+    expect(host.settings.opsDomain).toBe("hadoop");
+  });
+
+  it("allows routing to overview before gateway connects", () => {
+    const host = createHost("message");
+    host.connected = false;
+
+    setTabFromRoute(host, "overview");
+
+    expect(host.tab).toBe("overview");
   });
 });
