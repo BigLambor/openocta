@@ -409,7 +409,12 @@ import { renderWorkbench, type WorkbenchInspection, type WorkbenchView } from ".
 import { normalizeWorkbenchTimeRange } from "./ops/workbench-context.ts";
 import { buildScenarioResult, scenarioResultInputText, scenarioResultOutputText } from "./ops/scenario-results.ts";
 import { findWorkbenchScenario } from "./ops/scenario-registry.ts";
-import { runWorkbenchAi } from "./controllers/ops-workbench-ai.ts";
+import {
+  openWorkbenchAiPanel,
+  resolveWorkbenchAlertDomain,
+  runWorkbenchAi,
+  workbenchCapabilityForDomain,
+} from "./controllers/ops-workbench-ai.ts";
 import { renderAssetsView } from "./views/assets-view.ts";
 import { renderTechOpsDomain } from "./views/tech-ops-domain.ts";
 import {
@@ -1926,7 +1931,7 @@ export function renderApp(state: AppViewState) {
                           ? `处置建议${isAccepted ? "已确认" : "已驳回"}：${trimmedNote}`
                           : `根因分析建议${isAccepted ? "已确认" : "已驳回"}：${trimmedNote}`;
                     
-                    const actualDomain = alert.domain || (domain === "all" ? "hadoop" : domain);
+                    const actualDomain = resolveWorkbenchAlertDomain(alert.domain, domainForAlerts);
                     const employeeId = opsAssistantForDomain(actualDomain).employeeId;
 
                     const taskId = await createEmployeeTask(state, {
@@ -2071,11 +2076,14 @@ export function renderApp(state: AppViewState) {
                     }
                     const target = alertGroups.find((g) => g.id === selectedId) || alertGroups[0];
                     if (!target) return;
-                    void runWorkbenchAi(state as any, {
-                      domain: target.domain || domainForAlerts,
+                    const alertDomain = resolveWorkbenchAlertDomain(target.domain, domainForAlerts);
+                    void openWorkbenchAiPanel(state as any, {
+                      domain: domainForAlerts,
                       mode: aiMode,
                       alert: target,
-                      assistantTemplate: opsAssistantForDomain(target.domain || domainForAlerts).employeeId,
+                      assistantTemplate: opsAssistantForDomain(alertDomain).employeeId,
+                      sessionKey: target.sessionKey,
+                      force: true,
                     });
                   },
                   onViewChange: (view) => {
@@ -2242,11 +2250,13 @@ export function renderApp(state: AppViewState) {
                     };
                     const target = alertGroups.find((g) => g.id === selectedId) || alertGroups[0];
                     if (!target) return;
-                    void runWorkbenchAi(state as any, {
-                      domain: target.domain || domainForAlerts,
+                    const alertDomain = resolveWorkbenchAlertDomain(target.domain, domainForAlerts);
+                    void openWorkbenchAiPanel(state as any, {
+                      domain: domainForAlerts,
                       mode,
                       alert: target,
-                      assistantTemplate: opsAssistantForDomain(target.domain || domainForAlerts).employeeId,
+                      assistantTemplate: opsAssistantForDomain(alertDomain).employeeId,
+                      sessionKey: target.sessionKey,
                     });
                   },
                   onCloseAiPanel: () => {
@@ -2258,26 +2268,28 @@ export function renderApp(state: AppViewState) {
                   onSendToCopilot: async (id, mode) => {
                     const alert = alertGroups.find((g) => g.id === id);
                     if (!alert) return;
+                    const alertDomain = resolveWorkbenchAlertDomain(alert.domain, domainForAlerts);
+                    const domainLabel = opsDomainLabel(alertDomain);
                     state.sessionKey = "main";
                     state.setTab("message");
                     const question =
                       mode === "action"
-                        ? `请基于当前 BCH 告警组给出处置建议：${alert.title}`
+                        ? `请基于当前 ${domainLabel} 告警组给出处置建议：${alert.title}`
                         : mode === "similar"
-                          ? `请分析当前 BCH 告警组的相似告警聚合逻辑，并判断是否还需要继续降噪：${alert.title}`
-                          : `请基于当前 BCH 告警组分析根因，并给出验证步骤：${alert.title}`;
+                          ? `请分析当前 ${domainLabel} 告警组的相似告警聚合逻辑，并判断是否还需要继续降噪：${alert.title}`
+                          : `请基于当前 ${domainLabel} 告警组分析根因，并给出验证步骤：${alert.title}`;
                     state.chatMessage = question;
                     await loadChatHistory(state);
                     const runId = await sendChatMessage(state, question, [], state.chatModelRef ?? null, {
                       context: {
-                        domain,
-                        capability: "observability-alert",
+                        domain: alertDomain,
+                        capability: workbenchCapabilityForDomain(alertDomain, mode),
                         workflowType: mode === "action" ? "incident" : "diagnosis",
                         objectType: "alert",
                         objectId: alert.id,
                         severity: alert.severity,
-                        service: "BCH",
-                        cluster: "BCH 生态",
+                        service: domainLabel,
+                        cluster: domainLabel,
                         summary: [
                           alert.title,
                           alert.rootCause ? `根因候选: ${alert.rootCause}` : "",
@@ -2290,6 +2302,11 @@ export function renderApp(state: AppViewState) {
                     });
                     if (runId) {
                       state.chatMessage = "";
+                      state.workbenchAiCopilotRunId = runId;
+                      state.workbenchAiCopilotAlertId = id;
+                      state.workbenchAiCopilotMode = mode;
+                      state.workbenchAiObjectId = id;
+                      state.workbenchAiMode = mode;
                     }
                   },
                   onAcceptSuggestion: (id) => void recordAiDecision(id, "accepted"),

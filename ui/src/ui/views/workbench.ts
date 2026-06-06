@@ -1,5 +1,6 @@
 import { html, nothing } from "lit";
 import { unsafeHTML } from "lit/directives/unsafe-html.js";
+import { analysisContentFromAlert, hasMeaningfulAlertAnalysis } from "../controllers/ops-workbench-ai.ts";
 import { icons } from "../icons.ts";
 import { toSanitizedMarkdownHtml } from "../markdown.ts";
 import { renderOpsError } from "../components/ops-status.ts";
@@ -39,6 +40,7 @@ import {
 
 export type WorkbenchAlertGroup = {
   id: string;
+  domain?: string;
   title: string;
   severity: "critical" | "warning" | "info";
   timestamp: string;
@@ -46,6 +48,7 @@ export type WorkbenchAlertGroup = {
   reducedTo: number;
   rootCause: string;
   analysisMarkdown?: string;
+  sessionKey?: string;
   impact?: string;
   status?: string;
 };
@@ -238,13 +241,18 @@ function renderAiConclusion(props: WorkbenchProps, active: WorkbenchAlertGroup, 
       </div>
     `;
   }
+  const storedAnalysis = mode === "root-cause" ? analysisContentFromAlert(active, mode) : "";
   const fallback =
-    mode === "similar"
-      ? `本组已聚合 ${active.originalCount} 条原始告警，建议优先按共同根因处理，避免逐条关闭。`
-      : mode === "action"
-        ? "建议先确认影响范围，再按 Runbook 执行只读检查；涉及变更或脚本执行时需人工审批。"
-        : active.rootCause || "当前告警缺少明确根因，点击对应 AI 操作发起实时分析。";
-  return html`<div class="detail-section__content highlight">${fallback}</div>`;
+    storedAnalysis
+      ? storedAnalysis
+      : mode === "similar"
+        ? `本组已聚合 ${active.originalCount} 条原始告警，建议优先按共同根因处理，避免逐条关闭。`
+        : mode === "action"
+          ? "建议先确认影响范围，再按 Runbook 执行只读检查；涉及变更或脚本执行时需人工审批。"
+          : hasMeaningfulAlertAnalysis(active)
+            ? active.rootCause
+            : "当前告警缺少明确根因，点击对应 AI 操作发起实时分析。";
+  return html`<div class="detail-section__content highlight">${storedAnalysis ? renderRichText(storedAnalysis) : fallback}</div>`;
 }
 
 function aiModeLabel(mode: WorkbenchAiMode, context?: WorkbenchScenarioAiContext | null): string {
@@ -412,7 +420,7 @@ function renderAiPanel(
   const targetTitle = panelContext?.title ?? scenario?.title ?? active?.title ?? "";
   const evidence = scenario
     ? (panelContext?.evidence?.length ? panelContext.evidence : scenario.inputs)
-    : markdownToLines(active?.analysisMarkdown || active?.rootCause || "");
+    : markdownToLines(analysisContentFromAlert(active!, "root-cause") || active?.rootCause || "");
   const outputs = panelContext?.expectedOutputs?.length ? panelContext.expectedOutputs : (scenario?.outputs ?? []);
   const contextObjectScope = panelContext?.objectScope ?? scenarioContext?.selectedObjectScope;
   const contextTimeRange = panelContext?.timeRange ?? scenarioContext?.selectedTimeRange;
@@ -830,7 +838,7 @@ function renderScenarioCard(
         props.onSelectScenario?.(scenario.id);
       }}
     >
-      <div class="minimal-scenario-card__icon">${icons[scenario.icon] ?? icons.folder}</div>
+      <span class="ops-nav-icon minimal-scenario-card__icon" aria-hidden="true">${icons[scenario.icon] ?? icons.folder}</span>
       <div class="minimal-scenario-card__body">
         <div class="minimal-scenario-card__header">
           <h3>${scenario.title}</h3>

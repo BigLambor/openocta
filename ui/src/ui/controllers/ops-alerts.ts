@@ -100,6 +100,7 @@ export function mapAlertGroupForUI(g: OpsAlertGroupRecord) {
     g.severity === "critical" || g.severity === "warning" ? g.severity : ("info" as const);
   return {
     id: g.id,
+    domain: g.domain?.trim() || "",
     title: g.title,
     severity,
     timestamp: formatAlertTimestamp(g.createdAtMs),
@@ -109,5 +110,6 @@ export function mapAlertGroupForUI(g: OpsAlertGroupRecord) {
     impact: g.impactMarkdown?.trim() || "—",
     status: g.status === "resolved" ? ("resolved" as const) : ("active" as const),
     analysisMarkdown: g.rootCauseMarkdown?.trim() || "",
+    sessionKey: g.sessionKey?.trim() || "",
   };
 }

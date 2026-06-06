@@ -18,26 +18,31 @@
   background: var(--bg-surface, rgba(255, 255, 255, 0.02));
 }
 
+.login-logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
 .login-logo img {
   height: 36px;
+  width: auto;
+  flex-shrink: 0;
   object-fit: contain;
 }
 
-.login-header {
-  text-align: center;
-  margin: 20px 0 24px;
-}
-
-.login-title {
-  margin: 0 0 6px;
-  font-size: 20px;
-  font-weight: 600;
-  letter-spacing: -0.02em;
+.login-logo__name {
+  font-weight: 800;
+  font-size: 24px;
+  letter-spacing: 0.5px;
   color: var(--text-primary);
 }
 
 .login-subtitle {
-  margin: 0;
+  margin: 0 0 28px;
+  text-align: center;
   font-size: 13px;
   color: var(--text-secondary);
 }

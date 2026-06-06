@@ -87,6 +87,25 @@ describe("workbench view scenario directory filtering", () => {
     expect(container.textContent).toContain("告警 AI 分析");
   });
 
+  it("uses ops-nav-icon styling for scenario cards and sidebar items", async () => {
+    const container = document.createElement("div");
+    render(
+      renderWorkbench(
+        buildProps({
+          activeView: "capacity",
+          user: { roleName: "admin", permissions: [] },
+        }),
+      ),
+      container,
+    );
+    await Promise.resolve();
+
+    const scenarioIcons = container.querySelectorAll(".minimal-scenario-card .ops-nav-icon");
+    expect(scenarioIcons.length).toBeGreaterThan(0);
+    const sidebarIcons = container.querySelectorAll(".ops-sidebar-nav-item .ops-nav-icon");
+    expect(sidebarIcons.length).toBeGreaterThan(0);
+  });
+
   it("uses a single AI entry in scenario detail and opens the same drawer", async () => {
     const container = document.createElement("div");
     const props = buildProps({

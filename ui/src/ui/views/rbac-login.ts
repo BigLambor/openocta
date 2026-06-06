@@ -27,14 +27,11 @@ export function renderRbacLogin(state: AppViewState) {
   return html`
     <div class="login-container">
       <div class="login-card">
-        <div class="login-logo" style="display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 16px;">
-          <img src=${basePath ? `${basePath}/logo_h.png` : "/logo_h.png"} alt="ApexOps" style="height: 36px; width: auto; flex-shrink: 0;" />
-          <span style="font-weight: 800; font-size: 24px; letter-spacing: 0.5px; color: var(--text-primary);">ApexOps</span>
+        <div class="login-logo">
+          <img src=${basePath ? `${basePath}/logo_h.png` : "/logo_h.png"} alt="ApexOps" />
+          <span class="login-logo__name">ApexOps</span>
         </div>
-        <div class="login-header">
-          <h2 class="login-title">ApexOps 运维平台</h2>
-          <p class="login-subtitle">请使用您的账号登录</p>
-        </div>
+        <p class="login-subtitle">请使用您的账号登录</p>
 
         ${errorMsg
           ? html`

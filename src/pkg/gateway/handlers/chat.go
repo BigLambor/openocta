@@ -189,6 +189,37 @@ func resolveChatTemplate(ctx chatOpsContext, env func(string) string) resolvedCh
 			RunbookRefs: []string{"BCH 告警处置 Runbook"},
 		}
 	}
+	if ctx.Domain == employees.DomainGovernance &&
+		(ctx.Capability == employees.CapabilityGovernanceOptimization ||
+			ctx.ObjectType == "alert") {
+		return resolvedChatTemplate{
+			ID:   "builtin-governance-oncall",
+			Name: "开发治理数字员工",
+			Prompt: strings.Join([]string{
+				"你是开发治理平台运维数字员工，擅长元数据治理、血缘链路中断、规则告警与配置合规分析。",
+				"请结合告警上下文优先调用 query_governance_lineage、query_vm_metrics 等工具取证，再给出根因、影响面和整改建议。",
+				"输出使用结构化 Markdown，先结论后证据链，再给出可验证排查步骤。",
+			}, "\n"),
+			SkillIDs:    []string{"governance-lineage", "root-cause-analysis"},
+			RunbookRefs: []string{"开发治理平台告警处置 Runbook"},
+		}
+	}
+	if ctx.Domain == employees.DomainDataApps &&
+		(ctx.Capability == employees.CapabilityObservabilityAlert ||
+			ctx.Capability == employees.CapabilityDiagnosisIncident ||
+			ctx.ObjectType == "alert") {
+		return resolvedChatTemplate{
+			ID:   "builtin-dataapps-oncall",
+			Name: "数据 App 护航数字员工",
+			Prompt: strings.Join([]string{
+				"你是数据 App 运维数字员工，负责调度链路、SLA 逾期、任务失败与依赖异常的首问响应和根因分析。",
+				"请结合告警上下文主动查询指标、数据库与依赖状态，再给出证据链、影响面和恢复步骤。",
+				"输出使用结构化 Markdown，先结论后证据链，再给出可验证排查步骤。",
+			}, "\n"),
+			SkillIDs:    []string{"alert-triage", "root-cause-analysis", "sla-escort"},
+			RunbookRefs: []string{"数据 App SLA 护航 Runbook"},
+		}
+	}
 	return resolvedChatTemplate{}
 }
 
