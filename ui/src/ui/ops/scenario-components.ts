@@ -46,7 +46,6 @@ export function renderScenarioComponent(
 ) {
   const parsedScope = parseWorkbenchObjectScope(context.objectScope || "all");
   const selectedCluster = parsedScope.kind === "cluster" ? parsedScope.value : "all";
-  const activeNamespace = parsedScope.kind === "namespace" ? parsedScope.value : undefined;
   switch (scenario.id) {
     case "bch-flink-health":
       return html`
@@ -68,14 +67,20 @@ export function renderScenarioComponent(
       `;
     case "bch-hdfs-capacity": {
       let activeNamespace = "NS1";
+      let activeCluster = "all";
       if (parsedScope.kind === "namespace") {
         activeNamespace = parsedScope.value;
+        activeCluster = parsedScope.cluster ?? "all";
       } else if (parsedScope.kind === "directory" && parsedScope.namespace) {
         activeNamespace = parsedScope.namespace;
+        activeCluster = parsedScope.cluster ?? "all";
+      } else if (parsedScope.kind === "cluster") {
+        activeCluster = parsedScope.value;
       }
       return html`
         <bch-fsimage-dashboard
           .host=${context.host}
+          .activeCluster=${activeCluster}
           .activeNamespace=${activeNamespace}
           .objectScope=${context.objectScope ?? "all"}
           .timeRange=${context.timeRange ?? "24h"}

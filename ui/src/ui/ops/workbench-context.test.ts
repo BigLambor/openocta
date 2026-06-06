@@ -4,6 +4,8 @@ import { findWorkbenchScenario } from "./scenario-registry.ts";
 import {
   clusterObjectId,
   flinkJobObjectId,
+  hdfsDirectoryObjectId,
+  hdfsNamespaceObjectId,
   namespaceObjectId,
   normalizeWorkbenchObjectScope,
   normalizeWorkbenchTimeRange,
@@ -84,9 +86,23 @@ describe("workbench context", () => {
     const scenario = findWorkbenchScenario("bch-hdfs-capacity");
     const options = objectOptionsForScenario(scenario, clusters);
 
-    expect(options[0]?.label).toBe("全部 namespace/目录");
-    expect(options.some((option) => option.id === namespaceObjectId("NS8"))).toBe(true);
-    expect(options.find((option) => option.label === "NS1:/tmp")?.subtitle).toBe("HDFS 静态治理热点目录");
+    expect(options[0]?.label).toBe("全部集群 / 全部 namespace");
+    expect(options.some((option) => option.id === clusterObjectId("bch-prod-1"))).toBe(true);
+    expect(options.some((option) => option.id === hdfsNamespaceObjectId("bch-prod-2", "NS8"))).toBe(true);
+    expect(options.find((option) => option.id === hdfsDirectoryObjectId("bch-prod-1", "NS1", "/tmp"))?.subtitle).toBe(
+      "HDFS 静态治理热点目录",
+    );
+    expect(parseWorkbenchObjectScope(hdfsNamespaceObjectId("bch-prod-2", "NS8"))).toEqual({
+      kind: "namespace",
+      cluster: "bch-prod-2",
+      value: "NS8",
+    });
+    expect(parseWorkbenchObjectScope(hdfsDirectoryObjectId("bch-prod-1", "NS1", "/tmp"))).toEqual({
+      kind: "directory",
+      cluster: "bch-prod-1",
+      namespace: "NS1",
+      value: "/tmp",
+    });
     expect(parseWorkbenchObjectScope(namespaceObjectId("NS2"))).toEqual({
       kind: "namespace",
       value: "NS2",

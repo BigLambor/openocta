@@ -24,6 +24,14 @@ export function namespaceObjectId(namespace: string): string {
   return `${WORKBENCH_OBJECT_PREFIX_NAMESPACE}${encodeURIComponent(namespace)}`;
 }
 
+export function hdfsNamespaceObjectId(clusterName: string, namespace: string): string {
+  return `${WORKBENCH_OBJECT_PREFIX_NAMESPACE}${encodeURIComponent(clusterName)}:${encodeURIComponent(namespace)}`;
+}
+
+export function hdfsDirectoryObjectId(clusterName: string, namespace: string, directory: string): string {
+  return `${WORKBENCH_OBJECT_PREFIX_DIRECTORY}${encodeURIComponent(clusterName)}:${encodeURIComponent(namespace)}:${encodeURIComponent(directory)}`;
+}
+
 export function flinkJobObjectId(jobId: string): string {
   return `${WORKBENCH_OBJECT_PREFIX_FLINK_JOB}${encodeURIComponent(jobId)}`;
 }
@@ -35,6 +43,7 @@ export function sparkJobObjectId(jobId: string): string {
 export function parseWorkbenchObjectScope(id: string): {
   kind: "all" | "cluster" | "namespace" | "flink_job" | "spark_job" | "directory" | "custom";
   value: string;
+  cluster?: string;
   namespace?: string;
 } {
   if (!id || id === WORKBENCH_OBJECT_ALL) {
@@ -47,9 +56,18 @@ export function parseWorkbenchObjectScope(id: string): {
     };
   }
   if (id.startsWith(WORKBENCH_OBJECT_PREFIX_NAMESPACE)) {
+    const rest = id.slice(WORKBENCH_OBJECT_PREFIX_NAMESPACE.length);
+    const colonIdx = rest.indexOf(":");
+    if (colonIdx > 0) {
+      return {
+        kind: "namespace",
+        cluster: decodeURIComponent(rest.slice(0, colonIdx)),
+        value: decodeURIComponent(rest.slice(colonIdx + 1)),
+      };
+    }
     return {
       kind: "namespace",
-      value: decodeURIComponent(id.slice(WORKBENCH_OBJECT_PREFIX_NAMESPACE.length)),
+      value: decodeURIComponent(rest),
     };
   }
   if (id.startsWith(WORKBENCH_OBJECT_PREFIX_FLINK_JOB)) {
@@ -66,12 +84,20 @@ export function parseWorkbenchObjectScope(id: string): {
   }
   if (id.startsWith(WORKBENCH_OBJECT_PREFIX_DIRECTORY)) {
     const rest = id.slice(WORKBENCH_OBJECT_PREFIX_DIRECTORY.length);
-    const colonIdx = rest.indexOf(":");
-    if (colonIdx > 0) {
+    const parts = rest.split(":");
+    if (parts.length >= 3) {
       return {
         kind: "directory",
-        namespace: rest.slice(0, colonIdx),
-        value: decodeURIComponent(rest.slice(colonIdx + 1)),
+        cluster: decodeURIComponent(parts[0]),
+        namespace: decodeURIComponent(parts[1]),
+        value: decodeURIComponent(parts.slice(2).join(":")),
+      };
+    }
+    if (parts.length === 2) {
+      return {
+        kind: "directory",
+        namespace: decodeURIComponent(parts[0]),
+        value: decodeURIComponent(parts[1]),
       };
     }
   }
@@ -132,20 +158,34 @@ export function objectOptionsForScenario(
   if (scenario.id === "bch-hdfs-capacity") {
     const nsOptions: WorkbenchObjectOption[] = [];
     const namespaces = ["NS1", "NS2", "NS3", "NS4", "NS5", "NS6", "NS7", "NS8"];
-    
-    nsOptions.push({ id: WORKBENCH_OBJECT_ALL, label: "全部 namespace/目录", subtitle: "HDFS 全域" });
-    for (const ns of namespaces) {
+    const hdfsClusters =
+      clusters.length > 0
+        ? clusters
+        : [{ name: "默认集群", region: "", status: "unknown" } as OpsClusterRecord];
+
+    nsOptions.push({ id: WORKBENCH_OBJECT_ALL, label: "全部集群 / 全部 namespace", subtitle: "HDFS 全域" });
+    for (const cluster of hdfsClusters) {
+      if (!cluster.name) {
+        continue;
+      }
       nsOptions.push({
-        id: namespaceObjectId(ns),
-        label: ns,
-        subtitle: "HDFS namespace",
+        id: clusterObjectId(cluster.name),
+        label: cluster.name,
+        subtitle: cluster.region ? `HDFS 集群 · ${cluster.region}` : "HDFS 集群",
       });
-      for (const dir of ["/tmp", "/user", "/app"]) {
+      for (const ns of namespaces) {
         nsOptions.push({
-          id: `${WORKBENCH_OBJECT_PREFIX_DIRECTORY}${ns}:${encodeURIComponent(dir)}`,
-          label: `${ns}:${dir}`,
-          subtitle: "HDFS 静态治理热点目录",
+          id: hdfsNamespaceObjectId(cluster.name, ns),
+          label: `${cluster.name} / ${ns}`,
+          subtitle: "HDFS namespace",
         });
+        for (const dir of ["/tmp", "/user", "/app"]) {
+          nsOptions.push({
+            id: hdfsDirectoryObjectId(cluster.name, ns, dir),
+            label: `${cluster.name} / ${ns}${dir}`,
+            subtitle: "HDFS 静态治理热点目录",
+          });
+        }
       }
     }
     return nsOptions;
@@ -191,7 +231,7 @@ export function formatWorkbenchObjectScope(scope: string, options: WorkbenchObje
   const parsed = parseWorkbenchObjectScope(scope);
   if (parsed.kind === "directory") {
     return {
-      title: `${parsed.namespace}:${parsed.value}`,
+      title: [parsed.cluster, parsed.namespace, parsed.value].filter(Boolean).join(" / "),
       subtitle: "HDFS 静态治理热点目录",
     };
   }

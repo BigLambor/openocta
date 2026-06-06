@@ -6,6 +6,7 @@ import { parseWorkbenchObjectScope } from "../../ops/workbench-context.ts";
 @customElement("bch-fsimage-dashboard")
 export class BchFsImageDashboard extends LitElement {
   @property({ type: Object }) host: any = null;
+  @property({ type: String }) activeCluster = "all";
   @property({ type: String }) activeNamespace = "NS1";
   @property({ type: String }) objectScope = "all";
   @property({ type: String }) timeRange = "24h";
@@ -248,6 +249,8 @@ export class BchFsImageDashboard extends LitElement {
   render() {
     const parsed = parseWorkbenchObjectScope(this.objectScope);
     const directoryPath = parsed.kind === "directory" ? parsed.value : null;
+    const clusterName = parsed.cluster ?? (this.activeCluster === "all" ? "" : this.activeCluster);
+    const namespaceName = parsed.namespace ?? this.activeNamespace;
 
     return html`
       <div class="ns-tabs">
@@ -266,7 +269,12 @@ export class BchFsImageDashboard extends LitElement {
           ? html`
               <div class="ops-banner info" style="margin-bottom: 20px; display: flex; align-items: center; gap: 10px; padding: 12px 18px; border-radius: 8px; background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.2); font-size: 13px;">
                 <span style="font-weight:600;">目录</span>
-                <span>当前 HDFS 静态治理热点目录：<strong style="color: var(--accent, #3b82f6); font-family: monospace;">${directoryPath}</strong>。此入口用于小文件/容量治理聚焦，不代表实时目录树枚举。</span>
+                <span>
+                  当前 HDFS 静态治理热点目录：
+                  ${clusterName ? html`<strong style="color: var(--accent, #3b82f6); font-family: monospace;">${clusterName}</strong> / ` : nothing}
+                  <strong style="color: var(--accent, #3b82f6); font-family: monospace;">${namespaceName}${directoryPath}</strong>。
+                  此入口用于小文件/容量治理聚焦，不代表实时目录树枚举。
+                </span>
               </div>
             `
           : nothing}

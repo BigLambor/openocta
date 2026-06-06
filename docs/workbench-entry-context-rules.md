@@ -41,4 +41,4 @@
 * 当用户从工作台返回其他 Tab 时，`selectedOpsDomain` 不会被清空，以便再次点击工作台时能恢复上一次的临时上下文状态。
 * 单个技术域的告警选中 ID 分别存储在 `state.opsSelectedAlertGroupIds[domain]` 中，确保在切换技术域时，不会由于跨域 ID 冲突导致详情面板加载报错。
 * Flink/Spark 作业对象范围使用作业 `id` 作为 scope 值，页面 label 显示作业名称，避免跨集群同名作业误选。
-* HDFS `/tmp`、`/user`、`/app` 目录入口是静态治理热点目录，不代表实时目录树枚举。
+* HDFS `/tmp`、`/user`、`/app` 目录入口必须带集群和 namespace 上下文，是静态治理热点目录，不代表实时目录树枚举。

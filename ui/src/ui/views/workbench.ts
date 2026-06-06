@@ -341,12 +341,12 @@ function renderInspectionView(props: WorkbenchProps) {
         : nothing}
 
       <div class="ops-shell-panel" style="margin-bottom: 14px;">
-        <div class="ops-shell-panel__head">${icons.zap} 巡检控制台</div>
+        <div class="ops-shell-panel__head">巡检控制台</div>
         <div style="padding:16px;">
         <div style="display:flex; justify-content:space-between; gap:18px; flex-wrap:wrap; align-items:center;">
           <div>
             <div class="detail-section__title">健康巡检</div>
-            <p class="muted">支持手动触发当前技术域巡检，巡检报告用于风险解释和治理建议。</p>
+            <p class="muted">手动触发当前技术域巡检，结果用于风险解释和治理建议。</p>
           </div>
           <button
             class="ops-btn ops-btn--primary ${props.isInspecting ? "btn--loading" : ""}"
@@ -361,13 +361,9 @@ function renderInspectionView(props: WorkbenchProps) {
         </div>
       </div>
 
-      <div class="ops-inspection-layout-hint muted">
-        左侧选择巡检记录，右侧查看完整深度报告。
-      </div>
-
       <div class="ops-main-columns ops-shell-columns ops-inspection-columns">
         <div class="ops-card list-column">
-          <div class="column-header">巡检报告（左侧）</div>
+          <div class="column-header">巡检报告</div>
           ${props.inspectionsLoading
             ? html`<div class="loading-placeholder">${icons.loader} 加载中...</div>`
             : inspections.length === 0
@@ -395,7 +391,7 @@ function renderInspectionView(props: WorkbenchProps) {
                 `}
         </div>
         <div class="ops-card detail-column ops-inspection-detail">
-          <div class="column-header">报告详情（右侧）</div>
+          <div class="column-header">报告详情</div>
           ${!active
             ? html`<div class="empty-placeholder">请选择一份巡检报告。</div>`
             : html`
@@ -526,10 +522,10 @@ function triggerLabel(trigger: OpsScenario["triggers"][number]): string {
 
 function renderTagList(label: string, items: string[]) {
   return html`
-    <div style="margin-top:8px;">
-      <div class="stat-label" style="margin-bottom:4px;">${label}</div>
-      <div class="detail-meta" style="flex-wrap:wrap;">
-        ${items.map((item) => html`<span>${item}</span>`)}
+    <div class="workbench-tag-group">
+      <div class="workbench-tag-group__label">${label}</div>
+      <div class="workbench-tag-list">
+        ${items.map((item) => html`<span class="workbench-tag">${item}</span>`)}
       </div>
     </div>
   `;
@@ -653,21 +649,28 @@ function renderWorkbenchContextBar(
   scenario?: OpsScenario,
 ) {
   const objectScope = formatWorkbenchObjectScope(selectedObjectScope, objectOptions);
-  const scopeLabel = scenario ? scenario.title : WORKBENCH_VIEW_META[view].title;
+  const scopeLabel = scenario?.title;
+  const contextParts = [
+    opsDomainLabel(selectedDomain),
+    WORKBENCH_VIEW_META[view].title,
+    scopeLabel,
+    objectScope.title,
+    WORKBENCH_TIME_RANGES.find((range) => range.id === selectedTimeRange)?.label ?? selectedTimeRange,
+  ].filter(Boolean);
   return html`
-    <section class="ops-card" style="margin-bottom: 14px;">
-      <div style="display:grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; padding: 14px;">
-        <div>
+    <section class="ops-card workbench-context-card">
+      <div class="workbench-context-grid">
+        <div class="workbench-context-field">
           <div class="stat-label">技术域</div>
-          <div class="detail-section__title" style="font-size:14px;">${opsDomainLabel(selectedDomain)}</div>
+          <div class="workbench-context-value">${opsDomainLabel(selectedDomain)}</div>
         </div>
-        <div>
+        <div class="workbench-context-field">
           <div class="stat-label">工作中心</div>
-          <div class="detail-section__title" style="font-size:14px;">${WORKBENCH_VIEW_META[view].title}</div>
+          <div class="workbench-context-value">${WORKBENCH_VIEW_META[view].title}</div>
         </div>
-        <div>
+        <div class="workbench-context-field workbench-context-field--wide">
           <div class="stat-label">对象范围</div>
-          <label class="select" style="display:block; margin-top:4px;">
+          <label class="select">
             <select
               .value=${selectedObjectScope}
               @change=${(e: Event) => props.onObjectScopeChange?.((e.target as HTMLSelectElement).value)}
@@ -680,9 +683,9 @@ function renderWorkbenchContextBar(
             </select>
           </label>
         </div>
-        <div>
+        <div class="workbench-context-field">
           <div class="stat-label">时间范围</div>
-          <label class="select" style="display:block; margin-top:4px;">
+          <label class="select">
             <select
               .value=${selectedTimeRange}
               @change=${(e: Event) =>
@@ -695,11 +698,62 @@ function renderWorkbenchContextBar(
           </label>
         </div>
       </div>
-      <div class="detail-section__content highlight" style="margin: 0 14px 14px;">
-        当前上下文：${opsDomainLabel(selectedDomain)} / ${WORKBENCH_VIEW_META[view].title} / ${scopeLabel} /
-        ${objectScope.title} / ${WORKBENCH_TIME_RANGES.find((range) => range.id === selectedTimeRange)?.label ?? selectedTimeRange}
+      <div class="workbench-context-path">
+        <span>当前上下文</span>
+        <strong>${contextParts.join(" / ")}</strong>
+        ${objectScope.subtitle ? html`<em>${objectScope.subtitle}</em>` : nothing}
       </div>
     </section>
+  `;
+}
+
+function renderScenarioCard(
+  props: WorkbenchProps,
+  scenario: OpsScenario,
+  selectedDomain: OpsDomainKey,
+) {
+  return html`
+    <article class="workbench-scenario-card">
+      <div class="workbench-scenario-card__icon">${icons[scenario.icon] ?? icons.folder}</div>
+      <div class="workbench-scenario-card__body">
+        <div class="workbench-scenario-card__head">
+          <div>
+            <h3>${scenario.title}</h3>
+            <p>${scenario.summary}</p>
+          </div>
+          <span class="score-badge score-badge--${scenario.maturity === "planned" ? "unknown" : "ok"}">
+            ${maturityLabel(scenario.maturity)}
+          </span>
+        </div>
+        <dl class="workbench-scenario-card__meta">
+          <div><dt>技术域</dt><dd>${opsDomainLabel(scenario.domain, true)}</dd></div>
+          <div><dt>自动化</dt><dd>${automationLabel(scenario.automationLevel)}</dd></div>
+          <div><dt>对象</dt><dd>${scenario.objectTypes.join(" / ")}</dd></div>
+          <div><dt>主指标</dt><dd>${scenario.primaryMetric ?? "-"}</dd></div>
+        </dl>
+        <div class="workbench-scenario-card__tags">
+          ${scenario.triggers.map((trigger) => html`<span class="workbench-tag">${triggerLabel(trigger)}</span>`)}
+        </div>
+        <div class="workbench-scenario-card__sections">
+          ${renderTagList("输入证据", scenario.inputs)}
+          ${renderTagList("输出成果", scenario.outputs)}
+        </div>
+        <div class="workbench-scenario-card__footer">
+          <button
+            class="ops-btn ops-btn--primary"
+            type="button"
+            @click=${() => {
+              if (selectedDomain === "all") {
+                props.onDomainChange?.(scenario.domain);
+              }
+              props.onSelectScenario?.(scenario.id);
+            }}
+          >
+            进入专项
+          </button>
+        </div>
+      </div>
+    </article>
   `;
 }
 
@@ -801,48 +855,10 @@ function renderScenarioDirectory(props: WorkbenchProps, view: WorkbenchView, sel
         </label>
       </div>
       ${filteredScenarios.length === 0
-        ? html`<div class="empty-placeholder" style="margin: 0 14px 14px;">没有匹配的场景，可调整关键字或成熟度过滤。</div>`
-        : html`
-            <div class="ops-summary-cards">
-              ${filteredScenarios.map(
-                (scenario) => html`
-                  <article class="ops-card stat-card" style="align-items: flex-start;">
-                    <div class="stat-icon-slot">${icons[scenario.icon] ?? icons.folder}</div>
-                    <div class="stat-body">
-                      <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:4px;">
-                        <h3 style="margin:0;">${scenario.title}</h3>
-                        <span class="score-badge score-badge--${scenario.maturity === "planned" ? "unknown" : "ok"}">
-                          ${maturityLabel(scenario.maturity)}
-                        </span>
-                      </div>
-                      <p class="muted" style="margin:0 0 10px;">${scenario.summary}</p>
-                      <div class="detail-meta" style="margin-bottom:10px; flex-wrap:wrap;">
-                        <span>${opsDomainLabel(scenario.domain, true)}</span>
-                        <span>${automationLabel(scenario.automationLevel)}</span>
-                        ${scenario.triggers.map((trigger) => html`<span>${triggerLabel(trigger)}</span>`)}
-                        <span>${scenario.primaryMetric ?? scenario.objectTypes.join(" / ")}</span>
-                      </div>
-                      ${renderTagList("输入证据", scenario.inputs)}
-                      ${renderTagList("输出成果", scenario.outputs)}
-                      <button
-                        class="ops-btn ops-btn--primary"
-                        type="button"
-                        style="margin-top: 12px;"
-                        @click=${() => {
-                          if (selectedDomain === "all") {
-                            props.onDomainChange?.(scenario.domain);
-                          }
-                          props.onSelectScenario?.(scenario.id);
-                        }}
-                      >
-                        进入专项
-                      </button>
-                    </div>
-                  </article>
-                `,
-              )}
-            </div>
-          `}
+        ? html`<div class="empty-placeholder empty-placeholder--compact">没有匹配的场景，可调整关键字或成熟度过滤。</div>`
+        : html`<div class="workbench-scenario-list">
+            ${filteredScenarios.map((scenario) => renderScenarioCard(props, scenario, selectedDomain))}
+          </div>`}
     </section>
   `;
 }
@@ -1039,7 +1055,7 @@ export function renderWorkbench(props: WorkbenchProps) {
   });
 
   return html`
-    <div class="ops-workbench-layout" style="display: flex; height: 100%; width: 100%;">
+    <div class="ops-workbench-layout">
       ${renderOpsContextSidebar({
         selectedDomain: props.selectedDomain || "all",
         user: props.user,
@@ -1050,8 +1066,8 @@ export function renderWorkbench(props: WorkbenchProps) {
         domainSummary: props.domainSummary,
         includeAllDomain: true,
       })}
-      <div style="flex: 1; min-width: 0; overflow-y: auto;">
-        <main class="ops-dashboard ops-shell" style="height: 100%; box-sizing: border-box; display: flex; flex-direction: column;">
+      <div class="ops-workbench-main">
+        <main class="ops-dashboard ops-shell ops-workbench-shell">
           ${renderOpsShellHeader({
             kicker: `运维工作台 · ${props.domainName}`,
             title: meta.title,

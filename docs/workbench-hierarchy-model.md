@@ -4,7 +4,7 @@
 
 在旧版本设计中，工作台的层级仅表达为单一的 `技术域 -> 集群/应用`（二层平铺）。随着 Flink/Spark/HDFS 等高细粒度专项能力的增加，以及跨技术域场景扩展（如 GBase 实例/会话、开发治理元数据表血缘、数据 App SLA 调度链等）的接入，这种简化的二层架构导致了：
 * Flink 作业和 Spark 离线任务在集群选择器下表现极其怪异；
-* HDFS 离线分析和小文件扫描不需要也无法指定“虚机集群”，其物理边界通常是“Namespace”（命名空间），初期目录入口只承载静态治理热点目录；
+* HDFS 离线分析和小文件扫描不能只用“集群”表达对象范围；现实边界应是 `集群 -> Namespace -> 目录热点`；
 * 场景在左侧菜单被硬编码写死，无法做到热插拔或元数据驱动。
 
 为此，我们将工作台层级重构为以下 **四层层级结构模型**。
@@ -36,7 +36,7 @@ graph TD
   * **集群/应用级**：`cluster:xxx`（如 hadoop 物理集群、FI 逻辑集群等）
   * **作业级**：`flink_job:xxx`, `spark_job:xxx`, `schedule_task:xxx` (调度任务)
   * **数据库级**：`database_instance:xxx`, `tablespace:xxx`, `session:xxx`
-  * **元数据/目录级**：`namespace:xxx` (HDFS 命名空间), `directory:NS:/path` (HDFS 静态治理热点目录), `metadata_table:xxx`
+  * **元数据/目录级**：`namespace:cluster:ns` (HDFS 集群内命名空间), `directory:cluster:ns:/path` (HDFS 静态治理热点目录), `metadata_table:xxx`
   * **全局/全域默认**：`all`（未选择具体实例时，回退到当前技术域的全部范围）
 
 ### 第三层：场景与专项能力 (Scenario / Specialized View)
@@ -63,4 +63,4 @@ graph TD
 3. **数据兜底**：
    如果没有获取到具体的子对象（第二层），各场景详情必须能回退至 `all` (全域/全部集群)。
 4. **目录语义**：
-   HDFS `/tmp`、`/user`、`/app` 等目录 scope 是建设初期的静态治理热点目录，用于小文件、Trash、容量风险聚焦；不得在 UI 或文档中表述为实时 HDFS 目录树枚举。
+   HDFS `/tmp`、`/user`、`/app` 等目录 scope 是建设初期的静态治理热点目录，必须附带集群和 namespace 上下文，用于小文件、Trash、容量风险聚焦；不得在 UI 或文档中表述为实时 HDFS 目录树枚举。
