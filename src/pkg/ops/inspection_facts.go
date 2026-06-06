@@ -191,13 +191,24 @@ func ScenarioKeyForInspection(report InspectionReport) string {
 	if key := strings.TrimSpace(report.ScenarioKey); key != "" {
 		return key
 	}
-	if report.Domain == DomainGBase || DomainFromInspectJobID(report.JobID) == DomainGBase {
+	domain := strings.TrimSpace(report.Domain)
+	if domain == "" {
+		domain = DomainFromInspectJobID(report.JobID)
+	}
+	switch domain {
+	case DomainHadoop:
+		return "ops-bch-health"
+	case DomainFI:
+		return "ops-fi-health"
+	case DomainGBase:
 		return "ops-gbase-health"
+	case DomainGovernance:
+		return "ops-governance-health"
+	case DomainDataApps:
+		return "ops-dataapps-health"
+	default:
+		return "system:inspection"
 	}
-	if d := DomainFromInspectJobID(report.JobID); d != "" {
-		return "ops-" + d + "-inspection"
-	}
-	return "system:inspection"
 }
 
 func runIDFromInspectionReport(report InspectionReport) string {

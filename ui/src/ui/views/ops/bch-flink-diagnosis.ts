@@ -1,18 +1,25 @@
-import { LitElement, html, css, nothing } from "lit";
+import { LitElement, html, css, nothing, type TemplateResult } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import { unsafeHTML } from "lit/directives/unsafe-html.js";
 import {
+  fetchBchClustersHealth,
   fetchBchFlinkJobs,
   fetchBchFlinkJobConfig,
   diagnoseBchFlinkJob,
   fetchBchSparkJobs,
   tuneBchSparkJob,
+  BchClusterHealth,
   FlinkJob,
   SparkJob,
   chatBchFlinkJob,
 } from "../../controllers/bch-client.ts";
 import { icons } from "../../icons.ts";
 import { toSanitizedMarkdownHtml } from "../../markdown.ts";
+import {
+  averageRadarFromFlinkJobs,
+  bucketJobsByScore,
+  renderBchJobHealthOverview,
+} from "./bch-job-health-overview.ts";
 
 @customElement("bch-flink-diagnosis")
 export class BchFlinkDiagnosis extends LitElement {
@@ -21,6 +28,8 @@ export class BchFlinkDiagnosis extends LitElement {
   
   @state() private flinkJobs: FlinkJob[] = [];
   @state() private sparkJobs: SparkJob[] = [];
+  @state() private clusters: BchClusterHealth[] = [];
+  @state() private selectedCluster = "all";
   @state() private loading = false;
   @state() private error: string | null = null;
 
@@ -99,6 +108,24 @@ export class BchFlinkDiagnosis extends LitElement {
       margin: 0;
       font-size: 16px;
       font-weight: 600;
+    }
+
+    .cluster-filter {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .cluster-filter select {
+      min-width: 160px;
+      padding: 6px 10px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--bg-content);
+      color: var(--text-primary);
+      font-size: 12px;
     }
 
     /* Overall Summary Cards */
@@ -820,12 +847,62 @@ export class BchFlinkDiagnosis extends LitElement {
     this.loading = true;
     this.error = null;
     try {
-      this.flinkJobs = await fetchBchFlinkJobs(this.host);
+      const [clusters, jobs] = await Promise.all([
+        fetchBchClustersHealth(this.host).catch(() => [] as BchClusterHealth[]),
+        fetchBchFlinkJobs(this.host),
+      ]);
+      this.clusters = clusters;
+      this.flinkJobs = jobs;
     } catch (err: any) {
       this.error = err.message || String(err);
     } finally {
       this.loading = false;
     }
+  }
+
+  private clusterOptions(): Array<{ value: string; label: string }> {
+    const names = new Set<string>();
+    for (const cluster of this.clusters) {
+      if (cluster.name) names.add(cluster.name);
+    }
+    for (const job of this.flinkJobs) {
+      if (job.cluster) names.add(job.cluster);
+    }
+    return [
+      { value: "all", label: "全部集群" },
+      ...Array.from(names)
+        .sort()
+        .map((name) => ({ value: name, label: name })),
+    ];
+  }
+
+  private filteredFlinkJobs(): FlinkJob[] {
+    if (this.selectedCluster === "all") {
+      return this.flinkJobs;
+    }
+    return this.flinkJobs.filter((job) => job.cluster === this.selectedCluster);
+  }
+
+  private renderClusterFilter() {
+    const options = this.clusterOptions();
+    if (options.length <= 1) {
+      return nothing;
+    }
+    return html`
+      <label class="cluster-filter">
+        <span>目标集群</span>
+        <select
+          .value=${this.selectedCluster}
+          @change=${(e: Event) => {
+            this.selectedCluster = (e.target as HTMLSelectElement).value;
+          }}
+        >
+          ${options.map(
+            (opt) => html`<option value=${opt.value} ?selected=${opt.value === this.selectedCluster}>${opt.label}</option>`,
+          )}
+        </select>
+      </label>
+    `;
   }
 
   async openConfigModal(job: FlinkJob) {
@@ -915,7 +992,9 @@ export class BchFlinkDiagnosis extends LitElement {
                 <div>正在加载作业治理数据...</div>
               </div>
             `
-          : this.renderFlinkContent()}
+          : this.error
+            ? html`<div class="empty-placeholder" style="padding: 24px; color: var(--danger, #d33);">${this.error}</div>`
+            : this.renderFlinkContent()}
       </div>
 
       ${this.renderConfigModal()}
@@ -925,33 +1004,30 @@ export class BchFlinkDiagnosis extends LitElement {
   }
 
   private renderFlinkContent() {
-    const healthy = this.flinkJobs.filter((j) => j.score >= 90).length;
-    const warning = this.flinkJobs.filter((j) => j.score >= 60 && j.score < 90).length;
-    const critical = this.flinkJobs.filter((j) => j.score < 60).length;
-    const waste = this.flinkJobs.filter((j) => j.rootCause === "S7").length;
+    const jobs = this.filteredFlinkJobs();
+    const clusterLabel = this.selectedCluster === "all" ? "全部集群" : this.selectedCluster;
+    const buckets = bucketJobsByScore(
+      jobs.map((j) => j.score),
+      jobs.map((j) => j.rootCause === "S7"),
+    );
+    const radar = averageRadarFromFlinkJobs(jobs);
+    const backpressureCount = jobs.filter((j) => j.metrics?.isBP).length;
 
     return html`
-      <div class="flink-summary-grid">
-        <div class="summary-card">
-          <div class="summary-lbl">实时监控节点</div>
-          <div class="summary-val info">${this.flinkJobs.length} <span style="font-size:12px; font-weight:normal; color:var(--text-muted)">个</span></div>
-        </div>
-        <div class="summary-card">
-          <div class="summary-lbl">发生背压/宕机</div>
-          <div class="summary-val ${abnormal > 0 ? "critical" : "healthy"}">${abnormal} <span style="font-size:12px; font-weight:normal; color:var(--text-muted)">个</span></div>
-        </div>
-        <div class="summary-card">
-          <div class="summary-lbl">自动拦截风险</div>
-          <div class="summary-val healthy">100% <span style="font-size:12px; font-weight:normal; color:var(--text-muted)">阻断</span></div>
-        </div>
-        <div class="summary-card">
-          <div class="summary-lbl">全局平均延迟</div>
-          <div class="summary-val warning">1.2 <span style="font-size:12px; font-weight:normal; color:var(--text-muted)">s</span></div>
-        </div>
-      </div>
+      ${renderBchJobHealthOverview({
+        title: "全局健康概览",
+        jobKind: "Flink",
+        clusterLabel,
+        buckets,
+        radar,
+        agentSummary: html`当前环境共接入 <strong>${buckets.total}</strong> 个 Flink 作业。Flink Doctor Agent 正在执行 5 分钟级滑动窗口巡检。通过 <span class="bch-overview__summary-link">三角验证逻辑</span>，本周期共排查出 <strong>${backpressureCount}</strong> 起背压事件与 <strong>${buckets.waste}</strong> 起资源浪费候选。`,
+        stabilityBaseline: radar.stability >= 80 ? "normal" : "warning",
+        performanceBaseline: radar.performance >= 75 ? "warning" : "critical",
+      })}
 
       <div class="sec-header">
         <h2>在线流计算作业巡检 (Flink Doctor)</h2>
+        ${this.renderClusterFilter()}
       </div>
 
       <div class="ops-table-container">
@@ -967,7 +1043,10 @@ export class BchFlinkDiagnosis extends LitElement {
             </tr>
           </thead>
           <tbody>
-            ${this.flinkJobs.map((job) => {
+            ${jobs.length === 0
+              ? html`<tr><td colspan="6" style="text-align:center; color: var(--text-muted); padding: 24px;">当前集群暂无 Flink 作业。</td></tr>`
+              : nothing}
+            ${jobs.map((job) => {
               const scoreClass = job.score >= 90 ? "healthy" : job.score >= 60 ? "warning" : "critical";
               return html`
                 <tr>

@@ -1,5 +1,7 @@
 import { html, nothing, type TemplateResult } from "lit";
+import { unsafeHTML } from "lit/directives/unsafe-html.js";
 import { icons } from "../icons.ts";
+import { toSanitizedMarkdownHtml } from "../markdown.ts";
 import { renderOpsError } from "../components/ops-status.ts";
 import "./ops/bch-flink-diagnosis.ts";
 import "./ops/bch-spark-governance.ts";
@@ -11,6 +13,7 @@ import {
   type OpsViewNavItem,
 } from "../components/ops-shell.ts";
 import { renderOpsContextSidebar, type SidebarItem } from "../components/ops-context-sidebar.ts";
+import { effectiveOpsDomain } from "../components/domain-filter.ts";
 
 export type WorkbenchAlertGroup = {
   id: string;
@@ -264,6 +267,14 @@ function renderAiPanel(props: WorkbenchProps, active: WorkbenchAlertGroup | unde
 }
 
 
+function renderInspectionMarkdown(content: string) {
+  const trimmed = content.trim();
+  if (!trimmed) {
+    return html`<p class="muted">当前报告暂无完整正文，可结合最近告警和资产健康度继续分析。</p>`;
+  }
+  return html`<div class="ops-markdown ops-inspection-report">${unsafeHTML(toSanitizedMarkdownHtml(trimmed))}</div>`;
+}
+
 function scoreClass(score: number | null | undefined): string {
   if (score == null || score < 0) return "unknown";
   if (score >= 90) return "ok";
@@ -313,7 +324,7 @@ function renderInspectionView(props: WorkbenchProps) {
         </div>
       </div>
 
-      <div class="ops-main-columns ops-shell-columns">
+      <div class="ops-main-columns ops-shell-columns ops-inspection-columns">
         <div class="ops-card list-column">
           <div class="column-header">巡检报告</div>
           ${props.inspectionsLoading
@@ -342,25 +353,27 @@ function renderInspectionView(props: WorkbenchProps) {
                   </div>
                 `}
         </div>
-        <div class="ops-card detail-column">
+        <div class="ops-card detail-column ops-inspection-detail">
           <div class="column-header">报告详情</div>
           ${!active
             ? html`<div class="empty-placeholder">请选择一份巡检报告。</div>`
             : html`
-                <div class="report-header">
-                  <h3>${props.domainName} 巡检报告</h3>
-                  <span class="score-badge score-badge--${scoreClass(active.score)}">
-                    ${active.score == null || active.score < 0 ? "健康分未知" : `健康分 ${active.score}/100`}
-                  </span>
-                </div>
-                <div class="detail-section">
-                  <div class="detail-section__header">${icons.scrollText} 发现摘要</div>
-                  <div class="detail-section__content">${active.reportSummary}</div>
-                </div>
-                <div class="detail-section">
-                  <div class="detail-section__header">${icons.messageSquare} AI 解释</div>
-                  <div class="detail-section__content highlight">
-                    ${active.reportMarkdown || "当前报告暂无完整正文，可结合最近告警和资产健康度继续分析。"}
+                <div class="ops-inspection-detail__body">
+                  <div class="report-header">
+                    <h3>${props.domainName} 深度巡检报告</h3>
+                    <span class="score-badge score-badge--${scoreClass(active.score)}">
+                      ${active.score == null || active.score < 0 ? "健康分未知" : `健康分 ${active.score}/100`}
+                    </span>
+                  </div>
+                  <div class="detail-section">
+                    <div class="detail-section__header">${icons.scrollText} 发现摘要</div>
+                    <div class="detail-section__content">${active.reportSummary}</div>
+                  </div>
+                  <div class="detail-section ops-inspection-detail__report">
+                    <div class="detail-section__header">${icons.messageSquare} 完整报告</div>
+                    <div class="detail-section__content highlight">
+                      ${renderInspectionMarkdown(active.reportMarkdown)}
+                    </div>
                   </div>
                 </div>
               `}
@@ -545,6 +558,8 @@ export function renderWorkbench(props: WorkbenchProps) {
   const criticalCount = props.alertGroups.filter((g) => g.severity === "critical").length;
   const warningCount = props.alertGroups.filter((g) => g.severity === "warning").length;
   const activeView = props.activeView ?? "events";
+  const effectiveDomain = effectiveOpsDomain(props.selectedDomain || "all");
+  const isHadoopDomain = effectiveDomain === "hadoop";
 
   const meta = WORKBENCH_VIEW_META[activeView];
 
@@ -604,11 +619,11 @@ export function renderWorkbench(props: WorkbenchProps) {
             ? renderEventsView(props, active, originalTotal, criticalCount, warningCount)
             : activeView === "inspection"
               ? renderInspectionView(props)
-              : activeView === "diagnosis" && props.selectedDomain === "hadoop"
+              : activeView === "diagnosis" && isHadoopDomain
                 ? html`<bch-flink-diagnosis .host=${props.host}></bch-flink-diagnosis>`
-              : activeView === "governance" && props.selectedDomain === "hadoop"
+              : activeView === "governance" && isHadoopDomain
                 ? html`<bch-spark-governance .host=${props.host}></bch-spark-governance>`
-              : activeView === "capacity" && props.selectedDomain === "hadoop"
+              : activeView === "capacity" && isHadoopDomain
                 ? html`<bch-fsimage-dashboard .host=${props.host}></bch-fsimage-dashboard>`
               : renderSkeletonView(props, activeView)}
         </main>

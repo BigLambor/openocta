@@ -3,7 +3,7 @@
 import { loadCronRuns, type CronState } from "./cron.ts";
 
 const POLL_INTERVAL_MS = 2000;
-const MAX_POLL_ATTEMPTS = 15;
+const MAX_POLL_ATTEMPTS = 30;
 
 export type OpsInspectionRunHost = CronState & {
   tab: string;
@@ -47,11 +47,41 @@ export async function runDomainInspectionWithPoll(
   }
 }
 
+const INSPECTION_SCENARIO_KEYS: Record<string, string> = {
+  hadoop: "ops-bch-health",
+  fi: "ops-fi-health",
+  gbase: "ops-gbase-health",
+  governance: "ops-governance-health",
+  dataapps: "ops-dataapps-health",
+};
+
 function scenarioKeyForInspection(domainKey: string, jobId: string): string | undefined {
-  if (domainKey === "gbase" || jobId === "job-inspect-gbase") {
-    return "ops-gbase-health";
+  if (INSPECTION_SCENARIO_KEYS[domainKey]) {
+    return INSPECTION_SCENARIO_KEYS[domainKey];
   }
-  return undefined;
+  const suffix = jobId.replace(/^job-inspect-/, "");
+  return INSPECTION_SCENARIO_KEYS[suffix];
+}
+
+function isInspectionRunComplete(entry?: {
+  status?: string;
+  error?: string;
+  summary?: string;
+  result?: { score?: number | null; reportMarkdown?: string };
+}): boolean {
+  if (!entry) {
+    return false;
+  }
+  if (entry.status === "error" || entry.error) {
+    return true;
+  }
+  if (entry.result?.score != null || entry.result?.reportMarkdown) {
+    return true;
+  }
+  if (entry.summary?.trim()) {
+    return true;
+  }
+  return false;
 }
 
 export async function pollInspectionRuns(
@@ -59,18 +89,35 @@ export async function pollInspectionRuns(
   jobId: string,
   domainKey?: string,
 ): Promise<void> {
+  const dKey = domainKey || state.tab;
+  const baselineTs = state.cronRuns[0]?.runAtMs ?? state.cronRuns[0]?.ts ?? 0;
+
   for (let attempt = 1; attempt <= MAX_POLL_ATTEMPTS; attempt++) {
     await loadCronRuns(state, jobId);
-    const latest = state.cronRuns[0];
-    if (latest?.status === "ok" || attempt >= MAX_POLL_ATTEMPTS) {
-      if (latest?.sessionId) {
-        const dKey = domainKey || state.tab;
-        state.opsSelectedInspectionIds = {
-          ...state.opsSelectedInspectionIds,
-          [dKey]: latest.sessionId,
-        };
+    const latest = state.cronRuns[0] as {
+      status?: string;
+      error?: string;
+      summary?: string;
+      sessionId?: string;
+      runAtMs?: number;
+      ts?: number;
+      result?: { score?: number | null; reportMarkdown?: string };
+    };
+    const runTs = latest?.runAtMs ?? latest?.ts ?? 0;
+    const isNewRun = runTs > baselineTs;
+    if (isNewRun && isInspectionRunComplete(latest)) {
+      const selectedId = latest?.sessionId || `inspection-${dKey}-0`;
+      state.opsSelectedInspectionIds = {
+        ...state.opsSelectedInspectionIds,
+        [dKey]: selectedId,
+      };
+      if (latest?.status === "error" || latest?.error) {
+        throw new Error(latest.error || "巡检执行失败");
       }
       return;
+    }
+    if (attempt >= MAX_POLL_ATTEMPTS) {
+      throw new Error("巡检超时，请稍后在巡检报告中查看结果");
     }
     await sleep(POLL_INTERVAL_MS);
   }

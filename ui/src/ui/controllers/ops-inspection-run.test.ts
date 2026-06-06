@@ -11,7 +11,16 @@ describe("runDomainInspectionWithPoll", () => {
         request: vi.fn(async (method: string, params: unknown) => {
           requests.push({ method, params });
           if (method === "cron.runs") {
-            return { entries: [{ status: "ok", sessionId: "session-1" }] };
+            return {
+              entries: [
+                {
+                  status: "ok",
+                  sessionId: "session-1",
+                  runAtMs: Date.now(),
+                  result: { score: 88, reportMarkdown: "巡检完成" },
+                },
+              ],
+            };
           }
           return { ok: true };
         }),
@@ -24,16 +33,17 @@ describe("runDomainInspectionWithPoll", () => {
       },
     } as OpsInspectionRunHost & { connected: boolean; opsSelectedEntityIds: Record<string, string> };
 
-    await runDomainInspectionWithPoll(state, "job-inspect-hadoop-deep");
+    await runDomainInspectionWithPoll(state, "job-inspect-hadoop");
 
     expect(requests[0]).toEqual({
       method: "cron.run",
       params: {
-        id: "job-inspect-hadoop-deep",
+        id: "job-inspect-hadoop",
         mode: "force",
         domain: "hadoop",
         clusterId: "cluster-1",
         component: "YARN ResourceManager",
+        scenarioKey: "ops-bch-health",
       },
     });
     expect(state.opsSelectedInspectionIds.hadoop).toBe("session-1");
@@ -49,7 +59,16 @@ describe("runDomainInspectionWithPoll", () => {
         request: vi.fn(async (method: string, params: unknown) => {
           requests.push({ method, params });
           if (method === "cron.runs") {
-            return { entries: [{ status: "ok", sessionId: "session-gbase" }] };
+            return {
+              entries: [
+                {
+                  status: "ok",
+                  sessionId: "session-gbase",
+                  runAtMs: Date.now(),
+                  result: { score: 91, reportMarkdown: "GBase 巡检完成" },
+                },
+              ],
+            };
           }
           return { ok: true };
         }),

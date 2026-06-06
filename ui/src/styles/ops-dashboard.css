@@ -1349,3 +1349,76 @@
   background: color-mix(in srgb, var(--accent) 4%, var(--bg));
   border: 1px solid var(--border);
 }
+
+.ops-workbench-layout .ops-inspections-grid {
+  flex: 1;
+  min-height: 0;
+}
+
+.ops-workbench-layout .ops-inspection-columns {
+  flex: 1;
+  min-height: 0;
+  align-items: stretch;
+}
+
+.ops-workbench-layout .ops-inspection-detail {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  padding: 0;
+}
+
+.ops-workbench-layout .ops-inspection-detail__body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 20px;
+}
+
+.ops-inspection-report,
+.ops-markdown.ops-inspection-report {
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.ops-inspection-report h1,
+.ops-inspection-report h2,
+.ops-inspection-report h3 {
+  margin: 0 0 10px;
+  font-size: 15px;
+}
+
+.ops-inspection-report p {
+  margin: 0 0 10px;
+}
+
+.ops-inspection-report table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 10px 0 14px;
+  font-size: 12px;
+}
+
+.ops-inspection-report th,
+.ops-inspection-report td {
+  border: 1px solid var(--border);
+  padding: 8px 10px;
+  text-align: left;
+}
+
+.ops-inspection-report th {
+  background: color-mix(in srgb, var(--accent) 6%, var(--bg));
+}
+
+.ops-inspection-report ul {
+  margin: 0 0 10px;
+  padding-left: 18px;
+}
+
+.ops-inspection-report blockquote {
+  margin: 10px 0;
+  padding: 8px 12px;
+  border-left: 3px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 5%, var(--bg));
+}

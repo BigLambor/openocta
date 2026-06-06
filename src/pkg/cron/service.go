@@ -3,6 +3,7 @@ package cron
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -62,7 +63,7 @@ func (s *Service) resolveRunLogPath(jobID string) string {
 }
 
 // appendRunLogEntry appends one finished-action entry to the job's run log.
-func (s *Service) appendRunLogEntry(job CronJob, status, errMsg, summary, sessionKey string, runAtMs, durationMs, nextRunAtMs *int64, domain, clusterID, component, scenarioKey string, result *ops.InspectionResult) {
+func (s *Service) appendRunLogEntry(job CronJob, status, errMsg, summary, sessionKey, sessionID string, runAtMs, durationMs, nextRunAtMs *int64, domain, clusterID, component, scenarioKey string, result *ops.InspectionResult) {
 	entry := cronRunLogEntry{
 		Ts:          time.Now().UnixMilli(),
 		JobID:       job.ID,
@@ -70,6 +71,7 @@ func (s *Service) appendRunLogEntry(job CronJob, status, errMsg, summary, sessio
 		Status:      status,
 		Error:       errMsg,
 		Summary:     summary,
+		SessionID:   sessionID,
 		SessionKey:  sessionKey,
 		RunAtMs:     runAtMs,
 		DurationMs:  durationMs,
@@ -344,6 +346,9 @@ func (s *Service) Run(id string, mode string, domain, clusterId, component, scen
 		}
 	}
 
+	var inspectionResult *ops.InspectionResult
+	runSummary := ""
+
 	// Execute side effects when not skipped and deps are available.
 	if status != "skipped" {
 		_, hasNativeScenario := ops.GetOpsScenario(scenarioKey)
@@ -354,7 +359,10 @@ func (s *Service) Run(id string, mode string, domain, clusterId, component, scen
 			// Run native OpsScenario
 			ctx := context.Background() // TODO: use context with timeout
 			runID := uuid.New().String()
-			_, err := ops.RunScenario(ctx, scenarioKey, clusterId, ops.RunOpts{
+			if cronSessionID == "" {
+				cronSessionID = runID
+			}
+			res, err := ops.RunScenario(ctx, scenarioKey, clusterId, ops.RunOpts{
 				SessionID:  cronSessionID,
 				RunID:      runID,
 				EmployeeID: jobCopy.DigitalEmployeeID,
@@ -362,6 +370,12 @@ func (s *Service) Run(id string, mode string, domain, clusterId, component, scen
 			if err != nil {
 				status = "error"
 				errMsg = err.Error()
+			} else {
+				inspectionResult = &res
+				runSummary = strings.TrimSpace(res.ReportMarkdown)
+				if runSummary == "" && res.Score != nil {
+					runSummary = fmt.Sprintf("健康得分：%d", *res.Score)
+				}
 			}
 		} else if jobCopy.SessionTarget == "main" && jobCopy.Payload.Kind == "systemEvent" {
 			if deps.EnqueueSystemEvent != nil {
@@ -424,7 +438,7 @@ func (s *Service) Run(id string, mode string, domain, clusterId, component, scen
 
 	// Append run log entry without holding the lock.
 	runAt := startMs
-	s.appendRunLogEntry(jobCopy, status, errMsg, "", sessionKey, &runAt, &durationMs, nextRunAtMs, domain, clusterId, component, scenarioKey, nil)
+	s.appendRunLogEntry(jobCopy, status, errMsg, runSummary, sessionKey, cronSessionID, &runAt, &durationMs, nextRunAtMs, domain, clusterId, component, scenarioKey, inspectionResult)
 
 	return nil
 }

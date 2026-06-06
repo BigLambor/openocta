@@ -136,6 +136,11 @@ func RunScenario(ctx context.Context, scenarioKey string, objectID string, opts 
 	res.SourceKind = "cron"
 	res.TriggerType = "scenario_runner"
 	res.MissingSources = missingSources
+	res.Domain = scenario.DomainKey
+	if strings.TrimSpace(res.ClusterID) == "" {
+		res.ClusterID = strings.TrimSpace(objectID)
+	}
+	EnrichInspectionWithMockReport(&res, scenarioKey, objectID)
 
 	// Write L3 Facts (PersistInspectionFacts internally writes HealthSignal and HealthSnapshot)
 	if err := PersistInspectionFacts(res); err != nil {

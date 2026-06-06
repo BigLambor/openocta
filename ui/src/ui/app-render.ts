@@ -1640,9 +1640,13 @@ export function renderApp(state: AppViewState) {
                   },
                   onRunInspection: () => {
                     void import("./controllers/ops-inspection-run.ts").then(({ runDomainInspectionWithPoll }) => {
-                      return runDomainInspectionWithPoll(state as any, inspectionJobId, domain).catch((err) => {
-                        console.error("Failed to run domain-insight inspection:", err);
-                      });
+                      return runDomainInspectionWithPoll(state as any, inspectionJobId, domain)
+                        .then(() => loadCronRuns(state as any, inspectionJobId))
+                        .then(() => nativeAlert("巡检已完成，请在报告中查看结果。"))
+                        .catch((err) => {
+                          console.error("Failed to run domain-insight inspection:", err);
+                          void nativeAlert(err instanceof Error ? err.message : String(err));
+                        });
                     });
                   },
                   isInspecting: state.opsIsInspecting[domain] || false,
@@ -1885,9 +1889,13 @@ export function renderApp(state: AppViewState) {
                   },
                   onRunInspection: () => {
                     void import("./controllers/ops-inspection-run.ts").then(({ runDomainInspectionWithPoll }) => {
-                      return runDomainInspectionWithPoll(state as any, inspectionJobId, domain).catch((err) => {
-                        console.error("Failed to run workbench inspection:", err);
-                      });
+                      return runDomainInspectionWithPoll(state as any, inspectionJobId, domain)
+                        .then(() => loadCronRuns(state as any, inspectionJobId))
+                        .then(() => nativeAlert("巡检已完成，请在右侧查看报告。"))
+                        .catch((err) => {
+                          console.error("Failed to run workbench inspection:", err);
+                          void nativeAlert(err instanceof Error ? err.message : String(err));
+                        });
                     });
                   },
                   onOpenChannels: () => state.setTab("channels"),

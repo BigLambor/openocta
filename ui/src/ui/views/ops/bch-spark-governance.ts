@@ -1,18 +1,26 @@
-import { LitElement, html, css, nothing } from "lit";
+import { LitElement, html, css, nothing, type TemplateResult } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import { unsafeHTML } from "lit/directives/unsafe-html.js";
 import {
+  fetchBchClustersHealth,
   fetchBchFlinkJobs,
   fetchBchFlinkJobConfig,
   diagnoseBchFlinkJob,
   fetchBchSparkJobs,
   tuneBchSparkJob,
+  BchClusterHealth,
   FlinkJob,
   SparkJob,
   chatBchFlinkJob,
 } from "../../controllers/bch-client.ts";
 import { icons } from "../../icons.ts";
 import { toSanitizedMarkdownHtml } from "../../markdown.ts";
+import {
+  averageRadarFromSparkJobs,
+  bucketJobsByScore,
+  renderBchJobHealthOverview,
+  sparkHealthScore,
+} from "./bch-job-health-overview.ts";
 
 @customElement("bch-spark-governance")
 export class BchSparkGovernance extends LitElement {
@@ -21,6 +29,8 @@ export class BchSparkGovernance extends LitElement {
   
   @state() private flinkJobs: FlinkJob[] = [];
   @state() private sparkJobs: SparkJob[] = [];
+  @state() private clusters: BchClusterHealth[] = [];
+  @state() private selectedCluster = "all";
   @state() private loading = false;
   @state() private error: string | null = null;
 
@@ -99,6 +109,24 @@ export class BchSparkGovernance extends LitElement {
       margin: 0;
       font-size: 16px;
       font-weight: 600;
+    }
+
+    .cluster-filter {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .cluster-filter select {
+      min-width: 160px;
+      padding: 6px 10px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--bg-content);
+      color: var(--text-primary);
+      font-size: 12px;
     }
 
     /* Overall Summary Cards */
@@ -820,12 +848,62 @@ export class BchSparkGovernance extends LitElement {
     this.loading = true;
     this.error = null;
     try {
-      this.sparkJobs = await fetchBchSparkJobs(this.host);
+      const [clusters, jobs] = await Promise.all([
+        fetchBchClustersHealth(this.host).catch(() => [] as BchClusterHealth[]),
+        fetchBchSparkJobs(this.host),
+      ]);
+      this.clusters = clusters;
+      this.sparkJobs = jobs;
     } catch (err: any) {
       this.error = err.message || String(err);
     } finally {
       this.loading = false;
     }
+  }
+
+  private clusterOptions(): Array<{ value: string; label: string }> {
+    const names = new Set<string>();
+    for (const cluster of this.clusters) {
+      if (cluster.name) names.add(cluster.name);
+    }
+    for (const job of this.sparkJobs) {
+      if (job.cluster) names.add(job.cluster);
+    }
+    return [
+      { value: "all", label: "全部集群" },
+      ...Array.from(names)
+        .sort()
+        .map((name) => ({ value: name, label: name })),
+    ];
+  }
+
+  private filteredSparkJobs(): SparkJob[] {
+    if (this.selectedCluster === "all") {
+      return this.sparkJobs;
+    }
+    return this.sparkJobs.filter((job) => job.cluster === this.selectedCluster);
+  }
+
+  private renderClusterFilter() {
+    const options = this.clusterOptions();
+    if (options.length <= 1) {
+      return nothing;
+    }
+    return html`
+      <label class="cluster-filter">
+        <span>目标集群</span>
+        <select
+          .value=${this.selectedCluster}
+          @change=${(e: Event) => {
+            this.selectedCluster = (e.target as HTMLSelectElement).value;
+          }}
+        >
+          ${options.map(
+            (opt) => html`<option value=${opt.value} ?selected=${opt.value === this.selectedCluster}>${opt.label}</option>`,
+          )}
+        </select>
+      </label>
+    `;
   }
 
   async openConfigModal(job: FlinkJob) {
@@ -915,7 +993,9 @@ export class BchSparkGovernance extends LitElement {
                 <div>正在加载作业治理数据...</div>
               </div>
             `
-          : this.renderSparkContent()}
+          : this.error
+            ? html`<div class="empty-placeholder" style="padding: 24px; color: var(--danger, #d33);">${this.error}</div>`
+            : this.renderSparkContent()}
       </div>
 
       ${this.renderConfigModal()}
@@ -997,9 +1077,31 @@ export class BchSparkGovernance extends LitElement {
   }
 
   private renderSparkContent() {
+    const jobs = this.filteredSparkJobs();
+    const clusterLabel = this.selectedCluster === "all" ? "全部集群" : this.selectedCluster;
+    const scores = jobs.map((job) => sparkHealthScore(job));
+    const buckets = bucketJobsByScore(
+      scores,
+      jobs.map((job) => job.labels.some((l) => l.includes("资源过度配置") || l.includes("过度配置"))),
+    );
+    const radar = averageRadarFromSparkJobs(jobs);
+    const tuningCandidates = jobs.filter((job) => sparkHealthScore(job) < 90).length;
+
     return html`
+      ${renderBchJobHealthOverview({
+        title: "全局健康概览",
+        jobKind: "Spark",
+        clusterLabel,
+        buckets,
+        radar,
+        agentSummary: html`当前环境共接入 <strong>${buckets.total}</strong> 个 Spark 批作业。Spark Tuning Agent 已对近 24h 完成任务进行画像分析，识别 <strong>${tuningCandidates}</strong> 个调优候选，预计可释放约 <strong>4,200</strong> Core 闲置算力。`,
+        stabilityBaseline: radar.stability >= 80 ? "normal" : "warning",
+        performanceBaseline: radar.performance >= 80 ? "normal" : "warning",
+      })}
+
       <div class="sec-header">
         <h2>离线批处理作业治理 (Spark Tuning)</h2>
+        ${this.renderClusterFilter()}
       </div>
 
       <div class="ops-table-container">
@@ -1016,7 +1118,10 @@ export class BchSparkGovernance extends LitElement {
             </tr>
           </thead>
           <tbody>
-            ${this.sparkJobs.map((job) => {
+            ${jobs.length === 0
+              ? html`<tr><td colspan="7" style="text-align:center; color: var(--text-muted); padding: 24px;">当前集群暂无 Spark 作业。</td></tr>`
+              : nothing}
+            ${jobs.map((job) => {
               let statusColor = "color: #10b981; font-weight: bold;";
               if (job.status === "FAILED") {
                 statusColor = "color: #ef4444; font-weight: bold;";
