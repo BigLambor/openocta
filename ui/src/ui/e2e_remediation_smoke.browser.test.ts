@@ -250,10 +250,12 @@ describe("Ops remediation E2E smoke tests", () => {
     const firstCell = app.querySelector(".asset-table td");
     expect(firstCell?.textContent?.trim()).toBe("CMDB Import Hadoop");
 
-    // 6. Test Manual Add Cluster
-    const details = app.querySelector(".asset-form-panel") as HTMLDetailsElement;
-    expect(details).not.toBeNull();
-    details.open = true;
+    // 6. Test Manual Add Cluster (open drawer via button)
+    const addButton = Array.from(app.querySelectorAll("button")).find(
+      btn => btn.textContent?.includes("新增纳管集群")
+    );
+    expect(addButton).toBeDefined();
+    addButton?.click();
     await app.updateComplete;
 
     const form = app.querySelector(".asset-form") as HTMLFormElement;
@@ -294,7 +296,7 @@ describe("Ops remediation E2E smoke tests", () => {
     await app.updateComplete;
 
     const inspectButton = Array.from(app.querySelectorAll("button")).find(
-      btn => btn.textContent?.includes("一键手动巡检")
+      btn => btn.textContent?.includes("一键巡检")
     ) as HTMLButtonElement;
     expect(inspectButton).toBeDefined();
     inspectButton.click();

@@ -19,6 +19,7 @@ import (
 	"github.com/openocta/openocta/pkg/channels/weixin"
 	"github.com/openocta/openocta/pkg/channels/wework"
 	"github.com/openocta/openocta/pkg/config"
+	"github.com/openocta/openocta/pkg/db"
 	"github.com/openocta/openocta/pkg/cron"
 	"github.com/openocta/openocta/pkg/gateway/handlers"
 	"github.com/openocta/openocta/pkg/gateway/protocol"
@@ -34,6 +35,7 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/pprof"
 	_ "net/http/pprof"
@@ -98,27 +100,28 @@ func isTruthyEnv(env func(string) string, key string) bool {
 	return v == "1" || v == "true" || v == "yes"
 }
 
-// NewServer creates a new HTTP server with WebSocket hub and handlers.
-func NewServer(addr string, version string) *Server {
-	mux := http.NewServeMux()
-	env := func(k string) string { return os.Getenv(k) }
-	stateDir := paths.ResolveStateDir(env)
-
-	// Initialize RBAC database
+// initStores initializes all SQLite database and ops stores.
+func initStores(stateDir string) error {
 	if err := rbac.InitDB(stateDir); err != nil {
-		slog.Error("Failed to initialize RBAC database", "error", err)
+		return fmt.Errorf("failed to initialize RBAC database: %w", err)
+	}
+	if err := db.InitDB(stateDir); err != nil {
+		return fmt.Errorf("failed to initialize unified database: %w", err)
 	}
 	if err := ops.InitStore(stateDir); err != nil {
-		slog.Error("Failed to initialize ops cluster store", "error", err)
+		return fmt.Errorf("failed to initialize ops cluster store: %w", err)
 	}
 	if err := ops.InitAlertsStore(stateDir); err != nil {
-		slog.Error("Failed to initialize ops alerts store", "error", err)
+		return fmt.Errorf("failed to initialize ops alerts store: %w", err)
 	}
 	if err := ops.InitHealthStore(stateDir); err != nil {
-		slog.Error("Failed to initialize ops health facts store", "error", err)
+		return fmt.Errorf("failed to initialize ops health facts store: %w", err)
 	}
+	return nil
+}
 
-	// Wire tools hooks to prevent circular dependency
+// wireToolsHooks sets up global tools configuration retrieval hooks.
+func wireToolsHooks() {
 	tools.GetClusterConfig = func(clusterID string) (tools.ClusterConfig, error) {
 		c, err := ops.GetCluster(clusterID)
 		if err != nil {
@@ -159,15 +162,47 @@ func NewServer(addr string, version string) *Server {
 		}
 		return res, nil
 	}
+}
+
+// initCron creates the Cron service if not skipped.
+func initCron(stateDir string, skipCron bool) (*cron.Service, error) {
+	if skipCron {
+		return nil, nil
+	}
+	return cron.NewService(filepath.Join(stateDir, "cron", "jobs.json"))
+}
+
+// initChannels registers channel plugins and adapters.
+func initChannels(chReg *channels.Registry, outReg *outbound.AdapterRegistry) {
+	builtin.Register(chReg)
+	for _, p := range chReg.List() {
+		outReg.Register(p.ID(), &outbound.StubAdapter{ChannelID: p.ID()})
+	}
+}
+
+// NewServer creates a new HTTP server with WebSocket hub and handlers.
+func NewServer(addr string, version string) *Server {
+	mux := http.NewServeMux()
+	env := func(k string) string { return os.Getenv(k) }
+	stateDir := paths.ResolveStateDir(env)
+
+	// Initialize stores
+	if err := initStores(stateDir); err != nil {
+		slog.Error("Failed to initialize database and stores", "error", err)
+	}
+
+	// Wire tools hooks
+	wireToolsHooks()
 
 	skipCron := isTruthyEnv(env, "OPENOCTA_SKIP_CRON")
 	skipChannels := isTruthyEnv(env, "OPENOCTA_SKIP_CHANNELS") || isTruthyEnv(env, "OPENOCTA_SKIP_PROVIDERS")
 
-	var cronSvc *cron.Service
-	if !skipCron {
-		svc, _ := cron.NewService(filepath.Join(stateDir, "cron", "jobs.json"))
-		cronSvc = svc
+	// Initialize Cron
+	cronSvc, err := initCron(stateDir, skipCron)
+	if err != nil {
+		slog.Error("Failed to initialize Cron service", "error", err)
 	}
+
 	var cronSvcIf interface {
 		List(bool) ([]cron.CronJob, error)
 		Add(cron.JobCreate) (cron.CronJob, error)
@@ -176,15 +211,13 @@ func NewServer(addr string, version string) *Server {
 	if cronSvc != nil {
 		cronSvcIf = cronSvc
 	}
+
+	// Initialize Channels
 	chReg := channels.NewRegistry()
 	chRuntimeMgr := channels.NewManager()
 	outReg := outbound.NewAdapterRegistry()
-	// 始终注册内置 Channel 插件，保证 channels.status / 配置 UI 能反映各通道是否已配置。
-	// 桌面模式仍可通过 skipChannels 跳过 Runtime 连接（registerChannelRuntimesFromConfig / Start），避免后台长连接导致不稳定。
-	builtin.Register(chReg)
-	for _, p := range chReg.List() {
-		outReg.Register(p.ID(), &outbound.StubAdapter{ChannelID: p.ID()})
-	}
+	initChannels(chReg, outReg)
+
 	hub := ws.NewHub(version, nil, nil) // Create hub first to get broadcast functions
 
 	// Load configuration at startup
@@ -401,15 +434,21 @@ func NewServer(addr string, version string) *Server {
 		}
 		chRuntimeMgr.StopAll()
 		registerChannelRuntimesFromConfig(chRuntimeMgr, cfg, inboundSink, skipChannels)
-		if err := chRuntimeMgr.Start(context.Background()); err != nil {
-			slog.Warn("channels runtime: reload start error", "error", err)
+		results := chRuntimeMgr.Start(context.Background())
+		for _, r := range results {
+			if !r.Success {
+				slog.Warn("channels runtime: reload start error", "channel", r.ChannelID, "account", r.AccountID, "error", r.Error)
+			}
 		}
 	}
 
 	// 异步启动所有 RuntimeChannel。
 	go func() {
-		if err := chRuntimeMgr.Start(context.Background()); err != nil {
-			slog.Warn("channels runtime: start error", "error", err)
+		results := chRuntimeMgr.Start(context.Background())
+		for _, r := range results {
+			if !r.Success {
+				slog.Warn("channels runtime: start error", "channel", r.ChannelID, "account", r.AccountID, "error", r.Error)
+			}
 		}
 	}()
 
@@ -459,7 +498,7 @@ func (w *statusLoggingResponseWriter) Write(b []byte) (int, error) {
 // 非 API 路径的 GET/HEAD 直接走 handleDist，避免 ServeMux 在 app 环境下匹配异常导致 404。
 func (s *Server) Handler() http.Handler {
 	handlerFunc := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/" && r.Method == "GET" && strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+		if (r.URL.Path == "/" || r.URL.Path == "/ws") && r.Method == "GET" && strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
 			slog.Info("WS Upgrade Request", "method", r.Method, "url", r.URL.String(), "remote_addr", r.RemoteAddr)
 			s.handleWSUpgrade(w, r)
 			return
@@ -584,13 +623,14 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /ws", s.handleWSUpgrade)
 	s.mux.HandleFunc("POST /hooks/", s.handleHooks)
 	s.mux.HandleFunc("POST /hooks", s.handleHooks)
-	s.mux.HandleFunc("GET /debug/pprof/", pprof.Index)
-
-	// 为了支持 cmdline 和 profile 等特定功能，建议也显式注册这几个（Index 里其实包含了大部分，但显式注册更稳妥）
-	s.mux.HandleFunc("GET /debug/pprof/cmdline", pprof.Cmdline)
-	s.mux.HandleFunc("GET /debug/pprof/profile", pprof.Profile)
-	s.mux.HandleFunc("GET /debug/pprof/symbol", pprof.Symbol)
-	s.mux.HandleFunc("GET /debug/pprof/trace", pprof.Trace)
+	// pprof routes (only registered if OPENOCTA_ENABLE_PPROF=1 env is set)
+	if os.Getenv("OPENOCTA_ENABLE_PPROF") == "1" {
+		s.mux.HandleFunc("GET /debug/pprof/", s.requirePprofAuth(pprof.Index))
+		s.mux.HandleFunc("GET /debug/pprof/cmdline", s.requirePprofAuth(pprof.Cmdline))
+		s.mux.HandleFunc("GET /debug/pprof/profile", s.requirePprofAuth(pprof.Profile))
+		s.mux.HandleFunc("GET /debug/pprof/symbol", s.requirePprofAuth(pprof.Symbol))
+		s.mux.HandleFunc("GET /debug/pprof/trace", s.requirePprofAuth(pprof.Trace))
+	}
 }
 
 // resolveDistDirFile resolves the frontend dist directory from the file system.
@@ -688,14 +728,36 @@ func (s *Server) handleDist(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		var rs io.ReadSeeker
-		if rsf, ok := f.(io.ReadSeeker); ok {
-			rs = rsf
-		} else {
-			data, _ := io.ReadAll(f)
-			rs = bytes.NewReader(data)
+		data, err := io.ReadAll(f)
+		if err != nil {
+			http.NotFound(w, r)
+			return
 		}
-		http.ServeContent(w, r, "index.html", info.ModTime(), rs)
+
+		var cfgMode *string
+		if s.ctx != nil && s.ctx.Config != nil && s.ctx.Config.Gateway != nil {
+			cfgMode = s.ctx.Config.Gateway.Mode
+		}
+		runMode := paths.ResolveRunMode(func(k string) string { return os.Getenv(k) }, cfgMode)
+
+		remoteIP, _, err := net.SplitHostPort(r.RemoteAddr)
+		if err != nil {
+			remoteIP = r.RemoteAddr
+		}
+		if remoteIP == "::1" {
+			remoteIP = "127.0.0.1"
+		}
+		isLoopback := remoteIP == "127.0.0.1" || remoteIP == "localhost"
+
+		if runMode == "desktop" || isLoopback {
+			token := s.getExpectedToken()
+			if token != "" {
+				injection := fmt.Sprintf("<script>window.__gateway_token__ = %q;</script>", token)
+				data = bytes.Replace(data, []byte("</head>"), []byte(injection+"</head>"), 1)
+			}
+		}
+
+		http.ServeContent(w, r, "index.html", info.ModTime(), bytes.NewReader(data))
 	}
 
 	cleanPath := path.Clean("/" + strings.TrimSpace(r.URL.Path))
@@ -838,4 +900,38 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		return nil
 	}
 	return s.server.Shutdown(ctx)
+}
+
+func (s *Server) requirePprofAuth(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		remoteIP, _, err := net.SplitHostPort(r.RemoteAddr)
+		if err != nil {
+			remoteIP = r.RemoteAddr
+		}
+		if remoteIP == "::1" {
+			remoteIP = "127.0.0.1"
+		}
+		isLoopback := remoteIP == "127.0.0.1" || remoteIP == "localhost"
+		if isLoopback {
+			next(w, r)
+			return
+		}
+
+		// Check RBAC admin session
+		authHeader := r.Header.Get("Authorization")
+		if authHeader != "" && strings.HasPrefix(strings.ToLower(authHeader), "bearer ") {
+			parts := strings.Split(authHeader, " ")
+			if len(parts) == 2 {
+				token := parts[1]
+				if session, err := rbac.ValidateToken(token); err == nil && session.RoleName == "admin" {
+					next(w, r)
+					return
+				}
+			}
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"error":"无权访问此模块：仅限本地回环或管理员会话","code":"forbidden"}`))
+	}
 }

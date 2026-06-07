@@ -3,12 +3,20 @@
 package session
 
 import (
+	"database/sql"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/openocta/openocta/pkg/db"
 )
+
+// SessionMu protects the session store read-modify-write operations across different goroutines.
+var SessionMu sync.Mutex
 
 // SessionEntry is a minimal session store entry.
 // Mirrors SessionEntry from src/config/sessions/types.ts.
@@ -39,6 +47,36 @@ func ResolveDefaultSessionStorePath(agentID string, env func(string) string) str
 
 // LoadSessionStore reads sessions.json and returns the store.
 func LoadSessionStore(storePath string) (SessionStore, error) {
+	sqliteDB := db.GetDB()
+	if sqliteDB != nil {
+		if err := createSessionTables(sqliteDB); err != nil {
+			return nil, err
+		}
+		if err := migrateSessionJSONToSQLite(sqliteDB, storePath); err != nil {
+			fmt.Printf("warning: session JSON to SQLite migration failed: %v\n", err)
+		}
+
+		rows, err := sqliteDB.Query(`SELECT session_key, detail_json FROM sessions WHERE store_path = ?`, storePath)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+
+		store := SessionStore{}
+		for rows.Next() {
+			var key, detailStr string
+			if err := rows.Scan(&key, &detailStr); err != nil {
+				return nil, err
+			}
+			var entry SessionEntry
+			if err := json.Unmarshal([]byte(detailStr), &entry); err != nil {
+				return nil, err
+			}
+			store[key] = entry
+		}
+		return store, nil
+	}
+
 	data, err := os.ReadFile(storePath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -94,6 +132,42 @@ func LoadCombinedSessionStore(env func(string) string, agentIDs []string) (store
 
 // SaveSessionStore writes the session store back to disk.
 func SaveSessionStore(storePath string, store SessionStore) error {
+	sqliteDB := db.GetDB()
+	if sqliteDB != nil {
+		if err := createSessionTables(sqliteDB); err != nil {
+			return err
+		}
+
+		tx, err := sqliteDB.Begin()
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+
+		_, err = tx.Exec(`DELETE FROM sessions WHERE store_path = ?`, storePath)
+		if err != nil {
+			return err
+		}
+
+		stmt, err := tx.Prepare(`INSERT INTO sessions (store_path, session_key, detail_json) VALUES (?, ?, ?)`)
+		if err != nil {
+			return err
+		}
+		defer stmt.Close()
+
+		for k, entry := range store {
+			b, err := json.Marshal(entry)
+			if err != nil {
+				return err
+			}
+			_, err = stmt.Exec(storePath, k, string(b))
+			if err != nil {
+				return err
+			}
+		}
+		return tx.Commit()
+	}
+
 	if storePath == "" {
 		return nil
 	}
@@ -110,6 +184,9 @@ func SaveSessionStore(storePath string, store SessionStore) error {
 // UpdateSessionUpdatedAt updates or creates a session entry's updatedAt for the given agent/session.
 // This mirrors the behavior of touching a session on new activity.
 func UpdateSessionUpdatedAt(agentID, sessionID string, env func(string) string, nowMs int64) error {
+	SessionMu.Lock()
+	defer SessionMu.Unlock()
+
 	if env == nil {
 		env = os.Getenv
 	}
@@ -143,5 +220,113 @@ func UpdateSessionUpdatedAt(agentID, sessionID string, env func(string) string, 
 	// Creating store[sessionID] would produce a duplicate key (e.g. "channel-feishu-oc_xxx")
 	// that differs from the canonical sessionKey (e.g. "agent:main:channel:feishu:oc_xxx").
 	// The entry will be created by updateSessionAfterRun with the correct sessionKey.
+	return nil
+}
+
+func createSessionTables(sqliteDB *sql.DB) error {
+	var count int
+	err := sqliteDB.QueryRow("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='sessions'").Scan(&count)
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		_, err = sqliteDB.Exec(`
+			CREATE TABLE sessions (
+				store_path TEXT,
+				session_key TEXT,
+				detail_json TEXT,
+				PRIMARY KEY (store_path, session_key)
+			);
+		`)
+		return err
+	}
+
+	rows, err := sqliteDB.Query("PRAGMA table_info(sessions)")
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	hasStorePath := false
+	for rows.Next() {
+		var cid int
+		var name, typeVal string
+		var notnull, pk int
+		var dfltVal interface{}
+		if err := rows.Scan(&cid, &name, &typeVal, &notnull, &dfltVal, &pk); err != nil {
+			return err
+		}
+		if name == "store_path" {
+			hasStorePath = true
+		}
+	}
+
+	if !hasStorePath {
+		tx, err := sqliteDB.Begin()
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+
+		if _, err := tx.Exec("ALTER TABLE sessions RENAME TO sessions_old"); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`
+			CREATE TABLE sessions (
+				store_path TEXT,
+				session_key TEXT,
+				detail_json TEXT,
+				PRIMARY KEY (store_path, session_key)
+			);
+		`); err != nil {
+			return err
+		}
+		if _, err := tx.Exec("INSERT INTO sessions (store_path, session_key, detail_json) SELECT '', session_key, detail_json FROM sessions_old"); err != nil {
+			return err
+		}
+		if _, err := tx.Exec("DROP TABLE sessions_old"); err != nil {
+			return err
+		}
+		return tx.Commit()
+	}
+
+	return nil
+}
+
+func migrateSessionJSONToSQLite(db *sql.DB, storePath string) error {
+	if _, err := os.Stat(storePath); err == nil {
+		data, err := os.ReadFile(storePath)
+		if err == nil && len(data) > 0 {
+			var store SessionStore
+			if json.Unmarshal(data, &store) == nil && len(store) > 0 {
+				tx, err := db.Begin()
+				if err != nil {
+					return err
+				}
+				defer tx.Rollback()
+
+				stmt, err := tx.Prepare(`INSERT OR REPLACE INTO sessions (store_path, session_key, detail_json) VALUES (?, ?, ?)`)
+				if err != nil {
+					return err
+				}
+				defer stmt.Close()
+
+				for k, entry := range store {
+					b, err := json.Marshal(entry)
+					if err != nil {
+						return err
+					}
+					_, err = stmt.Exec(storePath, k, string(b))
+					if err != nil {
+						return err
+					}
+				}
+
+				if err := tx.Commit(); err == nil {
+					_ = os.Rename(storePath, storePath+".bak")
+				}
+			}
+		}
+	}
 	return nil
 }

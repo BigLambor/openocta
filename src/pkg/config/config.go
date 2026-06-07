@@ -1,7 +1,10 @@
 package config
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"strings"
 	"time"
@@ -71,12 +74,20 @@ func Load(env EnvGetter) (*OpenOctaConfig, error) {
 	return &cfg, nil
 }
 
-// DefaultGatewayToken is the default gateway.auth.token when initializing new configs.
-// Frontend uses the same value when user does not fill in the gateway token.
+// DefaultGatewayToken is the historical default gateway.auth.token.
 const DefaultGatewayToken = "edc146993b5ae0b1544c3137cc888f94436cf11e1952cff6"
 
-// normalizeDesktopGatewayAuth forces gateway.auth.token to DefaultGatewayToken in desktop run mode
-// when using token auth (not password). Existing non-default tokens are overwritten; persists via Load.
+// generateRandomToken generates a secure 24-byte random hex token.
+func generateRandomToken() string {
+	b := make([]byte, 24)
+	if _, err := rand.Read(b); err != nil {
+		return "fallback" + fmt.Sprintf("%d", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(b)
+}
+
+// normalizeDesktopGatewayAuth normalizes gateway token in desktop run mode.
+// If it is empty or is the legacy DefaultGatewayToken, generates a new random token.
 func normalizeDesktopGatewayAuth(cfg *OpenOctaConfig, env EnvGetter) bool {
 	if env == nil {
 		env = DefaultEnv
@@ -103,8 +114,9 @@ func normalizeDesktopGatewayAuth(cfg *OpenOctaConfig, env EnvGetter) bool {
 		}
 	}
 	changed := false
-	if cfg.Gateway.Auth.Token != DefaultGatewayToken {
-		cfg.Gateway.Auth.Token = DefaultGatewayToken
+	curToken := strings.TrimSpace(cfg.Gateway.Auth.Token)
+	if curToken == "" || curToken == DefaultGatewayToken {
+		cfg.Gateway.Auth.Token = generateRandomToken()
 		changed = true
 	}
 	if cfg.Gateway.Auth.Mode == nil || strings.TrimSpace(*cfg.Gateway.Auth.Mode) == "" {
@@ -115,7 +127,7 @@ func normalizeDesktopGatewayAuth(cfg *OpenOctaConfig, env EnvGetter) bool {
 	return changed
 }
 
-// EnsureDefaultConfig ensures ~/.openocta/openocta.json exists; if not, creates the dir and writes minimal default config with DefaultGatewayToken.
+// EnsureDefaultConfig ensures ~/.openocta/openocta.json exists; if not, creates the dir and writes minimal default config with a random Gateway Token.
 func EnsureDefaultConfig(env EnvGetter) error {
 	if env == nil {
 		env = DefaultEnv
@@ -145,7 +157,7 @@ func EnsureDefaultConfig(env EnvGetter) error {
 			Bind: &bindLoopback,
 			Auth: &GatewayAuthConfig{
 				Mode:  &modeToken,
-				Token: DefaultGatewayToken,
+				Token: generateRandomToken(),
 			},
 			Tailscale: &GatewayTailscaleConfig{
 				Mode:        &modeOff,

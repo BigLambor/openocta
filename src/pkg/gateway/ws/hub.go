@@ -3,7 +3,10 @@ package ws
 
 import (
 	"encoding/json"
+	"net"
 	"net/http"
+	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -14,6 +17,7 @@ import (
 	"github.com/openocta/openocta/pkg/gateway/handlers"
 	"github.com/openocta/openocta/pkg/gateway/protocol"
 	"github.com/openocta/openocta/pkg/logging"
+	"github.com/openocta/openocta/pkg/paths"
 	"github.com/openocta/openocta/pkg/rbac"
 )
 
@@ -25,13 +29,61 @@ const (
 	pingPeriod = (pongWait * 9) / 10
 )
 
-var upgrader = websocket.Upgrader{
-	ReadBufferSize:  1024,
-	WriteBufferSize: 1024,
-	CheckOrigin: func(r *http.Request) bool {
-		// Phase 2d: allow all origins; tighten in Phase 2e with config
+// checkWebSocketOrigin checks if the origin is allowed.
+func checkWebSocketOrigin(r *http.Request, h *Hub) bool {
+	origin := strings.TrimSpace(r.Header.Get("Origin"))
+	if origin == "" {
 		return true
-	},
+	}
+
+	// Resolve runMode from config context or env
+	runMode := paths.ResolveRunMode(os.Getenv, nil)
+	var allowedOrigins []string
+	if h.context != nil && h.context.LoadConfigSnapshot != nil {
+		if snap, err := h.context.LoadConfigSnapshot(); err == nil && snap != nil && snap.Config != nil && snap.Config.Gateway != nil {
+			runMode = paths.ResolveRunMode(os.Getenv, snap.Config.Gateway.Mode)
+			if snap.Config.Gateway.ControlUI != nil {
+				allowedOrigins = snap.Config.Gateway.ControlUI.AllowedOrigins
+			}
+		}
+	}
+
+	if runMode == "desktop" {
+		if strings.HasPrefix(origin, "wails://") || strings.HasPrefix(origin, "http://wails.localhost") {
+			return true
+		}
+		u, err := url.Parse(origin)
+		if err != nil {
+			return false
+		}
+		host := u.Host
+		if h, _, err := net.SplitHostPort(u.Host); err == nil {
+			host = h
+		}
+		return host == "localhost" || host == "127.0.0.1"
+	}
+
+	// Service mode: check allowedOrigins
+	if len(allowedOrigins) > 0 {
+		for _, a := range allowedOrigins {
+			if strings.TrimSpace(a) == origin {
+				return true
+			}
+		}
+		return false
+	}
+
+	// Fallback to OPENOCTA_CORS_ORIGINS env
+	if envCors := os.Getenv("OPENOCTA_CORS_ORIGINS"); envCors != "" {
+		for _, part := range strings.Split(envCors, ",") {
+			if strings.TrimSpace(part) == origin {
+				return true
+			}
+		}
+		return false
+	}
+
+	return true
 }
 
 // Client represents a connected WebSocket client.
@@ -44,6 +96,7 @@ type Client struct {
 	Context  *handlers.Context
 	// ConnectParams set after successful handshake
 	Connect *protocol.ConnectParams
+	Session *rbac.UserSession
 	mu      sync.RWMutex
 	// queuedBytes tracks the approximate number of bytes pending in Send.
 	queuedBytes int64
@@ -251,7 +304,14 @@ func (h *Hub) broadcastInternal(event string, payload interface{}, opts *Broadca
 
 // ServeWS upgrades HTTP to WebSocket and handles the connection.
 func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request) {
-	conn, err := upgrader.Upgrade(w, r, nil)
+	localUpgrader := websocket.Upgrader{
+		ReadBufferSize:  1024,
+		WriteBufferSize: 1024,
+		CheckOrigin: func(req *http.Request) bool {
+			return checkWebSocketOrigin(req, h)
+		},
+	}
+	conn, err := localUpgrader.Upgrade(w, r, nil)
 	if err != nil {
 		wsLog.Warn("ws upgrade failed err=%v", err)
 		return
@@ -363,9 +423,14 @@ func (c *Client) handleMessage(data []byte) {
 			wsLog.Warn("response channel full, dropping message connId=%s id=%s method=%s", c.ConnID, id, method)
 		}
 	}
+	c.mu.RLock()
+	connectParams := c.Connect
+	session := c.Session
+	c.mu.RUnlock()
+
 	opts := handlers.HandlerOpts{
 		Req:     req,
-		Client:  &handlers.Client{Connect: *c.Connect, ConnID: c.ConnID},
+		Client:  &handlers.Client{Connect: *connectParams, ConnID: c.ConnID, Session: session},
 		Respond: respond,
 		Context: c.Context,
 	}
@@ -394,29 +459,31 @@ func (c *Client) handleConnect(id string, params interface{}) {
 		return
 	}
 
+	// Try RBAC validation first if auth is provided
+	var session *rbac.UserSession
+	gotToken := ""
+	if cp.Auth != nil {
+		gotToken = strings.TrimSpace(cp.Auth.Token)
+		if gotToken == "" {
+			gotToken = strings.TrimSpace(cp.Auth.Password)
+		}
+	}
+
+	rbacValid := false
+	if gotToken != "" {
+		if s, err := rbac.ValidateToken(gotToken); err == nil {
+			rbacValid = true
+			session = s
+		}
+	}
+
 	// Gateway token validation: when expected token is configured, require valid auth
 	expectedToken := ""
 	if c.Context != nil && c.Context.LoadConfigSnapshot != nil {
 		expectedToken = handlers.GetExpectedGatewayToken(c.Context.LoadConfigSnapshot)
 	}
 	if expectedToken != "" {
-		gotToken := ""
-		if cp.Auth != nil {
-			gotToken = strings.TrimSpace(cp.Auth.Token)
-			if gotToken == "" {
-				gotToken = strings.TrimSpace(cp.Auth.Password)
-			}
-		}
-
-		// 1. Try RBAC validation first
-		rbacValid := false
-		if gotToken != "" {
-			if _, err := rbac.ValidateToken(gotToken); err == nil {
-				rbacValid = true
-			}
-		}
-
-		// 2. Fallback to legacy expectedToken check if not a valid RBAC token
+		// Fallback to legacy expectedToken check if not a valid RBAC token
 		if !rbacValid && (gotToken == "" || gotToken != expectedToken) {
 			authMsg := "认证失败：网关令牌/登录会话无效或未提供，请重新登录或配置正确的 Gateway Token"
 			c.sendError(id, "invalid_gateway_token", authMsg)
@@ -446,6 +513,7 @@ func (c *Client) handleConnect(id string, params interface{}) {
 
 	c.mu.Lock()
 	c.Connect = &cp
+	c.Session = session
 	c.mu.Unlock()
 
 	// Send hello-ok

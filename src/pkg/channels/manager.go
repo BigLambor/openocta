@@ -68,18 +68,41 @@ func (m *Manager) List() []string {
 	return out
 }
 
-// Start 启动所有已注册通道。
-func (m *Manager) Start(ctx context.Context) error {
+// RuntimeStartResult 表示通道运行时的启动结果，包含启动状态与潜在错误信息。
+type RuntimeStartResult struct {
+	ChannelID string `json:"channelId"`
+	AccountID string `json:"accountId"`
+	Success   bool   `json:"success"`
+	Error     string `json:"error,omitempty"`
+}
+
+// Start 启动所有已注册通道，返回启动结果数组。
+func (m *Manager) Start(ctx context.Context) []RuntimeStartResult {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	for name, ch := range m.channels {
-		if err := ch.Start(ctx); err != nil {
-			// 目前采用“尽力而为”策略：记录错误但继续启动其它通道。
-			// 由调用者通过 Status 或日志感知失败情况。
-			_ = fmt.Errorf("start channel %s failed: %w", name, err)
+	var results []RuntimeStartResult
+	for _, ch := range m.channels {
+		if ch == nil {
+			continue
 		}
+		err := ch.Start(ctx)
+		res := RuntimeStartResult{
+			ChannelID: ch.Name(),
+			AccountID: ch.AccountID(),
+			Success:   err == nil,
+		}
+		if err != nil {
+			res.Error = err.Error()
+			// 尝试将启动阶段的错误设置到运行时对象中，使其在 channels.status 接口中立即可见
+			if provider, ok := ch.(interface{ MarkConnectionFailed(error) }); ok {
+				provider.MarkConnectionFailed(err)
+			} else if provider, ok := ch.(interface{ SetLastError(error) }); ok {
+				provider.SetLastError(err)
+			}
+		}
+		results = append(results, res)
 	}
-	return nil
+	return results
 }
 
 // Stop 停止所有已注册通道。

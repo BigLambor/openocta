@@ -14,7 +14,7 @@ const (
 )
 
 // gatewayHTTPAuthDisabled 为 true 时不校验 HTTP 网关令牌（全部放行）。需要恢复校验时改为 false。
-const gatewayHTTPAuthDisabled = true
+const gatewayHTTPAuthDisabled = false
 
 // getExpectedToken returns the gateway token from config or env.
 // Config takes precedence; env OPENOCTA_GATEWAY_TOKEN overrides when set.

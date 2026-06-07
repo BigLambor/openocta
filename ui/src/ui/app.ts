@@ -111,6 +111,11 @@ import { gatewayHttpBase } from "./gateway-url.ts";
 import type { NativeDialogModel } from "./views/native-dialog-overlay.ts";
 import { type ChatAttachment, type ChatQueueItem, type CronFormState } from "./ui-types.ts";
 
+import { ChatStore } from "./controllers/chatStore.ts";
+import { ConfigStore } from "./controllers/configStore.ts";
+import { OpsStore } from "./controllers/opsStore.ts";
+import { ChannelsStore } from "./controllers/channelsStore.ts";
+
 declare global {
   interface Window {
     __OPENCLAW_CONTROL_UI_BASE_PATH__?: string;
@@ -171,16 +176,14 @@ export class OpenClawApp extends LitElement implements NativeDialogInvoker {
   @state() assistantAvatar = injectedAssistantIdentity.avatar;
   @state() assistantAgentId = injectedAssistantIdentity.agentId ?? null;
 
+  // Lit Controllers as split state stores
+  chatStore = new ChatStore(this);
+  configStore = new ConfigStore(this);
+  opsStore = new OpsStore(this);
+  channelsStore = new ChannelsStore(this);
+
+  // Global app-level states (unsplit)
   @state() sessionKey = this.settings.sessionKey;
-  @state() chatLoading = false;
-  @state() chatSending = false;
-  @state() chatMessage = "";
-  @state() chatMessages: unknown[] = [];
-  @state() chatToolMessages: unknown[] = [];
-  @state() chatStream: string | null = null;
-  @state() chatStreamStartedAt: number | null = null;
-  @state() chatRunId: string | null = null;
-  // Workbench scenario AI (in-panel streaming, separate from the global Copilot session)
   @state() workbenchAiSessionKey: string | null = null;
   @state() workbenchAiRunId: string | null = null;
   @state() workbenchAiStream: string | null = null;
@@ -194,12 +197,6 @@ export class OpenClawApp extends LitElement implements NativeDialogInvoker {
   @state() workbenchAiCopilotAlertId: string | null = null;
   @state() workbenchAiCopilotMode: "root-cause" | "similar" | "action" | null = null;
   @state() compactionStatus: CompactionStatus | null = null;
-  @state() chatAvatarUrl: string | null = null;
-  @state() chatThinkingLevel: string | null = null;
-  @state() chatModelRef: string | null = null;
-  @state() chatQueue: ChatQueueItem[] = [];
-  @state() chatAttachments: ChatAttachment[] = [];
-  // Sidebar state for tool output viewing
   @state() sidebarOpen = false;
   @state() sidebarContent: string | null = null;
   @state() sidebarError: string | null = null;
@@ -222,57 +219,11 @@ export class OpenClawApp extends LitElement implements NativeDialogInvoker {
   @state() execApprovalBusy = false;
   @state() execApprovalError: string | null = null;
   @state() pendingGatewayUrl: string | null = null;
-
-  @state() configLoading = false;
-  @state() configRaw = "{\n}\n";
-  @state() configRawOriginal = "";
-  @state() configValid: boolean | null = null;
-  @state() configIssues: unknown[] = [];
-  @state() configSaving = false;
-  @state() configApplying = false;
   @state() updateRunning = false;
   @state() applySessionKey = this.settings.lastActiveSessionKey;
-  @state() configSnapshot: ConfigSnapshot | null = null;
-  @state() configSchema: unknown = null;
-  @state() configSchemaVersion: string | null = null;
-  @state() configSchemaLoading = false;
-  @state() configUiHints: ConfigUiHints = {};
-  @state() configForm: Record<string, unknown> | null = null;
-  @state() configFormOriginal: Record<string, unknown> | null = null;
-  @state() configFormDirty = false;
-  @state() configFormMode: "form" | "raw" = "raw";
-  @state() configSearchQuery = "";
-  @state() configActiveSection: string | null = null;
-  @state() configActiveSubsection: string | null = null;
 
-  @state() channelsLoading = false;
-  @state() channelsSnapshot: ChannelsStatusSnapshot | null = null;
-  @state() channelsError: string | null = null;
-  @state() channelsLastSuccess: number | null = null;
-  @state() whatsappLoginMessage: string | null = null;
-  @state() whatsappLoginQrDataUrl: string | null = null;
-  @state() whatsappLoginConnected: boolean | null = null;
-  @state() whatsappBusy = false;
-  @state() weworkQrModalOpen = false;
-  @state() weworkQrModalLoading = false;
-  @state() weworkQrModalPolling = false;
-  @state() weworkQrModalSuccess = false;
-  @state() weworkQrModalError: string | null = null;
-  @state() weworkQrModalReplaceWarn = false;
-  @state() weworkQrModalAuthUrl: string | null = null;
-  @state() weworkQrModalGenPageUrl: string | null = null;
-  @state() weixinQrModalOpen = false;
-  @state() weixinQrModalLoading = false;
-  @state() weixinQrModalPolling = false;
-  @state() weixinQrModalSuccess = false;
-  @state() weixinQrModalError: string | null = null;
-  @state() weixinQrModalReplaceWarn = false;
-  @state() weixinQrModalImageSrc: string | null = null;
-  @state() weixinQrModalScanPageUrl: string | null = null;
-  @state() weixinQrModalScanned = false;
   @state() nativeDialog: NativeDialogModel = null;
   @state() nativePromptInput = "";
-  /** Browser interval id for WeCom QR polling (not reactive) */
   weworkQrPollTimer: number | null = null;
   weworkQrSuccessCloseTimer: number | null = null;
   weixinQrPollAbort = false;
@@ -283,9 +234,6 @@ export class OpenClawApp extends LitElement implements NativeDialogInvoker {
   private nativeResolveConfirm: ((ok: boolean) => void) | null = null;
   private nativeResolveAlert: (() => void) | null = null;
   private nativeResolvePrompt: ((v: string | null) => void) | null = null;
-  @state() nostrProfileFormState: NostrProfileFormState | null = null;
-  @state() nostrProfileAccountId: string | null = null;
-  @state() channelsSelectedChannelId: string | null = null;
   @state() mcpSelectedKey: string | null = null;
   @state() mcpViewMode: "list" | "card" = "card";
   @state() mcpEditMode: "form" | "raw" = "form";
@@ -354,85 +302,11 @@ export class OpenClawApp extends LitElement implements NativeDialogInvoker {
   @state() skillsSkillDocError: string | null = null;
   @state() skillsViewMode: "list" | "card" = "card";
 
-  // Tech Ops Domains
-  @state() opsActiveSubTabs: Record<
-    string,
-    | "overview"
-    | "assetTopology"
-    | "observability"
-    | "inspection"
-    | "jobGovernance"
-    | "diagnosis"
-    | "governance"
-    | "capacity"
-    | "change"
-    | "employees"
-  > = {
-    hadoop: "overview",
-    fi: "overview",
-    gbase: "overview",
-    governance: "overview",
-    dataapps: "overview",
-  };
-  @state() opsSelectedAlertGroupIds: Record<string, string | null> = {
-    hadoop: null,
-    fi: null,
-    gbase: null,
-    governance: null,
-    dataapps: null,
-  };
-  @state() opsSelectedInspectionIds: Record<string, string | null> = {
-    hadoop: null,
-    fi: null,
-    gbase: null,
-    governance: null,
-    dataapps: null,
-  };
-  @state() opsAlertsByDomain: Record<
-    string,
-    import("./controllers/ops-alerts.ts").ReturnType<
-      typeof import("./controllers/ops-alerts.ts").mapAlertGroupForUI
-    >[]
-  > = {};
-  @state() opsAlertsStats: Record<
-    string,
-    { originalTotal: number; reductionRate: number; mergedTotal: number }
-  > = {};
-  @state() opsAlertsLoading: Record<string, boolean> = {};
-  @state() opsAlertsError: Record<string, string | null> = {};
-  @state() opsInspectionImStatus: import("./controllers/ops-inspection.ts").OpsInspectionIMStatus | null =
-    null;
-  @state() opsIsInspecting: Record<string, boolean> = {
-    hadoop: false,
-    fi: false,
-    gbase: false,
-    governance: false,
-    dataapps: false,
-  };
-  @state() opsSelectedEntityIds: Record<string, string> = {
-    hadoop: "all",
-    fi: "all",
-    gbase: "all",
-    governance: "all",
-    dataapps: "all",
-  };
-  @state() opsDomainClusters: Record<string, import("./controllers/ops-clusters.ts").OpsClusterRecord[]> =
-    {};
-  @state() opsDomainClustersLoading: Record<string, boolean> = {};
-  @state() opsEntitySelectorOpen: Record<string, boolean> = {
-    hadoop: false,
-    fi: false,
-    gbase: false,
-    governance: false,
-    dataapps: false,
-  };
-
   @state() presenceLoading = false;
   @state() presenceEntries: PresenceEntry[] = [];
   @state() presenceError: string | null = null;
   @state() presenceStatus: string | null = null;
 
-  // RBAC Authentication & Users State
   @state() rbacToken: string | null = localStorage.getItem("openocta_rbac_token");
   @state() rbacUser: { userId: number; username: string; roleName: string; permissions: string[] } | null = null;
   @state() rbacChecked = false;
@@ -442,33 +316,206 @@ export class OpenClawApp extends LitElement implements NativeDialogInvoker {
   @state() rbacRolesList: Array<Record<string, unknown>> = [];
   @state() rbacUsersLoading = false;
 
-  @state() opsClusters: import("./controllers/ops-clusters.ts").OpsClusterRecord[] = [];
-  @state() opsClustersLoading = false;
-  @state() opsClustersError: string | null = null;
-  @state() opsHealthSnapshots: import("./controllers/ops-clusters.ts").OpsHealthSnapshot[] = [];
-  @state() opsHealthSnapshotsLoading = false;
-  @state() opsHealthSnapshotsError: string | null = null;
-  @state() opsFlinkJobs: import("./controllers/bch-client.ts").FlinkJob[] = [];
-  @state() opsFlinkJobsLoading = false;
-  @state() opsSparkJobs: import("./controllers/bch-client.ts").SparkJob[] = [];
-  @state() opsSparkJobsLoading = false;
-  @state() opsDashboardSummary: import("./controllers/ops-clusters.ts").OpsDashboardSummary | null =
-    null;
-  @state() opsDashboardLoading = false;
-  @state() opsDashboardError: string | null = null;
-  @state() opsBchScenarioSummary: import("./controllers/bch-scenario-summary.ts").BchDomainScenarioSummary | null =
-    null;
-  @state() opsBchScenarioSummaryLoading = false;
-  @state() opsBchScenarioSummaryError: string | null = null;
-  @state() opsGlobalInspecting = false;
-  @state() opsDashboardToast: string | null = null;
-  @state() opsDashboardFeedLoading = false;
-  @state() opsDashboardFeedError: string | null = null;
-  @state() opsDashboardAlertHighlights: import("./controllers/ops-dashboard-feed.ts").DashboardAlertHighlight[] =
-    [];
-  @state() opsDashboardDomainPendingAlerts: Record<string, number> = {};
-  @state() opsDashboardRecentInspections: import("./controllers/ops-dashboard-feed.ts").DashboardInspectionRun[] =
-    [];
+
+  // --- ChatStore Delegation Getters/Setters ---
+  get chatLoading() { return this.chatStore.chatLoading; }
+  set chatLoading(v) { this.chatStore.chatLoading = v; this.requestUpdate(); }
+  get chatSending() { return this.chatStore.chatSending; }
+  set chatSending(v) { this.chatStore.chatSending = v; this.requestUpdate(); }
+  get chatMessage() { return this.chatStore.chatMessage; }
+  set chatMessage(v) { this.chatStore.chatMessage = v; this.requestUpdate(); }
+  get chatMessages() { return this.chatStore.chatMessages; }
+  set chatMessages(v) { this.chatStore.chatMessages = v; this.requestUpdate(); }
+  get chatToolMessages() { return this.chatStore.chatToolMessages; }
+  set chatToolMessages(v) { this.chatStore.chatToolMessages = v; this.requestUpdate(); }
+  get chatStream() { return this.chatStore.chatStream; }
+  set chatStream(v) { this.chatStore.chatStream = v; this.requestUpdate(); }
+  get chatStreamStartedAt() { return this.chatStore.chatStreamStartedAt; }
+  set chatStreamStartedAt(v) { this.chatStore.chatStreamStartedAt = v; this.requestUpdate(); }
+  get chatRunId() { return this.chatStore.chatRunId; }
+  set chatRunId(v) { this.chatStore.chatRunId = v; this.requestUpdate(); }
+  get chatAvatarUrl() { return this.chatStore.chatAvatarUrl; }
+  set chatAvatarUrl(v) { this.chatStore.chatAvatarUrl = v; this.requestUpdate(); }
+  get chatThinkingLevel() { return this.chatStore.chatThinkingLevel; }
+  set chatThinkingLevel(v) { this.chatStore.chatThinkingLevel = v; this.requestUpdate(); }
+  get chatModelRef() { return this.chatStore.chatModelRef; }
+  set chatModelRef(v) { this.chatStore.chatModelRef = v; this.requestUpdate(); }
+  get chatQueue() { return this.chatStore.chatQueue; }
+  set chatQueue(v) { this.chatStore.chatQueue = v; this.requestUpdate(); }
+  get chatAttachments() { return this.chatStore.chatAttachments; }
+  set chatAttachments(v) { this.chatStore.chatAttachments = v; this.requestUpdate(); }
+
+  // --- ConfigStore Delegation Getters/Setters ---
+  get configLoading() { return this.configStore.configLoading; }
+  set configLoading(v) { this.configStore.configLoading = v; this.requestUpdate(); }
+  get configRaw() { return this.configStore.configRaw; }
+  set configRaw(v) { this.configStore.configRaw = v; this.requestUpdate(); }
+  get configRawOriginal() { return this.configStore.configRawOriginal; }
+  set configRawOriginal(v) { this.configStore.configRawOriginal = v; this.requestUpdate(); }
+  get configValid() { return this.configStore.configValid; }
+  set configValid(v) { this.configStore.configValid = v; this.requestUpdate(); }
+  get configIssues() { return this.configStore.configIssues; }
+  set configIssues(v) { this.configStore.configIssues = v; this.requestUpdate(); }
+  get configSaving() { return this.configStore.configSaving; }
+  set configSaving(v) { this.configStore.configSaving = v; this.requestUpdate(); }
+  get configApplying() { return this.configStore.configApplying; }
+  set configApplying(v) { this.configStore.configApplying = v; this.requestUpdate(); }
+  get configSnapshot() { return this.configStore.configSnapshot; }
+  set configSnapshot(v) { this.configStore.configSnapshot = v; this.requestUpdate(); }
+  get configSchema() { return this.configStore.configSchema; }
+  set configSchema(v) { this.configStore.configSchema = v; this.requestUpdate(); }
+  get configSchemaVersion() { return this.configStore.configSchemaVersion; }
+  set configSchemaVersion(v) { this.configStore.configSchemaVersion = v; this.requestUpdate(); }
+  get configSchemaLoading() { return this.configStore.configSchemaLoading; }
+  set configSchemaLoading(v) { this.configStore.configSchemaLoading = v; this.requestUpdate(); }
+  get configUiHints() { return this.configStore.configUiHints; }
+  set configUiHints(v) { this.configStore.configUiHints = v; this.requestUpdate(); }
+  get configForm() { return this.configStore.configForm; }
+  set configForm(v) { this.configStore.configForm = v; this.requestUpdate(); }
+  get configFormOriginal() { return this.configStore.configFormOriginal; }
+  set configFormOriginal(v) { this.configStore.configFormOriginal = v; this.requestUpdate(); }
+  get configFormDirty() { return this.configStore.configFormDirty; }
+  set configFormDirty(v) { this.configStore.configFormDirty = v; this.requestUpdate(); }
+  get configFormMode() { return this.configStore.configFormMode; }
+  set configFormMode(v) { this.configStore.configFormMode = v; this.requestUpdate(); }
+  get configSearchQuery() { return this.configStore.configSearchQuery; }
+  set configSearchQuery(v) { this.configStore.configSearchQuery = v; this.requestUpdate(); }
+  get configActiveSection() { return this.configStore.configActiveSection; }
+  set configActiveSection(v) { this.configStore.configActiveSection = v; this.requestUpdate(); }
+  get configActiveSubsection() { return this.configStore.configActiveSubsection; }
+  set configActiveSubsection(v) { this.configStore.configActiveSubsection = v; this.requestUpdate(); }
+
+  // --- ChannelsStore Delegation Getters/Setters ---
+  get channelsLoading() { return this.channelsStore.channelsLoading; }
+  set channelsLoading(v) { this.channelsStore.channelsLoading = v; this.requestUpdate(); }
+  get channelsSnapshot() { return this.channelsStore.channelsSnapshot; }
+  set channelsSnapshot(v) { this.channelsStore.channelsSnapshot = v; this.requestUpdate(); }
+  get channelsError() { return this.channelsStore.channelsError; }
+  set channelsError(v) { this.channelsStore.channelsError = v; this.requestUpdate(); }
+  get channelsLastSuccess() { return this.channelsStore.channelsLastSuccess; }
+  set channelsLastSuccess(v) { this.channelsStore.channelsLastSuccess = v; this.requestUpdate(); }
+  get whatsappLoginMessage() { return this.channelsStore.whatsappLoginMessage; }
+  set whatsappLoginMessage(v) { this.channelsStore.whatsappLoginMessage = v; this.requestUpdate(); }
+  get whatsappLoginQrDataUrl() { return this.channelsStore.whatsappLoginQrDataUrl; }
+  set whatsappLoginQrDataUrl(v) { this.channelsStore.whatsappLoginQrDataUrl = v; this.requestUpdate(); }
+  get whatsappLoginConnected() { return this.channelsStore.whatsappLoginConnected; }
+  set whatsappLoginConnected(v) { this.channelsStore.whatsappLoginConnected = v; this.requestUpdate(); }
+  get whatsappBusy() { return this.channelsStore.whatsappBusy; }
+  set whatsappBusy(v) { this.channelsStore.whatsappBusy = v; this.requestUpdate(); }
+  get weworkQrModalOpen() { return this.channelsStore.weworkQrModalOpen; }
+  set weworkQrModalOpen(v) { this.channelsStore.weworkQrModalOpen = v; this.requestUpdate(); }
+  get weworkQrModalLoading() { return this.channelsStore.weworkQrModalLoading; }
+  set weworkQrModalLoading(v) { this.channelsStore.weworkQrModalLoading = v; this.requestUpdate(); }
+  get weworkQrModalPolling() { return this.channelsStore.weworkQrModalPolling; }
+  set weworkQrModalPolling(v) { this.channelsStore.weworkQrModalPolling = v; this.requestUpdate(); }
+  get weworkQrModalSuccess() { return this.channelsStore.weworkQrModalSuccess; }
+  set weworkQrModalSuccess(v) { this.channelsStore.weworkQrModalSuccess = v; this.requestUpdate(); }
+  get weworkQrModalError() { return this.channelsStore.weworkQrModalError; }
+  set weworkQrModalError(v) { this.channelsStore.weworkQrModalError = v; this.requestUpdate(); }
+  get weworkQrModalReplaceWarn() { return this.channelsStore.weworkQrModalReplaceWarn; }
+  set weworkQrModalReplaceWarn(v) { this.channelsStore.weworkQrModalReplaceWarn = v; this.requestUpdate(); }
+  get weworkQrModalAuthUrl() { return this.channelsStore.weworkQrModalAuthUrl; }
+  set weworkQrModalAuthUrl(v) { this.channelsStore.weworkQrModalAuthUrl = v; this.requestUpdate(); }
+  get weworkQrModalGenPageUrl() { return this.channelsStore.weworkQrModalGenPageUrl; }
+  set weworkQrModalGenPageUrl(v) { this.channelsStore.weworkQrModalGenPageUrl = v; this.requestUpdate(); }
+  get weixinQrModalOpen() { return this.channelsStore.weixinQrModalOpen; }
+  set weixinQrModalOpen(v) { this.channelsStore.weixinQrModalOpen = v; this.requestUpdate(); }
+  get weixinQrModalLoading() { return this.channelsStore.weixinQrModalLoading; }
+  set weixinQrModalLoading(v) { this.channelsStore.weixinQrModalLoading = v; this.requestUpdate(); }
+  get weixinQrModalPolling() { return this.channelsStore.weixinQrModalPolling; }
+  set weixinQrModalPolling(v) { this.channelsStore.weixinQrModalPolling = v; this.requestUpdate(); }
+  get weixinQrModalSuccess() { return this.channelsStore.weixinQrModalSuccess; }
+  set weixinQrModalSuccess(v) { this.channelsStore.weixinQrModalSuccess = v; this.requestUpdate(); }
+  get weixinQrModalError() { return this.channelsStore.weixinQrModalError; }
+  set weixinQrModalError(v) { this.channelsStore.weixinQrModalError = v; this.requestUpdate(); }
+  get weixinQrModalReplaceWarn() { return this.channelsStore.weixinQrModalReplaceWarn; }
+  set weixinQrModalReplaceWarn(v) { this.channelsStore.weixinQrModalReplaceWarn = v; this.requestUpdate(); }
+  get weixinQrModalImageSrc() { return this.channelsStore.weixinQrModalImageSrc; }
+  set weixinQrModalImageSrc(v) { this.channelsStore.weixinQrModalImageSrc = v; this.requestUpdate(); }
+  get weixinQrModalScanPageUrl() { return this.channelsStore.weixinQrModalScanPageUrl; }
+  set weixinQrModalScanPageUrl(v) { this.channelsStore.weixinQrModalScanPageUrl = v; this.requestUpdate(); }
+  get weixinQrModalScanned() { return this.channelsStore.weixinQrModalScanned; }
+  set weixinQrModalScanned(v) { this.channelsStore.weixinQrModalScanned = v; this.requestUpdate(); }
+  get nostrProfileFormState() { return this.channelsStore.nostrProfileFormState; }
+  set nostrProfileFormState(v) { this.channelsStore.nostrProfileFormState = v; this.requestUpdate(); }
+  get nostrProfileAccountId() { return this.channelsStore.nostrProfileAccountId; }
+  set nostrProfileAccountId(v) { this.channelsStore.nostrProfileAccountId = v; this.requestUpdate(); }
+  get channelsSelectedChannelId() { return this.channelsStore.channelsSelectedChannelId; }
+  set channelsSelectedChannelId(v) { this.channelsStore.channelsSelectedChannelId = v; this.requestUpdate(); }
+
+  // --- OpsStore Delegation Getters/Setters ---
+  get opsActiveSubTabs() { return this.opsStore.opsActiveSubTabs; }
+  set opsActiveSubTabs(v) { this.opsStore.opsActiveSubTabs = v; this.requestUpdate(); }
+  get opsSelectedAlertGroupIds() { return this.opsStore.opsSelectedAlertGroupIds; }
+  set opsSelectedAlertGroupIds(v) { this.opsStore.opsSelectedAlertGroupIds = v; this.requestUpdate(); }
+  get opsSelectedInspectionIds() { return this.opsStore.opsSelectedInspectionIds; }
+  set opsSelectedInspectionIds(v) { this.opsStore.opsSelectedInspectionIds = v; this.requestUpdate(); }
+  get opsAlertsByDomain() { return this.opsStore.opsAlertsByDomain; }
+  set opsAlertsByDomain(v) { this.opsStore.opsAlertsByDomain = v; this.requestUpdate(); }
+  get opsAlertsStats() { return this.opsStore.opsAlertsStats; }
+  set opsAlertsStats(v) { this.opsStore.opsAlertsStats = v; this.requestUpdate(); }
+  get opsAlertsLoading() { return this.opsStore.opsAlertsLoading; }
+  set opsAlertsLoading(v) { this.opsStore.opsAlertsLoading = v; this.requestUpdate(); }
+  get opsAlertsError() { return this.opsStore.opsAlertsError; }
+  set opsAlertsError(v) { this.opsStore.opsAlertsError = v; this.requestUpdate(); }
+  get opsInspectionImStatus() { return this.opsStore.opsInspectionImStatus; }
+  set opsInspectionImStatus(v) { this.opsStore.opsInspectionImStatus = v; this.requestUpdate(); }
+  get opsIsInspecting() { return this.opsStore.opsIsInspecting; }
+  set opsIsInspecting(v) { this.opsStore.opsIsInspecting = v; this.requestUpdate(); }
+  get opsSelectedEntityIds() { return this.opsStore.opsSelectedEntityIds; }
+  set opsSelectedEntityIds(v) { this.opsStore.opsSelectedEntityIds = v; this.requestUpdate(); }
+  get opsDomainClusters() { return this.opsStore.opsDomainClusters; }
+  set opsDomainClusters(v) { this.opsStore.opsDomainClusters = v; this.requestUpdate(); }
+  get opsDomainClustersLoading() { return this.opsStore.opsDomainClustersLoading; }
+  set opsDomainClustersLoading(v) { this.opsStore.opsDomainClustersLoading = v; this.requestUpdate(); }
+  get opsEntitySelectorOpen() { return this.opsStore.opsEntitySelectorOpen; }
+  set opsEntitySelectorOpen(v) { this.opsStore.opsEntitySelectorOpen = v; this.requestUpdate(); }
+  get opsClusters() { return this.opsStore.opsClusters; }
+  set opsClusters(v) { this.opsStore.opsClusters = v; this.requestUpdate(); }
+  get opsClustersLoading() { return this.opsStore.opsClustersLoading; }
+  set opsClustersLoading(v) { this.opsStore.opsClustersLoading = v; this.requestUpdate(); }
+  get opsClustersError() { return this.opsStore.opsClustersError; }
+  set opsClustersError(v) { this.opsStore.opsClustersError = v; this.requestUpdate(); }
+  get opsHealthSnapshots() { return this.opsStore.opsHealthSnapshots; }
+  set opsHealthSnapshots(v) { this.opsStore.opsHealthSnapshots = v; this.requestUpdate(); }
+  get opsHealthSnapshotsLoading() { return this.opsStore.opsHealthSnapshotsLoading; }
+  set opsHealthSnapshotsLoading(v) { this.opsStore.opsHealthSnapshotsLoading = v; this.requestUpdate(); }
+  get opsHealthSnapshotsError() { return this.opsStore.opsHealthSnapshotsError; }
+  set opsHealthSnapshotsError(v) { this.opsStore.opsHealthSnapshotsError = v; this.requestUpdate(); }
+  get opsFlinkJobs() { return this.opsStore.opsFlinkJobs; }
+  set opsFlinkJobs(v) { this.opsStore.opsFlinkJobs = v; this.requestUpdate(); }
+  get opsFlinkJobsLoading() { return this.opsStore.opsFlinkJobsLoading; }
+  set opsFlinkJobsLoading(v) { this.opsStore.opsFlinkJobsLoading = v; this.requestUpdate(); }
+  get opsSparkJobs() { return this.opsStore.opsSparkJobs; }
+  set opsSparkJobs(v) { this.opsStore.opsSparkJobs = v; this.requestUpdate(); }
+  get opsSparkJobsLoading() { return this.opsStore.opsSparkJobsLoading; }
+  set opsSparkJobsLoading(v) { this.opsStore.opsSparkJobsLoading = v; this.requestUpdate(); }
+  get opsDashboardSummary() { return this.opsStore.opsDashboardSummary; }
+  set opsDashboardSummary(v) { this.opsStore.opsDashboardSummary = v; this.requestUpdate(); }
+  get opsDashboardLoading() { return this.opsStore.opsDashboardLoading; }
+  set opsDashboardLoading(v) { this.opsStore.opsDashboardLoading = v; this.requestUpdate(); }
+  get opsDashboardError() { return this.opsStore.opsDashboardError; }
+  set opsDashboardError(v) { this.opsStore.opsDashboardError = v; this.requestUpdate(); }
+  get opsBchScenarioSummary() { return this.opsStore.opsBchScenarioSummary; }
+  set opsBchScenarioSummary(v) { this.opsStore.opsBchScenarioSummary = v; this.requestUpdate(); }
+  get opsBchScenarioSummaryLoading() { return this.opsStore.opsBchScenarioSummaryLoading; }
+  set opsBchScenarioSummaryLoading(v) { this.opsStore.opsBchScenarioSummaryLoading = v; this.requestUpdate(); }
+  get opsBchScenarioSummaryError() { return this.opsStore.opsBchScenarioSummaryError; }
+  set opsBchScenarioSummaryError(v) { this.opsStore.opsBchScenarioSummaryError = v; this.requestUpdate(); }
+  get opsGlobalInspecting() { return this.opsStore.opsGlobalInspecting; }
+  set opsGlobalInspecting(v) { this.opsStore.opsGlobalInspecting = v; this.requestUpdate(); }
+  get opsDashboardToast() { return this.opsStore.opsDashboardToast; }
+  set opsDashboardToast(v) { this.opsStore.opsDashboardToast = v; this.requestUpdate(); }
+  get opsDashboardFeedLoading() { return this.opsStore.opsDashboardFeedLoading; }
+  set opsDashboardFeedLoading(v) { this.opsStore.opsDashboardFeedLoading = v; this.requestUpdate(); }
+  get opsDashboardFeedError() { return this.opsStore.opsDashboardFeedError; }
+  set opsDashboardFeedError(v) { this.opsStore.opsDashboardFeedError = v; this.requestUpdate(); }
+  get opsDashboardAlertHighlights() { return this.opsStore.opsDashboardAlertHighlights; }
+  set opsDashboardAlertHighlights(v) { this.opsStore.opsDashboardAlertHighlights = v; this.requestUpdate(); }
+  get opsDashboardDomainPendingAlerts() { return this.opsStore.opsDashboardDomainPendingAlerts; }
+  set opsDashboardDomainPendingAlerts(v) { this.opsStore.opsDashboardDomainPendingAlerts = v; this.requestUpdate(); }
+  get opsDashboardRecentInspections() { return this.opsStore.opsDashboardRecentInspections; }
+  set opsDashboardRecentInspections(v) { this.opsStore.opsDashboardRecentInspections = v; this.requestUpdate(); }
 
   @state() agentsLoading = false;
   @state() agentsList: AgentsListResult | null = null;

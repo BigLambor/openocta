@@ -11,6 +11,7 @@ import (
 	"github.com/openocta/openocta/pkg/cron"
 	"github.com/openocta/openocta/pkg/gateway/protocol"
 	"github.com/openocta/openocta/pkg/outbound"
+	"github.com/openocta/openocta/pkg/rbac"
 	"github.com/stellarlinkco/agentsdk-go/pkg/tool"
 )
 
@@ -29,10 +30,11 @@ func (a *gatewayInvokerAdapter) Invoke(method string, params map[string]interfac
 
 var _ tools.GatewayInvoker = (*gatewayInvokerAdapter)(nil)
 
-// Client represents a connected WebSocket client (minimal for Phase 2c).
+// Client represents a connected WebSocket client.
 type Client struct {
 	Connect protocol.ConnectParams
 	ConnID  string
+	Session *rbac.UserSession
 }
 
 // RespondFn sends a response frame.
@@ -120,5 +122,11 @@ type HandlerOpts struct {
 	Context *Context
 }
 
-// Registry maps method names to handlers.
-type Registry map[string]Handler
+// MethodDescriptor defines handler registration metadata.
+type MethodDescriptor struct {
+	Handler            Handler
+	RequiredPermission string
+}
+
+// Registry maps method names to MethodDescriptors.
+type Registry map[string]MethodDescriptor

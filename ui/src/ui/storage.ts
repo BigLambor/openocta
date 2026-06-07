@@ -32,9 +32,11 @@ export function loadSettings(): UiSettings {
     return typeof location !== "undefined" ? location.host : "127.0.0.1:18900";
   })();
 
+  const injectedToken = (window as any).__gateway_token__;
+
   const defaults: UiSettings = {
     gatewayUrl: defaultHost,
-    token: DEFAULT_GATEWAY_TOKEN,
+    token: injectedToken || DEFAULT_GATEWAY_TOKEN,
     sessionKey: "main",
     lastActiveSessionKey: "main",
     theme: "light",
@@ -52,15 +54,22 @@ export function loadSettings(): UiSettings {
       return defaults;
     }
     const parsed = JSON.parse(raw) as Partial<UiSettings>;
+    let token =
+      typeof parsed.token === "string" && parsed.token.trim()
+        ? parsed.token.trim()
+        : defaults.token;
+
+    // Automatically upgrade default static token to injected token if present
+    if (injectedToken && (token === DEFAULT_GATEWAY_TOKEN || token === "")) {
+      token = injectedToken;
+    }
+
     return {
       gatewayUrl:
         typeof parsed.gatewayUrl === "string" && parsed.gatewayUrl.trim()
           ? parseGatewayHost(parsed.gatewayUrl.trim())
           : defaults.gatewayUrl,
-      token:
-        typeof parsed.token === "string" && parsed.token.trim()
-          ? parsed.token.trim()
-          : defaults.token,
+      token,
       sessionKey:
         typeof parsed.sessionKey === "string" && parsed.sessionKey.trim()
           ? parsed.sessionKey.trim()
