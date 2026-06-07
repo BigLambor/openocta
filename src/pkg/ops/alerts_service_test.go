@@ -132,6 +132,22 @@ func TestExtractSection(t *testing.T) {
 	if res3 != "" {
 		t.Fatalf("expected empty, got %q", res3)
 	}
+
+	// Case 4: False positive matching heading in sentence followed by real markdown heading
+	md4 := "根据当前告警组进行根因候选分析工作。\n\n## 根因候选\n当前环境不存在实际运行的 Hadoop 集群。"
+	res4 := extractSection(md4, headings)
+	expected4 := "当前环境不存在实际运行的 Hadoop 集群。"
+	if res4 != expected4 {
+		t.Fatalf("expected %q, got %q", expected4, res4)
+	}
+
+	// Case 5: Bold inline header next marker
+	md5 := "**根因候选：** 内存溢出。\n\n**可验证依据：** 虚拟机健康指标正常。"
+	res5 := extractSection(md5, headings)
+	expected5 := "内存溢出。"
+	if res5 != expected5 {
+		t.Fatalf("expected %q, got %q", expected5, res5)
+	}
 }
 
 func TestParseReportMarkdownFromText(t *testing.T) {
@@ -158,5 +174,26 @@ func TestParseReportMarkdownFromText(t *testing.T) {
 		t.Fatalf("expected %q, got %q", text3, res3)
 	}
 }
+
+func TestIsCompleteDiagnosisReport(t *testing.T) {
+	// Case 1: Short greeting/intro - should be false
+	text1 := "我将作为数据血缘治理数字员工，分析该告警。"
+	if isCompleteDiagnosisReport(text1) {
+		t.Errorf("expected false for short greeting, got true")
+	}
+
+	// Case 2: Structured report - should be true
+	text2 := "分析结束。\n## 根因候选\n底层组件故障。"
+	if !isCompleteDiagnosisReport(text2) {
+		t.Errorf("expected true for structured report, got false")
+	}
+
+	// Case 3: Paragraph with bold title but no specific header - should check length
+	text3 := "**判断结论：** 这是一个比较详细的诊断建议，应该包含了分析。"
+	if !isCompleteDiagnosisReport(text3) {
+		t.Errorf("expected true for report containing '判断结论', got false")
+	}
+}
+
 
 

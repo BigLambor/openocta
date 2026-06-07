@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
+	"unicode"
 
 	"github.com/google/uuid"
 	"github.com/openocta/openocta/pkg/agent/tools"
@@ -432,6 +434,28 @@ func PatchAlertGroup(id string, patch AlertGroupPatch, operator string) (AlertGr
 	return AlertGroup{}, fmt.Errorf("告警组不存在: %s", id)
 }
 
+var reportStructureRe = regexp.MustCompile(`(?i)##\s*(结论|根因|影响|impact|root)|判断结论|根因分析|证据链|处置建议|排查步骤|影响面|建议动作|建议行动`)
+
+func isCompleteDiagnosisReport(text string) bool {
+	trimmed := strings.TrimSpace(text)
+	if len(trimmed) < 50 {
+		return false
+	}
+	if reportStructureRe.MatchString(trimmed) {
+		return true
+	}
+	looksLikeOpening := strings.HasPrefix(trimmed, "我需要分析") ||
+		strings.HasPrefix(trimmed, "让我先") ||
+		strings.HasPrefix(trimmed, "首先") ||
+		strings.HasPrefix(trimmed, "正在分析") ||
+		strings.HasPrefix(trimmed, "我将作为")
+
+	if looksLikeOpening && len(trimmed) < 200 {
+		return false
+	}
+	return len(trimmed) >= 180
+}
+
 func enrichAlertGroupFromSession(g AlertGroup) AlertGroup {
 	if strings.TrimSpace(g.SessionKey) == "" {
 		return g
@@ -440,7 +464,7 @@ func enrichAlertGroupFromSession(g AlertGroup) AlertGroup {
 	sessionID := tools.SessionIDFromSessionKey(g.SessionKey)
 	md := readAssistantMarkdown(g.SessionKey)
 
-	if md != "" {
+	if md != "" && isCompleteDiagnosisReport(md) {
 		md = parseReportMarkdownFromText(md)
 		md = strings.ReplaceAll(md, "\\n", "\n")
 		md = strings.ReplaceAll(md, "\\t", "\t")
@@ -449,7 +473,7 @@ func enrichAlertGroupFromSession(g AlertGroup) AlertGroup {
 		g.DiagnosticStatus = "completed"
 
 		if g.ImpactMarkdown == "" {
-			g.ImpactMarkdown = extractSection(md, []string{"## 影响", "## impact", "### 影响", "业务受损", "impact assessment", "影响范围", "影响面"})
+			g.ImpactMarkdown = extractSection(md, []string{"## 影响", "## impact", "### 影响", "业务受损", "impact assessment", "影响范围", "影响面判断", "影响面"})
 		}
 		g.ImpactAnalysis = g.ImpactMarkdown
 
@@ -588,49 +612,71 @@ func parseAlertGroupToolRuns(sessionID string) []ToolRunReport {
 	return runs
 }
 
+func isAllMarkdownSymbols(s string) bool {
+	for _, r := range s {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			return false
+		}
+	}
+	return true
+}
+
 func extractSection(md string, headings []string) string {
 	lower := strings.ToLower(md)
 	for _, heading := range headings {
-		idx := strings.Index(lower, strings.ToLower(heading))
-		if idx < 0 {
-			continue
-		}
-		rest := md[idx+len(heading):]
-
-		// Determine if the heading is a markdown header line (e.g., starts with #).
-		// We look back from idx to find the start of the line.
-		lineStart := 0
-		for i := idx; i >= 0; i-- {
-			if md[i] == '\n' {
-				lineStart = i + 1
+		searchStr := lower
+		offset := 0
+		for {
+			pos := strings.Index(searchStr, strings.ToLower(heading))
+			if pos < 0 {
 				break
 			}
-		}
-		linePrefix := strings.TrimSpace(md[lineStart:idx])
-		isHeaderLine := strings.HasPrefix(linePrefix, "#")
+			idx := offset + pos
 
-		if isHeaderLine {
-			if nl := strings.Index(rest, "\n"); nl >= 0 {
-				rest = rest[nl+1:]
-			} else {
-				rest = ""
-			}
-		} else {
-			rest = strings.TrimLeft(rest, " ：:*`）)")
-		}
-
-		nextHeadingIdx := -1
-		for _, nextMarker := range []string{"\n#", "\n##", "\n###"} {
-			if pos := strings.Index(rest, nextMarker); pos >= 0 {
-				if nextHeadingIdx == -1 || pos < nextHeadingIdx {
-					nextHeadingIdx = pos
+			// Determine if the heading is a markdown header line (e.g., starts with #).
+			// We look back from idx to find the start of the line.
+			lineStart := 0
+			for i := idx; i >= 0; i-- {
+				if md[i] == '\n' {
+					lineStart = i + 1
+					break
 				}
 			}
+			linePrefix := strings.TrimSpace(md[lineStart:idx])
+			if isAllMarkdownSymbols(linePrefix) {
+				rest := md[idx+len(heading):]
+				isHeaderLine := strings.HasPrefix(linePrefix, "#")
+
+				if isHeaderLine {
+					if nl := strings.Index(rest, "\n"); nl >= 0 {
+						rest = rest[nl+1:]
+					} else {
+						rest = ""
+					}
+				} else {
+					rest = strings.TrimLeft(rest, " ：:*`）)")
+				}
+
+				nextHeadingIdx := -1
+				for _, nextMarker := range []string{"\n#", "\n##", "\n###", "\n**"} {
+					if pos := strings.Index(rest, nextMarker); pos >= 0 {
+						if nextHeadingIdx == -1 || pos < nextHeadingIdx {
+							nextHeadingIdx = pos
+						}
+					}
+				}
+				if nextHeadingIdx > 0 {
+					return strings.TrimSpace(rest[:nextHeadingIdx])
+				}
+				return strings.TrimSpace(rest)
+			}
+
+			offset = idx + len(heading)
+			if offset >= len(lower) {
+				break
+			}
+			searchStr = lower[offset:]
 		}
-		if nextHeadingIdx > 0 {
-			return strings.TrimSpace(rest[:nextHeadingIdx])
-		}
-		return strings.TrimSpace(rest)
 	}
 	return ""
 }
@@ -645,11 +691,27 @@ func readAssistantMarkdown(sessionKey string) string {
 	if transcript == "" {
 		return ""
 	}
-	items := session.ReadSessionPreviewItems(transcript, 20, 8000)
+	msgs, err := session.ReadTranscriptMessages(transcript, 0)
+	if err != nil {
+		return ""
+	}
 	var lastAssistant string
-	for _, it := range items {
-		if strings.EqualFold(it.Role, "assistant") && strings.TrimSpace(it.Text) != "" {
-			lastAssistant = it.Text
+	for _, m := range msgs {
+		role := m.Role
+		if role == "" {
+			role = "assistant"
+		}
+		if strings.EqualFold(role, "assistant") {
+			var text string
+			for _, b := range m.Content {
+				if (b.Type == "text" || b.Type == "output_text" || b.Type == "input_text") && b.Text != "" {
+					text = strings.TrimSpace(b.Text)
+					break
+				}
+			}
+			if text != "" {
+				lastAssistant = text
+			}
 		}
 	}
 	return strings.TrimSpace(lastAssistant)

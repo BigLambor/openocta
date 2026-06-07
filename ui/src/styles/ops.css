@@ -828,6 +828,40 @@
   background: rgba(255, 255, 255, 0.06);
 }
 
+.ops-markdown table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 8px;
+  margin-bottom: 16px;
+  font-size: 13px;
+}
+
+.ops-markdown th,
+.ops-markdown td {
+  padding: 10px 12px;
+  text-align: left;
+  border: 1px solid var(--border);
+}
+
+.ops-markdown th {
+  font-weight: 600;
+  background: rgba(0, 0, 0, 0.02);
+  color: var(--text-primary);
+}
+
+:root[data-theme="dark"] .ops-markdown th {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.ops-markdown tr:nth-child(even) {
+  background: rgba(0, 0, 0, 0.01);
+}
+
+:root[data-theme="dark"] .ops-markdown tr:nth-child(even) {
+  background: rgba(255, 255, 255, 0.01);
+}
+
+
 /* P3-4: Structured Tool Runs and Error Styles */
 .error-list {
   margin: 0;
