@@ -44,6 +44,18 @@ func xunfeiProviderName(modelRef string) string {
 	return ""
 }
 
+func extractAlertGroupID(s string) string {
+	idx := strings.Index(s, "alert-group-")
+	if idx < 0 {
+		return ""
+	}
+	rest := s[idx:]
+	if colIdx := strings.IndexByte(rest, ':'); colIdx > 0 {
+		return rest[:colIdx]
+	}
+	return rest
+}
+
 // resetCommandRe matches /new, !new, /reset, !reset with optional trailing message (postResetMessage).
 // Submatch 1: optional text after command (e.g. "intro" from "/new intro").
 var resetCommandRe = regexp.MustCompile(`(?i)^(?:/|!)(?:new|reset)(?:\s+([\s\S]*))?$`)
@@ -218,6 +230,39 @@ func resolveChatTemplate(ctx chatOpsContext, env func(string) string) resolvedCh
 			}, "\n"),
 			SkillIDs:    []string{"alert-triage", "root-cause-analysis", "sla-escort"},
 			RunbookRefs: []string{"数据 App SLA 护航 Runbook"},
+		}
+	}
+	if ctx.Domain == employees.DomainFI &&
+		(ctx.Capability == employees.CapabilityObservabilityAlert ||
+			ctx.Capability == employees.CapabilityDiagnosisIncident ||
+			ctx.Capability == employees.CapabilityHealthInspection ||
+			ctx.ObjectType == "alert") {
+		return resolvedChatTemplate{
+			ID:   "builtin-fi-inspect",
+			Name: "FI 巡检数字员工",
+			Prompt: strings.Join([]string{
+				"你是 FusionInsight 运维巡检数字员工，擅长 HBase Region 倾斜、YARN 队列水位与核心组件健康状态评估分析。",
+				"请结合告警上下文优先调用 query_vm_metrics 等工具取证，给出根因、影响面和恢复步骤。",
+				"输出使用结构化 Markdown，先结论后证据链，再给出可验证排查步骤。",
+			}, "\n"),
+			SkillIDs:    []string{"alert-triage", "root-cause-analysis", "runbook-recommendation"},
+			RunbookRefs: []string{"FusionInsight 巡检处置 Runbook"},
+		}
+	}
+	if ctx.Domain == employees.DomainGBase &&
+		(ctx.Capability == employees.CapabilityObservabilityAlert ||
+			ctx.Capability == employees.CapabilityDiagnosisIncident ||
+			ctx.ObjectType == "alert") {
+		return resolvedChatTemplate{
+			ID:   "builtin-gbase-diagnose",
+			Name: "GBase 诊断数字员工",
+			Prompt: strings.Join([]string{
+				"你是 GBase 慢 SQL 诊断助手，专职 GBase 数据库慢查询、死锁与连接池耗尽故障 of 诊断与调优。",
+				"请使用专业的 SQL 优化与配置调整能力，分析 GBase 的性能异常、死锁和慢日志，定位性能瓶颈，给出优化建议。",
+				"输出使用结构化 Markdown，先结论后证据链，再给出可验证排查步骤。",
+			}, "\n"),
+			SkillIDs:    []string{"alert-triage", "root-cause-analysis", "runbook-recommendation"},
+			RunbookRefs: []string{"GBase 慢 SQL 诊断 Runbook"},
 		}
 	}
 	return resolvedChatTemplate{}
@@ -990,12 +1035,12 @@ func updateSessionAfterRun(ctx *Context, sessionKey string, sessionID string, se
 				objectRef = component
 			}
 
-			triggerType := "manual"
+ 			triggerType := "manual"
 			operator := "system"
 			if isCronSessionKey(sessionKey) {
 				triggerType = "cron"
 				operator = "cron"
-			} else if strings.Contains(strings.ToLower(sessionKey), "alert") || strings.Contains(strings.ToLower(sessionID), "alert") {
+			} else if strings.Contains(strings.ToLower(sessionKey), "alert") || strings.Contains(strings.ToLower(sessionID), "alert") || extractAlertGroupID(sessionKey) != "" {
 				triggerType = "alert"
 				operator = "alert"
 			}
@@ -1012,7 +1057,11 @@ func updateSessionAfterRun(ctx *Context, sessionKey string, sessionID string, se
 
 			var taskMetrics employees.EmployeeTaskMetrics
 			if triggerType == "alert" {
-				if alertGroup, err := ops.GetAlertGroup(sessionID); err == nil {
+				alertID := sessionID
+				if extracted := extractAlertGroupID(sessionKey); extracted != "" {
+					alertID = extracted
+				}
+				if alertGroup, err := ops.GetAlertGroup(alertID); err == nil {
 					taskMetrics.RawAlertCount = alertGroup.OriginalCount
 					taskMetrics.ReducedAlertCount = alertGroup.ReducedTo
 					if alertGroup.CreatedAtMs > 0 {
@@ -1499,6 +1548,12 @@ func ChatSendHandler(opts HandlerOpts) error {
 			Message: "chat.send: " + err.Error(),
 		}, nil)
 		return nil
+	}
+
+	if opsContext.ObjectType == "alert" && opsContext.ObjectID != "" {
+		if err := ops.UpdateAlertGroupSessionKey(opsContext.ObjectID, sessionKey); err != nil {
+			chatLog.Warn("failed to update alert group session key: %v", err)
+		}
 	}
 
 	// Append user message to transcript (include image blocks so they persist across turns)

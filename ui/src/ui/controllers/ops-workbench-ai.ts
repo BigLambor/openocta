@@ -257,6 +257,7 @@ export async function openWorkbenchAiPanel(
     mode,
     alert: { ...alert, domain: alertDomain },
     assistantTemplate,
+    sessionKey: alert.sessionKey || `agent:main:${alert.id}`,
   });
 }
 
@@ -359,7 +360,7 @@ function buildSummary(alert: WorkbenchAiAlert): string {
 
 export async function runWorkbenchAi(
   host: WorkbenchAiHost,
-  params: { domain: string; mode: WorkbenchAiMode; alert: WorkbenchAiAlert; assistantTemplate: string },
+  params: { domain: string; mode: WorkbenchAiMode; alert: WorkbenchAiAlert; assistantTemplate: string; sessionKey?: string },
 ): Promise<void> {
   const { domain, mode, alert, assistantTemplate } = params;
   const alertDomain = resolveWorkbenchAlertDomain(alert.domain, domain);
@@ -375,7 +376,7 @@ export async function runWorkbenchAi(
     return;
   }
 
-  const sessionKey = workbenchAiSessionKey(alertDomain);
+  const sessionKey = params.sessionKey?.trim() || alert.sessionKey?.trim() || `agent:main:${alert.id}`;
   const runId = generateUUID();
   host.workbenchAiSessionKey = sessionKey;
   host.workbenchAiRunId = runId;

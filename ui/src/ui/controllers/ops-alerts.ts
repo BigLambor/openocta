@@ -13,6 +13,8 @@ export type OpsAlertGroupRecord = {
   runId?: string;
   rootCauseMarkdown?: string;
   impactMarkdown?: string;
+  rootCauseSummary?: string;
+  impactAnalysis?: string;
   createdAtMs: number;
   updatedAtMs: number;
 };
@@ -106,8 +108,8 @@ export function mapAlertGroupForUI(g: OpsAlertGroupRecord) {
     timestamp: formatAlertTimestamp(g.createdAtMs),
     originalCount: g.originalCount,
     reducedTo: g.reducedTo,
-    rootCause: g.rootCauseMarkdown?.trim() || (g.status === "analyzing" ? "Agent 正在分析合并告警…" : "暂无根因分析"),
-    impact: g.impactMarkdown?.trim() || "—",
+    rootCause: g.rootCauseSummary?.trim() || g.rootCauseMarkdown?.trim() || (g.status === "analyzing" ? "Agent 正在分析合并告警…" : "暂无根因分析"),
+    impact: g.impactAnalysis?.trim() || g.impactMarkdown?.trim() || "—",
     status: g.status === "resolved" ? ("resolved" as const) : ("active" as const),
     analysisMarkdown: g.rootCauseMarkdown?.trim() || "",
     sessionKey: g.sessionKey?.trim() || "",

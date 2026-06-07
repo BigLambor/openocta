@@ -21,7 +21,6 @@ import type { OpsClusterRecord } from "../controllers/ops-clusters.ts";
 import {
   findWorkbenchScenario,
   filterWorkbenchScenarios,
-  scenarioCatalogStats,
   scenariosForWorkbench,
   WORKBENCH_TIME_RANGES,
   type OpsScenario,
@@ -458,7 +457,24 @@ function renderAiPanel(
           </div>
         </div>
         <div class="detail-section">
-          <div class="detail-section__header">${icons.zap} 结论</div>
+          <div class="detail-section__header">
+            ${icons.zap} 结论
+            <div style="flex-grow: 1;"></div>
+            ${!busy && props.onRetryAi
+              ? html`
+                  <button
+                    class="ops-btn"
+                    type="button"
+                    style="padding: 2px 6px; font-size: 11px; height: auto; display: inline-flex; align-items: center; gap: 4px; border-radius: 4px; font-weight: normal; margin-top: -2px; margin-bottom: -2px;"
+                    @click=${props.onRetryAi}
+                    title="重新运行 AI 分析"
+                  >
+                    <span style="display: flex; align-items: center; width: 12px; height: 12px;">${icons.refreshCw}</span>
+                    重新分析
+                  </button>
+                `
+              : nothing}
+          </div>
           ${scenario ? renderScenarioAiConclusion(props, scenario, mode) : renderAiConclusion(props, active!, mode)}
         </div>
         <div class="detail-section">
@@ -866,24 +882,11 @@ function renderScenarioDirectory(props: WorkbenchProps, view: WorkbenchView, sel
     return renderSkeletonView(props, view);
   }
 
-  let stats;
-  if (selectedDomain === "all") {
-    const accessible = OPS_SCENARIOS.filter((scenario) => canAccessOpsDomain(props.user, scenario.domain));
-    stats = {
-      total: accessible.length,
-      centers: {} as Record<string, number>,
-      maturity: { planned: 0, beta: 0, connected: 0, automated: 0 },
-    };
-    for (const scenario of accessible) {
-      stats.centers[scenario.center] = (stats.centers[scenario.center] ?? 0) + 1;
-      stats.maturity[scenario.maturity] += 1;
-    }
-  } else {
-    stats = scenarioCatalogStats(selectedDomain);
-  }
+  const total = scenarios.length;
+  const connectedCount = scenarios.filter(
+    (s) => s.maturity === "beta" || s.maturity === "connected" || s.maturity === "automated",
+  ).length;
 
-  const connectedCount = stats.maturity.beta + stats.maturity.connected + stats.maturity.automated;
-  const activeCenterCount = stats.centers[view] ?? scenarios.length;
   const scenarioSearch = props.scenarioSearch ?? "";
   const maturityFilter = normalizeScenarioMaturityFilter(props.scenarioMaturityFilter);
   const filteredScenarios = filterWorkbenchScenarios(scenarios, scenarioSearch, maturityFilter);
@@ -891,7 +894,7 @@ function renderScenarioDirectory(props: WorkbenchProps, view: WorkbenchView, sel
   return html`
     <div class="minimal-directory-header">
       <div class="minimal-directory-stats">
-        共 ${stats.total} 个注册场景 (${connectedCount} 已接入)
+        共 ${total} 个注册场景 (${connectedCount} 已接入)
       </div>
       <div class="minimal-directory-filters">
         <input
@@ -1026,16 +1029,35 @@ function renderEventsView(props: WorkbenchProps, active: WorkbenchAlertGroup | u
                 
                 <div class="detail-section">
                   <div class="detail-section__header">${icons.zap} 根因候选</div>
-                  <div class="detail-section__content minimal-highlight">${active.rootCause || "暂无根因候选。"}</div>
+                  ${active.rootCause && active.rootCause !== "暂无根因分析" && active.rootCause !== "Agent 正在分析合并告警…"
+                    ? html`
+                        <div class="ops-ai-callout">
+                          <span class="ops-ai-callout__badge">AI 智能推断</span>
+                          <div class="ops-markdown">${unsafeHTML(toSanitizedMarkdownHtml(active.rootCause))}</div>
+                        </div>
+                      `
+                    : html`
+                        <div class="detail-section__content minimal-highlight">
+                          ${active.rootCause || "暂无根因候选。"}
+                        </div>
+                      `}
                 </div>
-                ${active.impact
+                ${active.impact && active.impact !== "—"
                   ? html`
                       <div class="detail-section">
                         <div class="detail-section__header">${icons.overviewGrid} 影响范围</div>
-                        <div class="detail-section__content">${active.impact}</div>
+                        <div class="ops-ai-callout">
+                          <span class="ops-ai-callout__badge">AI 影响评估</span>
+                          <div class="ops-markdown">${unsafeHTML(toSanitizedMarkdownHtml(active.impact))}</div>
+                        </div>
                       </div>
                     `
-                  : nothing}
+                  : html`
+                      <div class="detail-section">
+                        <div class="detail-section__header">${icons.overviewGrid} 影响范围</div>
+                        <div class="detail-section__content">${active.impact || "—"}</div>
+                      </div>
+                    `}
                 
                 <div class="detail-actions-bar">
                   <button class="ops-btn ops-btn--primary" type="button" @click=${() => props.onOpenAiPanel?.("root-cause")}>

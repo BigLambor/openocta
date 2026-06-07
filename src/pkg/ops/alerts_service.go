@@ -1,6 +1,7 @@
 package ops
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -440,16 +441,20 @@ func enrichAlertGroupFromSession(g AlertGroup) AlertGroup {
 	md := readAssistantMarkdown(g.SessionKey)
 
 	if md != "" {
+		md = parseReportMarkdownFromText(md)
+		md = strings.ReplaceAll(md, "\\n", "\n")
+		md = strings.ReplaceAll(md, "\\t", "\t")
+
 		g.RootCauseMarkdown = md
 		g.DiagnosticStatus = "completed"
 
 		if g.ImpactMarkdown == "" {
-			g.ImpactMarkdown = extractSection(md, []string{"## 影响", "## impact", "### 影响", "业务受损", "impact assessment"})
+			g.ImpactMarkdown = extractSection(md, []string{"## 影响", "## impact", "### 影响", "业务受损", "impact assessment", "影响范围", "影响面"})
 		}
 		g.ImpactAnalysis = g.ImpactMarkdown
 
 		if g.RootCauseSummary == "" {
-			g.RootCauseSummary = extractSection(md, []string{"## 根因", "## root cause", "### 根因", "根因分析", "原因分析", "## 根因分析"})
+			g.RootCauseSummary = extractSection(md, []string{"## 根因", "## root cause", "### 根因", "根因分析", "原因分析", "## 根因分析", "判断结论", "根因候选", "结论", "根因锁定"})
 			if g.RootCauseSummary == "" {
 				lines := strings.Split(md, "\n")
 				for _, line := range lines {
@@ -485,6 +490,50 @@ func enrichAlertGroupFromSession(g AlertGroup) AlertGroup {
 	}
 
 	return g
+}
+
+func parseReportMarkdownFromText(text string) string {
+	startMarker := "```json"
+	endMarker := "```"
+	startIdx := strings.Index(text, startMarker)
+	if startIdx >= 0 {
+		rest := text[startIdx+len(startMarker):]
+		endIdx := strings.Index(rest, endMarker)
+		if endIdx >= 0 {
+			jsonStr := strings.TrimSpace(rest[:endIdx])
+			var parsed map[string]interface{}
+			if err := json.Unmarshal([]byte(jsonStr), &parsed); err == nil {
+				if reportMD, ok := parsed["reportMarkdown"].(string); ok && strings.TrimSpace(reportMD) != "" {
+					return strings.TrimSpace(reportMD)
+				}
+				if reportMD, ok := parsed["report_markdown"].(string); ok && strings.TrimSpace(reportMD) != "" {
+					return strings.TrimSpace(reportMD)
+				}
+			}
+		}
+	}
+
+	startMarker = "```"
+	startIdx = strings.Index(text, startMarker)
+	if startIdx >= 0 {
+		rest := text[startIdx+len(startMarker):]
+		endIdx := strings.Index(rest, endMarker)
+		if endIdx >= 0 {
+			jsonStr := strings.TrimSpace(rest[:endIdx])
+			if strings.HasPrefix(jsonStr, "{") && strings.HasSuffix(jsonStr, "}") {
+				var parsed map[string]interface{}
+				if err := json.Unmarshal([]byte(jsonStr), &parsed); err == nil {
+					if reportMD, ok := parsed["reportMarkdown"].(string); ok && strings.TrimSpace(reportMD) != "" {
+						return strings.TrimSpace(reportMD)
+					}
+					if reportMD, ok := parsed["report_markdown"].(string); ok && strings.TrimSpace(reportMD) != "" {
+						return strings.TrimSpace(reportMD)
+					}
+				}
+			}
+		}
+	}
+	return text
 }
 
 func parseAlertGroupToolRuns(sessionID string) []ToolRunReport {
@@ -547,6 +596,29 @@ func extractSection(md string, headings []string) string {
 			continue
 		}
 		rest := md[idx+len(heading):]
+
+		// Determine if the heading is a markdown header line (e.g., starts with #).
+		// We look back from idx to find the start of the line.
+		lineStart := 0
+		for i := idx; i >= 0; i-- {
+			if md[i] == '\n' {
+				lineStart = i + 1
+				break
+			}
+		}
+		linePrefix := strings.TrimSpace(md[lineStart:idx])
+		isHeaderLine := strings.HasPrefix(linePrefix, "#")
+
+		if isHeaderLine {
+			if nl := strings.Index(rest, "\n"); nl >= 0 {
+				rest = rest[nl+1:]
+			} else {
+				rest = ""
+			}
+		} else {
+			rest = strings.TrimLeft(rest, " ：:*`）)")
+		}
+
 		nextHeadingIdx := -1
 		for _, nextMarker := range []string{"\n#", "\n##", "\n###"} {
 			if pos := strings.Index(rest, nextMarker); pos >= 0 {

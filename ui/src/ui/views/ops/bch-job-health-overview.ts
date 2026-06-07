@@ -271,24 +271,47 @@ export function renderBchJobHealthOverview(props: JobHealthOverviewProps) {
       ${props.title ? html`<h3 class="bch-overview__title">${props.title}</h3>` : nothing}
 
       <div class="bch-overview__cards">
-        <div class="bch-overview__card">
-          <div class="bch-overview__card-label">健康作业 (Health ≥ 90)</div>
-          <div class="bch-overview__card-value healthy">${buckets.healthy}</div>
-        </div>
-        <div class="bch-overview__card">
-          <div class="bch-overview__card-label">亚健康 (Health 60-89)</div>
-          <div class="bch-overview__card-value warning">${buckets.warning}</div>
-        </div>
-        <div class="bch-overview__card">
-          <div class="bch-overview__card-label">高危作业 (Health &lt; 60)</div>
-          <div class="bch-overview__card-value critical">${buckets.critical}</div>
-        </div>
-        <div class="bch-overview__card bch-overview__card--highlight">
-          <div class="bch-overview__card-label">识别资源浪费</div>
-          <div class="bch-overview__card-value info">
-            ${buckets.waste}<span class="bch-overview__card-unit">Jobs</span>
-          </div>
-        </div>
+        ${props.jobKind === "Spark"
+          ? html`
+              <div class="bch-overview__card">
+                <div class="bch-overview__card-label">已分析作业</div>
+                <div class="bch-overview__card-value info">${buckets.total}</div>
+              </div>
+              <div class="bch-overview__card">
+                <div class="bch-overview__card-label">正常结束</div>
+                <div class="bch-overview__card-value healthy">${buckets.healthy}</div>
+              </div>
+              <div class="bch-overview__card">
+                <div class="bch-overview__card-label">运行失败</div>
+                <div class="bch-overview__card-value critical">${buckets.critical}</div>
+              </div>
+              <div class="bch-overview__card bch-overview__card--highlight">
+                <div class="bch-overview__card-label">待调优作业</div>
+                <div class="bch-overview__card-value info">
+                  ${buckets.waste}<span class="bch-overview__card-unit">Jobs</span>
+                </div>
+              </div>
+            `
+          : html`
+              <div class="bch-overview__card">
+                <div class="bch-overview__card-label">健康作业 (Health ≥ 90)</div>
+                <div class="bch-overview__card-value healthy">${buckets.healthy}</div>
+              </div>
+              <div class="bch-overview__card">
+                <div class="bch-overview__card-label">亚健康 (Health 60-89)</div>
+                <div class="bch-overview__card-value warning">${buckets.warning}</div>
+              </div>
+              <div class="bch-overview__card">
+                <div class="bch-overview__card-label">高危作业 (Health &lt; 60)</div>
+                <div class="bch-overview__card-value critical">${buckets.critical}</div>
+              </div>
+              <div class="bch-overview__card bch-overview__card--highlight">
+                <div class="bch-overview__card-label">识别资源浪费</div>
+                <div class="bch-overview__card-value info">
+                  ${buckets.waste}<span class="bch-overview__card-unit">Jobs</span>
+                </div>
+              </div>
+            `}
       </div>
 
       <div class="bch-overview__panels">

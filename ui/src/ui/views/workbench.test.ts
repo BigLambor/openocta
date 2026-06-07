@@ -128,4 +128,42 @@ describe("workbench view scenario directory filtering", () => {
     expect(container.textContent).not.toContain("执行记录");
     expect(container.querySelector(".workbench-scenario-toolbar")).toBeNull();
   });
+
+  it("renders root cause candidate and impact scope as formatted markdown in callouts", async () => {
+    const container = document.createElement("div");
+    const props = buildProps({
+      activeView: "events",
+      selectedAlertGroupId: "alert-1",
+      alertGroups: [
+        {
+          id: "alert-1",
+          title: "HDFS NameNode 内存占用过高",
+          severity: "warning",
+          timestamp: "2026-06-05 09:28:09",
+          originalCount: 3,
+          reducedTo: 1,
+          rootCause: "**当前环境不存在实际运行的 Hadoop 集群。**",
+          impact: "部分作业无法运行。",
+        },
+      ],
+    });
+
+    render(renderWorkbench(props), container);
+    await Promise.resolve();
+
+    const callouts = container.querySelectorAll(".ops-ai-callout");
+    expect(callouts.length).toBe(2); // One for rootCause, one for impact
+    
+    // Check root cause callout text includes bold element
+    const rootCauseCallout = callouts[0];
+    expect(rootCauseCallout.querySelector(".ops-markdown strong")).not.toBeNull();
+    expect(rootCauseCallout.textContent).toContain("AI 智能推断");
+    expect(rootCauseCallout.textContent).toContain("当前环境不存在实际运行的 Hadoop 集群");
+
+    // Check impact callout
+    const impactCallout = callouts[1];
+    expect(impactCallout.textContent).toContain("AI 影响评估");
+    expect(impactCallout.textContent).toContain("部分作业无法运行");
+  });
 });
+

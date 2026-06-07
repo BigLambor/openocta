@@ -1499,3 +1499,58 @@
   color: var(--text-secondary);
   line-height: 1.5;
 }
+
+/* AI Callout Card for Event detail panel */
+.ops-ai-callout {
+  position: relative;
+  background: var(--accent-subtle);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-md, 8px);
+  padding: 14px 16px;
+  margin-top: 8px;
+  transition: all 0.2s ease;
+}
+
+.ops-ai-callout:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.03);
+}
+
+.ops-ai-callout__badge {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.1);
+  padding: 2px 6px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  user-select: none;
+}
+
+/* Ensure markdown inside ops-ai-callout has proper layout and spacing */
+.ops-ai-callout .ops-markdown {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-primary);
+  padding-right: 70px;
+}
+
+.ops-ai-callout .ops-markdown p:last-child {
+  margin-bottom: 0;
+}
+
+.ops-markdown code {
+  font-size: 12px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  background: var(--bg-content, rgba(0, 0, 0, 0.04)) !important;
+  color: var(--accent) !important;
+}
+

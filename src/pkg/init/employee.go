@@ -31,6 +31,7 @@ func InitEmployee(_ *config.OpenOctaConfig) error {
 			InputSources: []string{"alerts"},
 			OutputTypes: []string{"diagnosis_report"},
 			ActionScopes: []string{"read_only", "ops_ack_alert"},
+			SkillIDs:    []string{"alert-triage", "root-cause-analysis", "runbook-recommendation"},
 		},
 		{
 			ID:          "emp_bch_inspect",
@@ -47,6 +48,7 @@ func InitEmployee(_ *config.OpenOctaConfig) error {
 			InputSources: []string{"metrics", "logs"},
 			OutputTypes: []string{"inspection_report"},
 			ActionScopes: []string{"read_only"},
+			SkillIDs:    []string{"alert-triage", "root-cause-analysis"},
 		},
 		{
 			ID:          "emp_bch_diagnose",
@@ -63,12 +65,13 @@ func InitEmployee(_ *config.OpenOctaConfig) error {
 			InputSources: []string{"metrics", "logs"},
 			OutputTypes: []string{"tuning_report"},
 			ActionScopes: []string{"read_only"},
+			SkillIDs:    []string{"alert-triage", "root-cause-analysis"},
 		},
 		{
 			ID:          "emp_gbase_diagnose",
 			Name:        "GBase 慢 SQL 诊断助手",
 			Description: "专职 GBase 数据库慢查询、死锁与连接池耗尽故障的诊断与调优。",
-			Prompt:      "你是一个 GBase 数据库诊断数字员工。请使用专业的 SQL 优化与配置调整能力，分析 GBase 的性能异常、死锁和慢日志，定位性能瓶颈，给出优化建议。",
+			Prompt:      "你是一个 GBase 数据库诊断数字员工。请使用专业的 SQL 优化与配置调整能力，分析 GBase 的性能异常、死锁 and 慢日志，定位性能瓶颈，给出优化建议。",
 			Enabled:     true,
 			Type:        "智能值班",
 			From:        "local",
@@ -79,6 +82,7 @@ func InitEmployee(_ *config.OpenOctaConfig) error {
 			InputSources: []string{"metrics", "logs"},
 			OutputTypes: []string{"diagnosis_report"},
 			ActionScopes: []string{"read_only"},
+			SkillIDs:    []string{"alert-triage", "root-cause-analysis", "runbook-recommendation"},
 		},
 		{
 			ID:          "emp_fi_inspect",
@@ -95,6 +99,7 @@ func InitEmployee(_ *config.OpenOctaConfig) error {
 			InputSources: []string{"metrics", "logs"},
 			OutputTypes: []string{"inspection_report"},
 			ActionScopes: []string{"read_only"},
+			SkillIDs:    []string{"alert-triage", "root-cause-analysis", "runbook-recommendation"},
 		},
 		{
 			ID:          "emp_governance_remediate",
@@ -111,6 +116,7 @@ func InitEmployee(_ *config.OpenOctaConfig) error {
 			InputSources: []string{"metrics", "logs"},
 			OutputTypes: []string{"remediation_report"},
 			ActionScopes: []string{"read_only"},
+			SkillIDs:    []string{"governance-lineage", "root-cause-analysis"},
 		},
 		{
 			ID:          "emp_dataapps_ops",
@@ -127,14 +133,28 @@ func InitEmployee(_ *config.OpenOctaConfig) error {
 			InputSources: []string{"alerts"},
 			OutputTypes: []string{"diagnosis_report"},
 			ActionScopes: []string{"read_only"},
+			SkillIDs:    []string{"alert-triage", "root-cause-analysis", "sla-escort"},
 		},
 	}
 
 	for _, emp := range defaultEmployees {
-		if _, err := employees.LoadManifest(emp.ID, env); err != nil {
+		existing, err := employees.LoadManifest(emp.ID, env)
+		if err != nil || existing == nil || !equalStringSlices(existing.SkillIDs, emp.SkillIDs) {
 			_ = employees.SaveManifest(emp, env)
 		}
 	}
 
 	return nil
+}
+
+func equalStringSlices(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

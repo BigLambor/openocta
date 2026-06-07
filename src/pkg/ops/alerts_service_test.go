@@ -106,3 +106,57 @@ func TestPatchAlertGroupValidationAndTimeline(t *testing.T) {
 		t.Fatalf("unexpected last event: %+v", lastEvent)
 	}
 }
+
+func TestExtractSection(t *testing.T) {
+	headings := []string{"根因候选", "判断结论", "影响范围"}
+
+	// Case 1: Markdown header line with extra text
+	md1 := "### 根因候选（基于技能规范与 BCH 运维知识库）**：\n当前环境不存在实际运行的 Hadoop 集群。\n## 影响范围\n部分任务失败。"
+	res1 := extractSection(md1, headings)
+	expected1 := "当前环境不存在实际运行的 Hadoop 集群。"
+	if res1 != expected1 {
+		t.Fatalf("expected %q, got %q", expected1, res1)
+	}
+
+	// Case 2: Inline header bold
+	md2 := "**根因候选：** 当前环境不存在实际运行的 Hadoop 集群。\n## 影响范围\n部分任务失败。"
+	res2 := extractSection(md2, headings)
+	expected2 := "当前环境不存在实际运行的 Hadoop 集群。"
+	if res2 != expected2 {
+		t.Fatalf("expected %q, got %q", expected2, res2)
+	}
+
+	// Case 3: Empty content
+	md3 := "### 根因候选"
+	res3 := extractSection(md3, headings)
+	if res3 != "" {
+		t.Fatalf("expected empty, got %q", res3)
+	}
+}
+
+func TestParseReportMarkdownFromText(t *testing.T) {
+	// Case 1: Standard markdown with ```json code block containing reportMarkdown
+	text1 := "Here is the result:\n```json\n{\n  \"reportMarkdown\": \"### 根因\\n应用连接池占满。\"\n}\n```\nFollow up questions?"
+	res1 := parseReportMarkdownFromText(text1)
+	expected1 := "### 根因\n应用连接池占满。"
+	if res1 != expected1 {
+		t.Fatalf("expected %q, got %q", expected1, res1)
+	}
+
+	// Case 2: Markdown with standard ``` block containing JSON object with reportMarkdown
+	text2 := "Result:\n```\n{\n  \"report_markdown\": \"### 根因\\n应用连接池占满。\"\n}\n```"
+	res2 := parseReportMarkdownFromText(text2)
+	expected2 := "### 根因\n应用连接池占满。"
+	if res2 != expected2 {
+		t.Fatalf("expected %q, got %q", expected2, res2)
+	}
+
+	// Case 3: Non-JSON standard text
+	text3 := "### 根因\n应用连接池占满。"
+	res3 := parseReportMarkdownFromText(text3)
+	if res3 != text3 {
+		t.Fatalf("expected %q, got %q", text3, res3)
+	}
+}
+
+

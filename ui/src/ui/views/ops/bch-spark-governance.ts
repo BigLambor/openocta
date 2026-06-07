@@ -1118,13 +1118,21 @@ export class BchSparkGovernance extends LitElement {
   private renderSparkContent() {
     const jobs = this.filteredSparkJobs();
     const clusterLabel = this.selectedCluster === "all" ? "全部集群" : this.selectedCluster;
-    const scores = jobs.map((job) => sparkHealthScore(job));
-    const buckets = bucketJobsByScore(
-      scores,
-      jobs.map((job) => job.labels.some((l) => l.includes("资源过度配置") || l.includes("过度配置"))),
-    );
     const radar = averageRadarFromSparkJobs(jobs);
+    
+    const total = jobs.length;
+    const succeeded = jobs.filter((j) => j.status === "SUCCEEDED").length;
+    const failed = jobs.filter((j) => j.status === "FAILED").length;
+    const running = jobs.filter((j) => j.status === "RUNNING").length;
     const tuningCandidates = jobs.filter((job) => sparkHealthScore(job) < 90).length;
+
+    const buckets = {
+      healthy: succeeded,
+      warning: running,
+      critical: failed,
+      waste: tuningCandidates,
+      total,
+    };
 
     return html`
       ${renderBchJobHealthOverview({
