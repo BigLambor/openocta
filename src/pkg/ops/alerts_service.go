@@ -17,10 +17,10 @@ import (
 )
 
 var (
-	alertsMu      sync.RWMutex
-	alertsPath    string
-	alertGroups   []AlertGroup
-	stateDirRoot  string
+	alertsMu     sync.RWMutex
+	alertsPath   string
+	alertGroups  []AlertGroup
+	stateDirRoot string
 )
 
 func loadAlertsLocked() error {
@@ -49,8 +49,7 @@ func InitAlertsStore(stateDir string) error {
 
 	stateDirRoot = stateDir
 	alertsPath = filepath.Join(stateDir, "ops", "alerts.json")
-	err := loadAlertsLocked()
-	if err != nil {
+	if err := loadAlertsLocked(); err != nil {
 		return err
 	}
 
@@ -66,6 +65,7 @@ func InitAlertsStore(stateDir string) error {
 				Status:        AlertStatusActive,
 				OriginalCount: 3,
 				ReducedTo:     1,
+				SessionKey:    "agent:main:alert-group-hadoop-01",
 				CreatedAtMs:   now - 3600000,
 				UpdatedAtMs:   now - 3600000,
 				Alertname:     "HDFSNameNodeHeapUsageHigh",
@@ -76,6 +76,9 @@ func InitAlertsStore(stateDir string) error {
 				Timeline: []AlertTimelineEvent{
 					{Type: "created", Operator: "system", TimestampMs: now - 3600000, Message: "告警组已创建"},
 				},
+				SuppressionCategory: "flapping",
+				SuppressionDetail:   "内存占用指标在临界点 (85.2%) 持续震荡，属于典型抖动噪音，AI 已自动合并抑制，防止重复派单。",
+				ReviewStatus:        "pending",
 			},
 			{
 				ID:            "alert-group-gbase-01",
@@ -86,6 +89,7 @@ func InitAlertsStore(stateDir string) error {
 				Status:        AlertStatusActive,
 				OriginalCount: 5,
 				ReducedTo:     1,
+				SessionKey:    "agent:main:alert-group-gbase-01",
 				CreatedAtMs:   now - 1800000,
 				UpdatedAtMs:   now - 1800000,
 				Alertname:     "GBaseConnectionPoolExhausted",
@@ -96,6 +100,9 @@ func InitAlertsStore(stateDir string) error {
 				Timeline: []AlertTimelineEvent{
 					{Type: "created", Operator: "system", TimestampMs: now - 1800000, Message: "告警组已创建"},
 				},
+				SuppressionCategory: "duplicate",
+				SuppressionDetail:   "同一数据库实例 gbase-prod-01 在 5 分钟内重复上报连接池满告警，判断为冗余重复告警，已合并抑制。",
+				ReviewStatus:        "pending",
 			},
 			{
 				ID:            "alert-group-fi-01",
@@ -106,6 +113,7 @@ func InitAlertsStore(stateDir string) error {
 				Status:        AlertStatusActive,
 				OriginalCount: 2,
 				ReducedTo:     1,
+				SessionKey:    "agent:main:alert-group-fi-01",
 				CreatedAtMs:   now - 900000,
 				UpdatedAtMs:   now - 900000,
 				Alertname:     "FIYarnQueueExhausted",
@@ -116,6 +124,9 @@ func InitAlertsStore(stateDir string) error {
 				Timeline: []AlertTimelineEvent{
 					{Type: "created", Operator: "system", TimestampMs: now - 900000, Message: "告警组已创建"},
 				},
+				SuppressionCategory: "correlation",
+				SuppressionDetail:   "因为 YARN 队列 root.default 资源耗尽，触发连锁故障告警。AI 已根据资产拓扑及上下游依赖，将指标告警与队列根因告警进行关联抑制。",
+				ReviewStatus:        "pending",
 			},
 			{
 				ID:            "alert-group-gov-01",
@@ -126,6 +137,7 @@ func InitAlertsStore(stateDir string) error {
 				Status:        AlertStatusActive,
 				OriginalCount: 1,
 				ReducedTo:     1,
+				SessionKey:    "agent:main:alert-group-gov-01",
 				CreatedAtMs:   now - 600000,
 				UpdatedAtMs:   now - 600000,
 				Alertname:     "LineageParsingInterrupted",
@@ -136,6 +148,9 @@ func InitAlertsStore(stateDir string) error {
 				Timeline: []AlertTimelineEvent{
 					{Type: "created", Operator: "system", TimestampMs: now - 600000, Message: "告警组已创建"},
 				},
+				SuppressionCategory: "maintenance",
+				SuppressionDetail:   "当前实例处于 T+1 数据加工例行维护窗口（02:00 - 08:00），相关解析异常属于已知维护期告警，已自动静音屏蔽。",
+				ReviewStatus:        "pending",
 			},
 			{
 				ID:            "alert-group-dataapps-01",
@@ -146,6 +161,7 @@ func InitAlertsStore(stateDir string) error {
 				Status:        AlertStatusActive,
 				OriginalCount: 1,
 				ReducedTo:     1,
+				SessionKey:    "agent:main:alert-group-dataapps-01",
 				CreatedAtMs:   now - 300000,
 				UpdatedAtMs:   now - 300000,
 				Alertname:     "DataAppSLABreach",
@@ -156,11 +172,34 @@ func InitAlertsStore(stateDir string) error {
 				Timeline: []AlertTimelineEvent{
 					{Type: "created", Operator: "system", TimestampMs: now - 300000, Message: "告警组已创建"},
 				},
+				SuppressionCategory: "none",
+				SuppressionDetail:   "核心业务应用 SLA 发生严重逾期且超出常规阈值，不符合任何抑制规则，AI 已判定为紧急故障并升级派单。",
+				ReviewStatus:        "pending",
 			},
 		}
 		_ = persistAlertsLocked()
+	} else if migrateAlertGroupsLocked() {
+		if err := persistAlertsLocked(); err != nil {
+			return err
+		}
 	}
 	return nil
+}
+
+func migrateAlertGroupsLocked() bool {
+	changed := false
+	for i := range alertGroups {
+		g := &alertGroups[i]
+		if strings.TrimSpace(g.SuppressionCategory) == "" {
+			g.SuppressionCategory = "none"
+			changed = true
+		}
+		if strings.TrimSpace(g.ReviewStatus) == "" {
+			g.ReviewStatus = "pending"
+			changed = true
+		}
+	}
+	return changed
 }
 
 // MergedAlertInput is one alert in a merged batch (from hooks).
@@ -421,6 +460,26 @@ func PatchAlertGroup(id string, patch AlertGroupPatch, operator string) (AlertGr
 					TimestampMs: now,
 					Message:     fmt.Sprintf("添加解决原因: %s", val),
 				})
+			}
+		}
+
+		if patch.ReviewStatus != nil {
+			val := strings.TrimSpace(*patch.ReviewStatus)
+			if g.ReviewStatus != val {
+				g.ReviewStatus = val
+				g.Timeline = append(g.Timeline, AlertTimelineEvent{
+					Type:        "review_status_change",
+					Operator:    operator,
+					TimestampMs: now,
+					Message:     fmt.Sprintf("AI 复核状态变更为: %s", val),
+				})
+			}
+		}
+
+		if patch.ReviewNote != nil {
+			val := strings.TrimSpace(*patch.ReviewNote)
+			if g.ReviewNote != val {
+				g.ReviewNote = val
 			}
 		}
 

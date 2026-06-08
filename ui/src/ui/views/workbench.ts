@@ -18,6 +18,7 @@ import {
   type OpsDomainKey,
 } from "../components/domain-filter.ts";
 import type { OpsClusterRecord } from "../controllers/ops-clusters.ts";
+import type { OpsAlertGroupPatch } from "../controllers/ops-alerts.ts";
 import {
   findWorkbenchScenario,
   filterWorkbenchScenarios,
@@ -50,6 +51,10 @@ export type WorkbenchAlertGroup = {
   sessionKey?: string;
   impact?: string;
   status?: string;
+  suppressionCategory?: string;
+  suppressionDetail?: string;
+  reviewStatus?: string;
+  reviewNote?: string;
 };
 
 export type WorkbenchView = "events" | "inspection" | "diagnosis" | "governance" | "capacity" | "change";
@@ -140,6 +145,13 @@ export type WorkbenchProps = {
   onCloseAiPanel?: () => void;
   onAcceptSuggestion?: (id: string) => void;
   onRejectSuggestion?: (id: string) => void;
+  onPatchAlertGroup?: (
+    id: string,
+    patch: OpsAlertGroupPatch,
+  ) => Promise<void>;
+  reviewingAlertId?: string | null;
+  reviewProgress?: number;
+  onStartAiReview?: (id: string) => void;
   onOpenTasks?: (id: string) => void;
 };
 
@@ -183,6 +195,59 @@ const WORKBENCH_VIEW_META: Record<
     description: "变更前评估、变更中观测与回滚建议，对接审批与执行记录。",
   },
 };
+
+function suppressionClass(category?: string): string {
+  const normalized = category || "none";
+  if (normalized === "flapping" || normalized === "duplicate" || normalized === "correlation" || normalized === "maintenance") {
+    return normalized;
+  }
+  return "none";
+}
+
+function suppressionShortLabel(category?: string): string {
+  switch (category) {
+    case "flapping":
+      return "抖动";
+    case "duplicate":
+      return "重复";
+    case "correlation":
+      return "关联";
+    case "maintenance":
+      return "维护";
+    default:
+      return "上报";
+  }
+}
+
+function suppressionFullLabel(category?: string): string {
+  switch (category) {
+    case "flapping":
+      return "告警抖动收敛";
+    case "duplicate":
+      return "重复告警过滤";
+    case "correlation":
+      return "拓扑关联抑制";
+    case "maintenance":
+      return "维护窗口期屏蔽";
+    default:
+      return "升级上报";
+  }
+}
+
+function suppressionFallbackDetail(category?: string): string {
+  switch (category) {
+    case "flapping":
+      return "指标在临界点频繁震荡，已自动收敛降噪。";
+    case "duplicate":
+      return "相同告警源在短时间内高频重复触发，已自动合并去重。";
+    case "correlation":
+      return "根据资产拓扑及上下游依赖，判定此告警为次生衍生告警，已自动关联抑制。";
+    case "maintenance":
+      return "当前处于例行维护窗口，相关告警已被自动屏蔽。";
+    default:
+      return "该故障事件级别高或不满足任何抑制规则，已自动升级并派单上报。";
+  }
+}
 
 function severityLabel(severity: WorkbenchAlertGroup["severity"]): string {
   switch (severity) {
@@ -973,10 +1038,112 @@ function renderScenarioDetail(
 }
 
 function renderEventsView(props: WorkbenchProps, active: WorkbenchAlertGroup | undefined, originalTotal: number, criticalCount: number, warningCount: number) {
+  const mergedTotal = props.alertGroups.length;
+  const suppressedTotal = originalTotal - mergedTotal > 0 ? originalTotal - mergedTotal : 0;
+  const suppressionRate = originalTotal > 0 ? ((suppressedTotal / originalTotal) * 100).toFixed(1) : "0.0";
+
+  // Calculate category distribution based on original counts
+  let flapping = 0;
+  let duplicate = 0;
+  let correlation = 0;
+  let maintenance = 0;
+  let none = 0;
+  props.alertGroups.forEach((g) => {
+    const c = g.originalCount || 1;
+    if (g.suppressionCategory === "flapping") flapping += c;
+    else if (g.suppressionCategory === "duplicate") duplicate += c;
+    else if (g.suppressionCategory === "correlation") correlation += c;
+    else if (g.suppressionCategory === "maintenance") maintenance += c;
+    else none += c;
+  });
+  const totalCat = flapping + duplicate + correlation + maintenance + none;
+  const pFlapping = totalCat > 0 ? (flapping / totalCat) * 100 : 0;
+  const pDuplicate = totalCat > 0 ? (duplicate / totalCat) * 100 : 0;
+  const pCorrelation = totalCat > 0 ? (correlation / totalCat) * 100 : 0;
+  const pMaintenance = totalCat > 0 ? (maintenance / totalCat) * 100 : 0;
+  const pNone = totalCat > 0 ? (none / totalCat) * 100 : 0;
+
+  const isReviewing = props.reviewingAlertId === active?.id;
+  const reviewingProgress = props.reviewProgress ?? 0;
+
   return html`
     ${props.alertsError
       ? html`<div class="ops-panel" style="margin-bottom:12px;">${renderOpsError({ message: props.alertsError })}</div>`
       : nothing}
+
+    <!-- AI Alert Suppression Dashboard -->
+    <div class="ops-summary-cards ops-alert-suppression-summary">
+      <div class="ops-card stat-card ops-alert-stat ops-alert-stat--accent">
+        <div class="stat-label ops-alert-stat__label">
+          <span class="ops-inline-icon">${icons.messageSquare}</span> 接入原始告警
+        </div>
+        <div class="stat-value">${originalTotal} <span>条</span></div>
+        <div class="muted ops-alert-stat__hint">当前时间窗口内接收事件</div>
+      </div>
+      
+      <div class="ops-card stat-card ops-alert-stat ops-alert-stat--ok">
+        <div class="stat-label ops-alert-stat__label">
+          <span class="ops-inline-icon">${icons.brain || icons.zap}</span> AI 自动抑制
+        </div>
+        <div class="stat-value">${suppressedTotal} <span>条</span></div>
+        <div class="muted ops-alert-stat__hint">已被 AI 判定为噪音自动拦截</div>
+      </div>
+
+      <div class="ops-card stat-card ops-alert-stat ops-alert-stat--info">
+        <div class="stat-label ops-alert-stat__label">
+          <span class="ops-inline-icon">${icons.usageBars || icons.activity}</span> AI 抑制率
+        </div>
+        <div class="stat-value">${suppressionRate}%</div>
+        <div class="ops-progress-track">
+          <div class="ops-progress-fill ops-progress-fill--info" style="width: ${suppressionRate}%;"></div>
+        </div>
+      </div>
+
+      <div class="ops-card stat-card ops-alert-stat ops-alert-stat--warn">
+        <div class="stat-label ops-alert-stat__label">
+          <span class="ops-inline-icon">${icons.alertTriangle || icons.messageSquare}</span> 待处理故障组
+        </div>
+        <div class="stat-value">${mergedTotal} <span>组</span></div>
+        <div class="muted ops-alert-stat__hint">已收敛并升级的根因告警组</div>
+      </div>
+    </div>
+
+    <!-- AI Suppression Categories breakdown -->
+    <div class="ops-card ops-suppression-breakdown">
+      <div class="ops-suppression-breakdown__header">
+        <span>AI 抑制原因分类占比</span>
+        <span>共分析 ${totalCat} 条告警</span>
+      </div>
+      <div class="ops-suppression-bar">
+        ${pFlapping > 0 ? html`<div class="ops-suppression-bar__segment ops-suppression-flapping" style="width: ${pFlapping}%;" title="抖动收敛: ${flapping}条 (${pFlapping.toFixed(0)}%)"></div>` : nothing}
+        ${pDuplicate > 0 ? html`<div class="ops-suppression-bar__segment ops-suppression-duplicate" style="width: ${pDuplicate}%;" title="重复过滤: ${duplicate}条 (${pDuplicate.toFixed(0)}%)"></div>` : nothing}
+        ${pCorrelation > 0 ? html`<div class="ops-suppression-bar__segment ops-suppression-correlation" style="width: ${pCorrelation}%;" title="拓扑关联: ${correlation}条 (${pCorrelation.toFixed(0)}%)"></div>` : nothing}
+        ${pMaintenance > 0 ? html`<div class="ops-suppression-bar__segment ops-suppression-maintenance" style="width: ${pMaintenance}%;" title="维护屏蔽: ${maintenance}条 (${pMaintenance.toFixed(0)}%)"></div>` : nothing}
+        ${pNone > 0 ? html`<div class="ops-suppression-bar__segment ops-suppression-none" style="width: ${pNone}%;" title="升级处理: ${none}条 (${pNone.toFixed(0)}%)"></div>` : nothing}
+      </div>
+      <div class="ops-suppression-legend">
+        <div>
+          <span class="ops-suppression-dot ops-suppression-flapping"></span>
+          <span>抖动收敛 (${pFlapping.toFixed(0)}%)</span>
+        </div>
+        <div>
+          <span class="ops-suppression-dot ops-suppression-duplicate"></span>
+          <span>重复过滤 (${pDuplicate.toFixed(0)}%)</span>
+        </div>
+        <div>
+          <span class="ops-suppression-dot ops-suppression-correlation"></span>
+          <span>拓扑关联 (${pCorrelation.toFixed(0)}%)</span>
+        </div>
+        <div>
+          <span class="ops-suppression-dot ops-suppression-maintenance"></span>
+          <span>维护期屏蔽 (${pMaintenance.toFixed(0)}%)</span>
+        </div>
+        <div>
+          <span class="ops-suppression-dot ops-suppression-none"></span>
+          <span>升级上报 (${pNone.toFixed(0)}%)</span>
+        </div>
+      </div>
+    </div>
 
     <div class="ops-main-columns ops-shell-columns workbench-events-layout">
       <div class="list-column">
@@ -999,9 +1166,12 @@ function renderEventsView(props: WorkbenchProps, active: WorkbenchAlertGroup | u
                         class="alert-item minimal-alert-item ${g.id === active?.id ? "alert-item--active" : ""}"
                         @click=${() => props.onSelectAlertGroup?.(g.id)}
                       >
-                        <div class="alert-item__meta">
+                        <div class="alert-item__meta ops-alert-item__meta">
                           <span class="alert-badge alert-badge--${g.severity}">${severityLabel(g.severity)}</span>
                           <span class="alert-time">${g.timestamp}</span>
+                          <span class="ops-suppression-tag ops-suppression-tag--${suppressionClass(g.suppressionCategory)}">
+                            ${suppressionShortLabel(g.suppressionCategory)}
+                          </span>
                         </div>
                         <div class="alert-item__title">${g.title}</div>
                         <div class="alert-item__noise">
@@ -1026,14 +1196,151 @@ function renderEventsView(props: WorkbenchProps, active: WorkbenchAlertGroup | u
                     <span class="detail-count">关联 ${active.originalCount} 次事件</span>
                   </div>
                 </div>
+
+                <!-- AI Alert Suppression Detail card -->
+                <div class="detail-section ops-suppression-decision">
+                  <div class="detail-section__header ops-suppression-decision__header">
+                    <span class="ops-suppression-decision__title">
+                      <span class="ops-inline-icon ops-inline-icon--ok">${icons.brain}</span> AI 告警抑制决策
+                    </span>
+                    <span class="ops-suppression-decision__badge ops-suppression-decision__badge--${active.suppressionCategory !== 'none' ? 'suppressed' : 'escalated'}">
+                      ${active.suppressionCategory !== 'none' ? '已自动抑制' : '升级处理'}
+                    </span>
+                  </div>
+                  
+                  <div class="ops-suppression-decision__body">
+                    <div>
+                      <span>抑制原因类型：</span>
+                      <strong class="ops-suppression-text--${suppressionClass(active.suppressionCategory)}">
+                        ${suppressionFullLabel(active.suppressionCategory)}
+                      </strong>
+                    </div>
+                    <div>
+                      <span>判定细节：</span>
+                      <span>${active.suppressionDetail || suppressionFallbackDetail(active.suppressionCategory)}</span>
+                    </div>
+                  </div>
+
+                  <!-- AI Review Result (Styled as ops-ai-callout for visual consistency) -->
+                  ${active.reviewStatus && active.reviewStatus !== 'pending' ? html`
+                    <div class="ops-suppression-subsection">
+                      <div class="ops-ai-callout ops-review-callout ops-review-callout--${active.reviewStatus === 'approved' ? 'approved' : 'rejected'}">
+                        <span class="ops-ai-callout__badge">
+                          AI 复核建议：${active.reviewStatus === 'approved' ? '通过抑制' : '驳回抑制/升级'}
+                        </span>
+                        <div class="ops-review-callout__body">
+                          ${active.reviewNote}
+                        </div>
+                      </div>
+                    </div>
+                  ` : nothing}
+
+                  <!-- AI Review progress bar -->
+                  ${isReviewing ? html`
+                    <div class="ops-suppression-subsection">
+                      <div class="ops-review-progress__header">
+                        <span>
+                          <span class="ops-inline-icon ops-spin">${icons.loader}</span>
+                          AI 智能复核中 (${reviewingProgress}%) ...
+                        </span>
+                        <span>正在收集指标及拓扑树...</span>
+                      </div>
+                      <div class="ops-progress-track ops-progress-track--thin">
+                        <div class="ops-progress-fill" style="width: ${reviewingProgress}%;"></div>
+                      </div>
+                    </div>
+                  ` : nothing}
+
+                  <!-- Action buttons for review & feedback (grouped inside the card) -->
+                  <div class="ops-review-actions">
+                    <button 
+                      class="ops-btn ops-btn--primary ${isReviewing ? 'btn--loading' : ''}" 
+                      type="button" 
+                      ?disabled=${isReviewing} 
+                      @click=${() => active && props.onStartAiReview?.(active.id)}
+                    >
+                      ${isReviewing ? html`${icons.loader} 复核中...` : html`<span class="ops-inline-icon">${icons.brain}</span> 复核抑制决策`}
+                    </button>
+                    <button 
+                      class="ops-btn" 
+                      type="button" 
+                      ?disabled=${isReviewing} 
+                      @click=${async () => {
+                        if (props.onPatchAlertGroup) {
+                          await props.onPatchAlertGroup(active.id, {
+                            reviewStatus: "approved",
+                            reviewNote: "人工反馈：同意抑制。该告警已确认符合当前抑制规则，无需重复派单。"
+                          });
+                        }
+                      }}
+                    >
+                      同意抑制
+                    </button>
+                    <button 
+                      class="ops-btn ops-btn--danger-outline" 
+                      type="button" 
+                      ?disabled=${isReviewing} 
+                      @click=${async () => {
+                        if (props.onPatchAlertGroup) {
+                          await props.onPatchAlertGroup(active.id, {
+                            reviewStatus: "rejected",
+                            reviewNote: "人工反馈：驳回抑制。此为核心服务真实故障，需要立即生成工单升级处理。"
+                          });
+                        }
+                      }}
+                    >
+                      驳回上报
+                    </button>
+                  </div>
+                </div>
                 
+                <div class="detail-section ops-diagnostic-section">
+                  <div class="detail-section__header ops-diagnostic-section__header">
+                    ${icons.zap}
+                    <span>根因诊断与处置</span>
+                  </div>
+                  <div class="ops-diagnostic-section__hint">
+                    基于当前告警上下文继续生成分析、聚合相似事件或转交运维助手。
+                  </div>
+                  <div class="ops-diagnostic-toolbar__actions">
+                    <button class="ops-diagnostic-action" type="button" @click=${() => props.onOpenAiPanel?.("root-cause")}>
+                      <span class="ops-diagnostic-action__icon">${icons.messageSquare}</span>
+                      <span class="ops-diagnostic-action__text">
+                        <strong>生成根因分析</strong>
+                        <span>补充证据链与判断结论</span>
+                      </span>
+                    </button>
+                    <button class="ops-diagnostic-action" type="button" @click=${() => props.onOpenAiPanel?.("similar")}>
+                      <span class="ops-diagnostic-action__icon">${icons.copy}</span>
+                      <span class="ops-diagnostic-action__text">
+                        <strong>聚合相似事件</strong>
+                        <span>查找重复与关联告警</span>
+                      </span>
+                    </button>
+                    <button class="ops-diagnostic-action" type="button" @click=${() => props.onOpenAiPanel?.("action")}>
+                      <span class="ops-diagnostic-action__icon">${icons.scrollText}</span>
+                      <span class="ops-diagnostic-action__text">
+                        <strong>生成处置建议</strong>
+                        <span>输出排查步骤和动作</span>
+                      </span>
+                    </button>
+                    <button class="ops-diagnostic-action" type="button" @click=${() => props.onSendToCopilot?.(active.id, "root-cause")}>
+                      <span class="ops-diagnostic-action__icon">${icons.send}</span>
+                      <span class="ops-diagnostic-action__text">
+                        <strong>发送到运维助手</strong>
+                        <span>带上下文进入协同处理</span>
+                      </span>
+                    </button>
+                  </div>
+                </div>
+
                 <div class="detail-section">
-                  <div class="detail-section__header">${icons.zap} 根因候选</div>
+                  <div class="detail-section__header">${icons.zap} 当前根因候选</div>
                   ${active.rootCause && active.rootCause !== "暂无根因分析" && active.rootCause !== "Agent 正在分析合并告警…"
                     ? html`
-                        <div class="ops-ai-callout">
+                        <div class="ops-ai-callout ops-diagnostic-callout">
                           <span class="ops-ai-callout__badge">AI 智能推断</span>
-                          <div class="ops-markdown">${unsafeHTML(toSanitizedMarkdownHtml(active.rootCause))}</div>
+                          <div class="ops-markdown ops-diagnostic-markdown">${unsafeHTML(toSanitizedMarkdownHtml(active.rootCause))}</div>
                         </div>
                       `
                     : html`
@@ -1048,7 +1355,7 @@ function renderEventsView(props: WorkbenchProps, active: WorkbenchAlertGroup | u
                         <div class="detail-section__header">${icons.overviewGrid} 影响范围</div>
                         <div class="ops-ai-callout">
                           <span class="ops-ai-callout__badge">AI 影响评估</span>
-                          <div class="ops-markdown">${unsafeHTML(toSanitizedMarkdownHtml(active.impact))}</div>
+                          <div class="ops-markdown ops-diagnostic-markdown">${unsafeHTML(toSanitizedMarkdownHtml(active.impact))}</div>
                         </div>
                       </div>
                     `
@@ -1058,22 +1365,10 @@ function renderEventsView(props: WorkbenchProps, active: WorkbenchAlertGroup | u
                         <div class="detail-section__content">${active.impact || "—"}</div>
                       </div>
                     `}
-                
-                <div class="detail-actions-bar">
-                  <button class="ops-btn ops-btn--primary" type="button" @click=${() => props.onOpenAiPanel?.("root-cause")}>
-                    ${icons.messageSquare} AI 根因分析
-                  </button>
-                  <button class="ops-btn" type="button" @click=${() => props.onOpenAiPanel?.("similar")}>聚合相似</button>
-                  <button class="ops-btn" type="button" @click=${() => props.onOpenAiPanel?.("action")}>处置建议</button>
-                  <button class="ops-btn ops-btn--ghost" type="button" @click=${() => props.onSendToCopilot?.(active.id, "root-cause")}>
-                    发送到运维助手
-                  </button>
-                </div>
               </div>
             `}
       </div>
     </div>
-
   `;
 }
 

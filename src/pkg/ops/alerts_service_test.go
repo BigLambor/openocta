@@ -63,6 +63,39 @@ func TestRecordAndListAlertGroups(t *testing.T) {
 	}
 }
 
+func TestInitAlertsStoreMigratesExistingGroupsWithoutReplacing(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ops", "alerts.json")
+	existing := AlertGroup{
+		ID:            "existing-alert",
+		Domain:        DomainHadoop,
+		Title:         "Existing production alert",
+		Severity:      "critical",
+		Status:        AlertStatusActive,
+		OriginalCount: 4,
+		ReducedTo:     1,
+	}
+	if err := saveAlertsStore(path, &alertsStoreFile{Version: 1, Groups: []AlertGroup{existing}}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := InitAlertsStore(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	list := ListAlertGroups(DomainHadoop, "")
+	if list.Total != 1 {
+		t.Fatalf("expected existing group to be preserved, got %d groups", list.Total)
+	}
+	got := list.Groups[0]
+	if got.ID != existing.ID {
+		t.Fatalf("expected existing group %q, got %q", existing.ID, got.ID)
+	}
+	if got.SuppressionCategory != "none" || got.ReviewStatus != "pending" {
+		t.Fatalf("expected migrated defaults, got suppression=%q review=%q", got.SuppressionCategory, got.ReviewStatus)
+	}
+}
+
 func TestPatchAlertGroupValidationAndTimeline(t *testing.T) {
 	dir := t.TempDir()
 	if err := InitAlertsStore(dir); err != nil {
@@ -194,6 +227,3 @@ func TestIsCompleteDiagnosisReport(t *testing.T) {
 		t.Errorf("expected true for report containing '判断结论', got false")
 	}
 }
-
-
-

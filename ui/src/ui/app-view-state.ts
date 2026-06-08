@@ -565,6 +565,8 @@ export type AppViewState = {
   handleWindowToggleMaximise: () => void;
   handleWindowClose: () => void;
   handleTopbarDoubleClick: (event: MouseEvent) => void;
+  opsAlertReviewingId: string | null;
+  opsAlertReviewProgress: number;
   // Tech Ops Domains
   opsActiveSubTabs: Record<string, import("./ops/navigation.ts").TechOpsCapabilityTab>;
   opsSelectedAlertGroupIds: Record<string, string | null>;

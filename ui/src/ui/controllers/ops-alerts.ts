@@ -17,6 +17,10 @@ export type OpsAlertGroupRecord = {
   impactAnalysis?: string;
   createdAtMs: number;
   updatedAtMs: number;
+  suppressionCategory?: string;
+  suppressionDetail?: string;
+  reviewStatus?: string;
+  reviewNote?: string;
 };
 
 export type OpsAlertGroupsResponse = {
@@ -26,6 +30,14 @@ export type OpsAlertGroupsResponse = {
   mergedTotal: number;
   reductionRate: number;
   pendingActive: number;
+};
+
+export type OpsAlertGroupPatch = {
+  status?: string;
+  ackNote?: string;
+  resolvedReason?: string;
+  reviewStatus?: string;
+  reviewNote?: string;
 };
 
 type OpsAlertHost = {
@@ -74,7 +86,7 @@ export async function fetchOpsAlertGroups(
 export async function patchOpsAlertGroup(
   host: OpsAlertHost,
   id: string,
-  patch: { status: string; ackNote?: string; resolvedReason?: string },
+  patch: OpsAlertGroupPatch,
 ): Promise<OpsAlertGroupRecord> {
   const res = await fetch(`${baseUrl(host)}/api/ops/alerts/groups/${encodeURIComponent(id)}`, {
     method: "PATCH",
@@ -113,5 +125,9 @@ export function mapAlertGroupForUI(g: OpsAlertGroupRecord) {
     status: g.status === "resolved" ? ("resolved" as const) : ("active" as const),
     analysisMarkdown: g.rootCauseMarkdown?.trim() || "",
     sessionKey: g.sessionKey?.trim() || "",
+    suppressionCategory: g.suppressionCategory?.trim() || "none",
+    suppressionDetail: g.suppressionDetail?.trim() || "",
+    reviewStatus: g.reviewStatus?.trim() || "pending",
+    reviewNote: g.reviewNote?.trim() || "",
   };
 }

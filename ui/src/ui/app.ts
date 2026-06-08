@@ -196,6 +196,8 @@ export class OpenClawApp extends LitElement implements NativeDialogInvoker {
   @state() workbenchAiCopilotRunId: string | null = null;
   @state() workbenchAiCopilotAlertId: string | null = null;
   @state() workbenchAiCopilotMode: "root-cause" | "similar" | "action" | null = null;
+  @state() opsAlertReviewingId: string | null = null;
+  @state() opsAlertReviewProgress = 0;
   @state() compactionStatus: CompactionStatus | null = null;
   @state() sidebarOpen = false;
   @state() sidebarContent: string | null = null;

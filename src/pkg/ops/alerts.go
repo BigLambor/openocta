@@ -79,6 +79,10 @@ type AlertGroup struct {
 	ImpactAnalysis      string                 `json:"impactAnalysis,omitempty"`
 	SuggestedActions    string                 `json:"suggestedActions,omitempty"`
 	Evidence            map[string]interface{} `json:"evidence,omitempty"`
+	SuppressionCategory string                 `json:"suppressionCategory,omitempty"`
+	SuppressionDetail   string                 `json:"suppressionDetail,omitempty"`
+	ReviewStatus        string                 `json:"reviewStatus,omitempty"`
+	ReviewNote          string                 `json:"reviewNote,omitempty"`
 }
 
 // AlertGroupsListResponse is returned by GET /api/ops/alerts/groups.
@@ -97,6 +101,8 @@ type AlertGroupPatch struct {
 	Assignee       *string `json:"assignee"`
 	AckNote        *string `json:"ackNote"`
 	ResolvedReason *string `json:"resolvedReason"`
+	ReviewStatus   *string `json:"reviewStatus"`
+	ReviewNote     *string `json:"reviewNote"`
 }
 
 func normalizeSeverity(sev string) string {
