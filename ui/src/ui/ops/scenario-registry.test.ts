@@ -36,6 +36,7 @@ describe("ops scenario registry", () => {
     ]);
     expect(scenariosForWorkbench("hadoop", "capacity").map((scenario) => scenario.id)).toEqual([
       "bch-hdfs-capacity",
+      "bch-yarn-capacity",
     ]);
   });
 
@@ -73,9 +74,9 @@ describe("ops scenario registry", () => {
 
   it("summarizes scenario coverage by domain, center, and maturity", () => {
     const allStats = scenarioCatalogStats("all");
-    expect(allStats.total).toBe(12);
+    expect(allStats.total).toBe(13);
     expect(allStats.domains).toMatchObject({
-      hadoop: 3,
+      hadoop: 4,
       gbase: 3,
       fi: 2,
       governance: 2,
@@ -84,7 +85,7 @@ describe("ops scenario registry", () => {
     expect(allStats.centers).toMatchObject({
       diagnosis: 5,
       governance: 3,
-      capacity: 2,
+      capacity: 3,
       inspection: 1,
       change: 1,
     });
@@ -92,7 +93,7 @@ describe("ops scenario registry", () => {
       planned: 9,
       beta: 3,
       connected: 0,
-      automated: 0,
+      automated: 1,
     });
     expect(scenarioCatalogStats("gbase").domains).toEqual({ gbase: 3 });
   });

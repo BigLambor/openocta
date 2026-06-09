@@ -1226,7 +1226,7 @@ function renderEventsView(props: WorkbenchProps, active: WorkbenchAlertGroup | u
                     <div class="ops-suppression-subsection">
                       <div class="ops-ai-callout ops-review-callout ops-review-callout--${active.reviewStatus === 'approved' ? 'approved' : 'rejected'}">
                         <span class="ops-ai-callout__badge">
-                          AI 复核建议：${active.reviewStatus === 'approved' ? '通过抑制' : '驳回抑制/升级'}
+                          策略复核建议：${active.reviewStatus === 'approved' ? '通过抑制' : '驳回抑制/升级'}
                         </span>
                         <div class="ops-review-callout__body">
                           ${active.reviewNote}
@@ -1241,7 +1241,7 @@ function renderEventsView(props: WorkbenchProps, active: WorkbenchAlertGroup | u
                       <div class="ops-review-progress__header">
                         <span>
                           <span class="ops-inline-icon ops-spin">${icons.loader}</span>
-                          AI 智能复核中 (${reviewingProgress}%) ...
+                          策略自动复核中 (${reviewingProgress}%) ...
                         </span>
                         <span>正在收集指标及拓扑树...</span>
                       </div>
@@ -1259,7 +1259,7 @@ function renderEventsView(props: WorkbenchProps, active: WorkbenchAlertGroup | u
                       ?disabled=${isReviewing} 
                       @click=${() => active && props.onStartAiReview?.(active.id)}
                     >
-                      ${isReviewing ? html`${icons.loader} 复核中...` : html`<span class="ops-inline-icon">${icons.brain}</span> 复核抑制决策`}
+                      ${isReviewing ? html`${icons.loader} 策略复核中...` : html`<span class="ops-inline-icon">${icons.brain}</span> 策略复核抑制决策`}
                     </button>
                     <button 
                       class="ops-btn" 

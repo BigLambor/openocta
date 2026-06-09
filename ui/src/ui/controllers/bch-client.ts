@@ -306,3 +306,67 @@ export async function chatBchFlinkJob(host: BchClientHost, id: string, message: 
   const data = await res.json();
   return data.reply || "";
 }
+
+export interface YarnQueueMetric {
+  avgCpuPercent: number;
+  maxCpuPercent: number;
+  avgMemPercent: number;
+  maxMemPercent: number;
+  activeApps: number;
+}
+
+export interface YarnQueueEvaluation {
+  id: string;
+  name: string;
+  cluster: string;
+  metrics?: YarnQueueMetric;
+  status: "idle" | "over_allocated" | "healthy" | "under_allocated";
+  riskLevel: "low" | "medium" | "high";
+  currentCapacity: number;
+  maxCapacity: number;
+  usedCapacity: number;
+  pendingContainers: number;
+  waitingApps: number;
+  peakUsage30d: number;
+  lastActiveTime: string;
+  reasons: string[];
+  advice: string;
+  action: "reclaim" | "downsize" | "expand" | "none";
+  targetCapacity: number;
+  targetMaxCapacity: number;
+  configPatch: string;
+  rollbackPlan: string;
+}
+
+export async function fetchBchYarnQueues(host: any): Promise<YarnQueueEvaluation[]> {
+  const res = await fetch(`${baseUrl(host)}/api/ops/bch/yarn/queues`, {
+    headers: authHeaders(host),
+  });
+  if (!res.ok) {
+    throw new Error(`加载 YARN 队列评估列表失败 (${res.status})`);
+  }
+  const data = await res.json();
+  return Array.isArray(data) ? data : [];
+}
+
+export async function executeBchYarnQueueAction(host: any, id: string): Promise<{ success: boolean; message: string }> {
+  const res = await fetch(`${baseUrl(host)}/api/ops/bch/yarn/queues/${encodeURIComponent(id)}/execute`, {
+    method: "POST",
+    headers: authHeaders(host),
+  });
+  if (!res.ok) {
+    throw new Error(`执行 YARN 队列容量变更失败 (${res.status})`);
+  }
+  return res.json();
+}
+
+export async function rollbackBchYarnQueueAction(host: any, id: string): Promise<{ success: boolean; message: string }> {
+  const res = await fetch(`${baseUrl(host)}/api/ops/bch/yarn/queues/${encodeURIComponent(id)}/rollback`, {
+    method: "POST",
+    headers: authHeaders(host),
+  });
+  if (!res.ok) {
+    throw new Error(`回滚 YARN 队列容量变更失败 (${res.status})`);
+  }
+  return res.json();
+}

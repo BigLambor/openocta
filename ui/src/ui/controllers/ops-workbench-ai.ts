@@ -1,7 +1,7 @@
 import type { GatewayBrowserClient } from "../gateway.ts";
 import { effectiveOpsDomain, normalizeOpsDomain, type OpsDomainKey } from "../components/domain-filter.ts";
 import { extractText } from "../chat/message-extract.ts";
-import { canonicalGatewaySessionKey } from "../sessions/session-key-utils.js";
+import { canonicalGatewaySessionKey, gatewaySessionKeysEqual } from "../sessions/session-key-utils.js";
 import { generateUUID } from "../uuid.ts";
 
 type ConcreteOpsDomain = Exclude<OpsDomainKey, "all">;
@@ -89,6 +89,27 @@ function isCompleteDiagnosisReport(text: string | null | undefined): text is str
 
 function workbenchAiSessionKey(domain: string): string {
   return `agent:main:ops:${resolveWorkbenchAlertDomain(domain, domain)}:workbench-ai`;
+}
+
+function sessionSegment(value: string | undefined | null): string {
+  const trimmed = (value ?? "").trim().toLowerCase();
+  return trimmed
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 96) || "workbench";
+}
+
+export function workbenchScenarioAiSessionKey(params: {
+  employeeId: string;
+  scenarioId: string;
+  objectType?: string;
+  objectId?: string;
+}): string {
+  const employeeId = sessionSegment(params.employeeId || "main");
+  const scenarioId = sessionSegment(params.scenarioId);
+  const objectType = sessionSegment(params.objectType || "object");
+  const objectId = sessionSegment(params.objectId || "all");
+  return `agent:main:employee:${employeeId}:workbench:${scenarioId}:${objectType}:${objectId}`;
 }
 
 function messageMatchesAlert(
@@ -378,6 +399,7 @@ export async function runWorkbenchAi(
 
   const sessionKey = params.sessionKey?.trim() || alert.sessionKey?.trim() || `agent:main:${alert.id}`;
   const runId = generateUUID();
+  const anyHost = host as any;
   host.workbenchAiSessionKey = sessionKey;
   host.workbenchAiRunId = runId;
   host.workbenchAiMode = mode;
@@ -386,6 +408,8 @@ export async function runWorkbenchAi(
   host.workbenchAiResult = null;
   host.workbenchAiError = null;
   host.workbenchAiStatus = "loading";
+  anyHost._workbenchAiAccumulated = "";
+  anyHost._workbenchAiMsgId = null;
 
   try {
     await host.client.request("chat.send", {
@@ -399,7 +423,7 @@ export async function runWorkbenchAi(
         domain: alertDomain,
         capability: workbenchCapabilityForDomain(alertDomain, mode),
         workflowType: mode === "action" ? "incident" : "diagnosis",
-        objectType: "alert",
+        objectType: alert.objectType || "alert",
         objectId: alert.objectId || alert.id,
         severity: alert.severity,
         summary: buildSummary(alert),
@@ -425,7 +449,10 @@ export function handleWorkbenchAiEvent(host: WorkbenchAiHost, payload?: Workbenc
   if (!payload || !host.workbenchAiRunId) {
     return false;
   }
-  if (payload.runId !== host.workbenchAiRunId) {
+  if (
+    payload.runId !== host.workbenchAiRunId &&
+    !gatewaySessionKeysEqual(payload.sessionKey, host.workbenchAiSessionKey)
+  ) {
     return false;
   }
 

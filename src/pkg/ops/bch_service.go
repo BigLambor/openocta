@@ -185,6 +185,39 @@ type BchEmployee struct {
 	RecentTasks []BchEmployeeTask `json:"recentTasks"`
 }
 
+// YarnQueueMetric represents historical resource utilization metrics of a YARN queue.
+type YarnQueueMetric struct {
+	AvgCpuPercent float64 `json:"avgCpuPercent"`
+	MaxCpuPercent float64 `json:"maxCpuPercent"`
+	AvgMemPercent float64 `json:"avgMemPercent"`
+	MaxMemPercent float64 `json:"maxMemPercent"`
+	ActiveApps    int     `json:"activeApps"`
+}
+
+// YarnQueueEvaluation represents a YARN queue capacity evaluation.
+type YarnQueueEvaluation struct {
+	ID                 string          `json:"id"`
+	Name               string          `json:"name"`
+	Cluster            string          `json:"cluster"`
+	Metrics            YarnQueueMetric `json:"metrics"`
+	Status             string          `json:"status"` // idle, over_allocated, healthy, under_allocated
+	RiskLevel          string          `json:"riskLevel"` // low, medium, high
+	CurrentCapacity    float64         `json:"currentCapacity"`
+	MaxCapacity        float64         `json:"maxCapacity"`
+	UsedCapacity       float64         `json:"usedCapacity"`
+	PendingContainers  int             `json:"pendingContainers"`
+	WaitingApps        int             `json:"waitingApps"`
+	PeakUsage30d       float64         `json:"peakUsage30d"`
+	LastActiveTime     string          `json:"lastActiveTime"`
+	Reasons            []string        `json:"reasons"`
+	Advice             string          `json:"advice"`
+	Action             string          `json:"action"` // reclaim, downsize, expand, none
+	TargetCapacity     float64         `json:"targetCapacity"`
+	TargetMaxCapacity  float64         `json:"targetMaxCapacity"`
+	ConfigPatch        string          `json:"configPatch"`
+	RollbackPlan       string          `json:"rollbackPlan"`
+}
+
 // BchService manages BCH ecosystem operations
 type BchService interface {
 	GetClustersHealth() ([]BchClusterHealth, error)
@@ -195,4 +228,7 @@ type BchService interface {
 	TuneSparkJob(id string) (*SparkJob, error)
 	GetHdfsFsImage(namespace string) (*HdfsFsImageStats, error)
 	ListEmployees() ([]BchEmployee, error)
+	ListYarnQueues() ([]YarnQueueEvaluation, error)
+	ExecuteYarnQueueAction(id string) (bool, error)
+	RollbackYarnQueueAction(id string) (bool, error)
 }

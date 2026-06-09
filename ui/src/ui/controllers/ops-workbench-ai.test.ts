@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   analysisContentFromAlert,
   applyWorkbenchAiResult,
+  handleWorkbenchAiEvent,
   hasMeaningfulAlertAnalysis,
   resolveWorkbenchAlertDomain,
   syncWorkbenchAiFromCopilot,
   workbenchCapabilityForDomain,
+  workbenchScenarioAiSessionKey,
   type WorkbenchAiHost,
 } from "./ops-workbench-ai.ts";
 
@@ -100,5 +102,75 @@ describe("ops-workbench-ai helpers", () => {
     });
     expect(host.workbenchAiStatus).toBe("done");
     expect(host.workbenchAiResult).toContain("NameNode");
+  });
+
+  it("builds employee-scoped workbench scenario session keys", () => {
+    expect(
+      workbenchScenarioAiSessionKey({
+        employeeId: "builtin-bch-inspect",
+        scenarioId: "bch-flink-health",
+        objectType: "flink_job",
+        objectId: "job_tx_core",
+      }),
+    ).toBe("agent:main:employee:builtin-bch-inspect:workbench:bch-flink-health:flink_job:job_tx_core");
+  });
+
+  it("captures workbench AI events by session key when run id differs", () => {
+    const host = buildHost({
+      workbenchAiRunId: "local-run",
+      workbenchAiSessionKey: "agent:main:employee:builtin-bch-inspect:workbench:bch-flink-health:flink_job:job_tx_core",
+    });
+    const captured = handleWorkbenchAiEvent(host, {
+      runId: "gateway-run",
+      sessionKey: "agent:main:employee:builtin-bch-inspect:workbench:bch-flink-health:flink_job:job_tx_core",
+      state: "final",
+      message: {
+        role: "assistant",
+        content: "## 结论\nFlink 作业运行健康。",
+      },
+    });
+    expect(captured).toBe(true);
+    expect(host.workbenchAiStatus).toBe("done");
+    expect(host.workbenchAiResult).toContain("Flink 作业运行健康");
+  });
+
+  it("sends scenario object type and dedicated session to chat.send", async () => {
+    const requests: Array<{ method: string; params: any }> = [];
+    const host = buildHost({
+      connected: true,
+      client: {
+        request: async (method: string, params: any) => {
+          requests.push({ method, params });
+          return {};
+        },
+      } as any,
+    });
+    const sessionKey = workbenchScenarioAiSessionKey({
+      employeeId: "emp_bch_duty",
+      scenarioId: "bch-flink-health",
+      objectType: "flink_job",
+      objectId: "job_tx_core",
+    });
+    const { runWorkbenchAi } = await import("./ops-workbench-ai.ts");
+    await runWorkbenchAi(host, {
+      domain: "hadoop",
+      mode: "root-cause",
+      assistantTemplate: "emp_bch_duty",
+      sessionKey,
+      alert: {
+        id: "bch-flink-health:flink_job:job_tx_core:24h",
+        title: "交易核心链路 · 实时问诊",
+        severity: "info",
+        domain: "hadoop",
+        objectType: "flink_job",
+        objectId: "job_tx_core",
+      },
+    });
+
+    expect(requests[0]?.method).toBe("chat.send");
+    expect(requests[0]?.params.sessionKey).toBe(sessionKey);
+    expect(requests[0]?.params.context.objectType).toBe("flink_job");
+    expect(requests[0]?.params.context.objectId).toBe("job_tx_core");
+    expect(requests[0]?.params.deliver).toBe(false);
   });
 });

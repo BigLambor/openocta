@@ -5,6 +5,7 @@ import { parseWorkbenchObjectScope } from "./workbench-context.ts";
 import "../views/ops/bch-flink-diagnosis.ts";
 import "../views/ops/bch-spark-governance.ts";
 import "../views/ops/bch-fsimage-dashboard.ts";
+import "../views/ops/bch-yarn-capacity.ts";
 
 function renderScenarioSkeleton(scenario: OpsScenario) {
   return html`
@@ -92,6 +93,15 @@ export function renderScenarioComponent(
         ></bch-fsimage-dashboard>
       `;
     }
+    case "bch-yarn-capacity":
+      return html`
+        <bch-yarn-capacity
+          .host=${context.host}
+          .objectScope=${context.objectScope ?? "all"}
+          .timeRange=${context.timeRange ?? "24h"}
+          @scenario-ai-request=${(event: CustomEvent) => context.onAskAi?.(event.detail)}
+        ></bch-yarn-capacity>
+      `;
     default:
       return renderScenarioSkeleton(scenario);
   }

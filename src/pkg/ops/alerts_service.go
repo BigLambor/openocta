@@ -471,7 +471,7 @@ func PatchAlertGroup(id string, patch AlertGroupPatch, operator string) (AlertGr
 					Type:        "review_status_change",
 					Operator:    operator,
 					TimestampMs: now,
-					Message:     fmt.Sprintf("AI 复核状态变更为: %s", val),
+					Message:     fmt.Sprintf("策略复核状态变更为: %s", val),
 				})
 			}
 		}

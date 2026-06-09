@@ -266,4 +266,106 @@ func TestBCHAPIPermissionEnforcement(t *testing.T) {
 	if resp.StatusCode != http.StatusForbidden {
 		t.Errorf("GBase operator accessing BCH API should fail with 403, got %d", resp.StatusCode)
 	}
+
+	// Test 3: List YARN queues (should succeed, contains root.test)
+	req, _ = http.NewRequest("GET", ts.URL+"/api/ops/bch/yarn/queues", nil)
+	req.Header.Set("Authorization", "Bearer "+hadoopToken)
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("Hadoop operator listing YARN queues should succeed, got %d", resp.StatusCode)
+	}
+	var queues []ops.YarnQueueEvaluation
+	err = json.NewDecoder(resp.Body).Decode(&queues)
+	resp.Body.Close()
+	if err != nil {
+		t.Fatalf("Failed to decode YARN queues list: %v", err)
+	}
+	hasTestQueue := false
+	var testQueue ops.YarnQueueEvaluation
+	for _, q := range queues {
+		if q.ID == "root.test" {
+			hasTestQueue = true
+			testQueue = q
+			break
+		}
+	}
+	if !hasTestQueue {
+		t.Errorf("Expected YARN queues to contain root.test")
+	}
+	if testQueue.Status != "idle" {
+		t.Errorf("Expected root.test status to initially be idle, got %s", testQueue.Status)
+	}
+
+	originalCapacity := testQueue.CurrentCapacity
+
+	// Test 4: Execute root.test queue capacity change (should succeed)
+	req, _ = http.NewRequest("POST", ts.URL+"/api/ops/bch/yarn/queues/root.test/execute", nil)
+	req.Header.Set("Authorization", "Bearer "+hadoopToken)
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var executeRes map[string]interface{}
+	_ = json.NewDecoder(resp.Body).Decode(&executeRes)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("Hadoop operator executing YARN queue change should succeed, got %d, body: %v", resp.StatusCode, executeRes)
+	}
+
+	// Test 5: List YARN queues again, check root.test state is now healthy/reclaimed
+	req, _ = http.NewRequest("GET", ts.URL+"/api/ops/bch/yarn/queues", nil)
+	req.Header.Set("Authorization", "Bearer "+hadoopToken)
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&queues)
+	resp.Body.Close()
+	for _, q := range queues {
+		if q.ID == "root.test" {
+			testQueue = q
+			break
+		}
+	}
+	if testQueue.Status != "healthy" {
+		t.Errorf("Expected root.test status to be healthy after reclaim, got %s", testQueue.Status)
+	}
+	if testQueue.CurrentCapacity != testQueue.TargetCapacity {
+		t.Errorf("Expected root.test currentCapacity to be updated to targetCapacity %v, got %v", testQueue.TargetCapacity, testQueue.CurrentCapacity)
+	}
+
+	// Test 6: Rollback root.test queue and verify baseline state is restored
+	req, _ = http.NewRequest("POST", ts.URL+"/api/ops/bch/yarn/queues/root.test/rollback", nil)
+	req.Header.Set("Authorization", "Bearer "+hadoopToken)
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("Hadoop operator rolling back YARN queue should succeed, got %d", resp.StatusCode)
+	}
+	req, _ = http.NewRequest("GET", ts.URL+"/api/ops/bch/yarn/queues", nil)
+	req.Header.Set("Authorization", "Bearer "+hadoopToken)
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&queues)
+	resp.Body.Close()
+	for _, q := range queues {
+		if q.ID == "root.test" {
+			testQueue = q
+			break
+		}
+	}
+	if testQueue.Status != "idle" {
+		t.Errorf("Expected root.test status to be idle after rollback, got %s", testQueue.Status)
+	}
+	if testQueue.CurrentCapacity != originalCapacity {
+		t.Errorf("Expected root.test currentCapacity to rollback to %v, got %v", originalCapacity, testQueue.CurrentCapacity)
+	}
 }

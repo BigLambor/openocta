@@ -111,23 +111,23 @@ function buildAlertReviewPatch(alert: any) {
     return {
       reviewStatus: "rejected",
       reviewNote:
-        "【AI 复核完毕 - 驳回抑制】核心业务 SLA 逾期复核：发现任务存在堆积风险，不满足抑制规则。建议维持升级处理判定，加快人工处置排查。",
+        "【策略复核完毕 - 驳回抑制】核心业务 SLA 逾期复核：发现任务存在堆积风险，不满足抑制规则。建议维持升级处理判定，加快人工处置排查。",
     };
   }
   const id = String(alert?.id || "");
-  let note = "【AI 复核通过】复核确认该告警符合当前抑制规则，合并降噪决策合理，无需重复派单。";
+  let note = "【策略复核通过】复核确认该告警符合当前抑制规则，合并降噪决策合理，无需重复派单。";
   if (id.includes("hadoop")) {
     note =
-      "【AI 复核通过】基于最近 1 小时 HDFS NameNode 堆内存历史指标，堆内存波动处于安全水位，指标属于瞬时毛刺。NameNode 内存自愈助手已触发自动清理，服务平稳，抑制决策合理。";
+      "【策略复核通过】基于最近 1 小时 HDFS NameNode 堆内存历史指标，堆内存波动处于安全水位，指标属于瞬时毛刺。NameNode 内存自愈助手已触发自动清理，服务平稳，抑制决策合理。";
   } else if (id.includes("gbase")) {
     note =
-      "【AI 复核通过】GBase 数据库主备节点同步延迟稳定，高并发会话已自动降温。复核确认该告警属于瞬时噪音，抑制合并决策合理。";
+      "【策略复核通过】GBase 数据库主备节点同步延迟稳定，高并发会话已自动降温。复核确认该告警属于瞬时噪音，抑制合并决策合理。";
   } else if (id.includes("fi")) {
     note =
-      "【AI 复核通过】FusionInsight YARN 队列资源受限触发指标连锁告警，关联合并正确。队列自动扩容机制已触发，故障处于收敛状态。";
+      "【策略复核通过】FusionInsight YARN 队列资源受限触发指标连锁告警，关联合并正确。队列自动扩容机制已触发，故障处于收敛状态。";
   } else if (id.includes("gov")) {
     note =
-      "【AI 复核通过】血缘解析中断点处于例行维护窗口内，数据管道自愈引擎已重新调度解析，抑制判断合理。";
+      "【策略复核通过】血缘解析中断点处于例行维护窗口内，数据管道自愈引擎已重新调度解析，抑制判断合理。";
   }
   return { reviewStatus: "approved", reviewNote: note };
 }
@@ -441,6 +441,7 @@ import {
   resolveWorkbenchAlertDomain,
   runWorkbenchAi,
   workbenchCapabilityForDomain,
+  workbenchScenarioAiSessionKey,
 } from "./controllers/ops-workbench-ai.ts";
 import { renderAssetsView } from "./views/assets-view.ts";
 import { renderTechOpsDomain } from "./views/tech-ops-domain.ts";
@@ -2115,10 +2116,17 @@ export function renderApp(state: AppViewState) {
                   onRetryAi: () => {
                     if (workbenchView !== "events" && currentScenario) {
                       const targetId = workbenchAiTargetId || `${currentScenario.id}:${selectedObjectScope}:${selectedTimeRange}`;
+                      const assistant = opsAssistantForDomain(currentScenario.domain);
                       void runWorkbenchAi(state as any, {
                         domain: currentScenario.domain,
                         mode: aiMode,
-                        assistantTemplate: opsAssistantForDomain(currentScenario.domain).employeeId,
+                        assistantTemplate: assistant.employeeId,
+                        sessionKey: workbenchScenarioAiSessionKey({
+                          employeeId: assistant.employeeId,
+                          scenarioId: currentScenario.id,
+                          objectType: workbenchAiContext.objectType || currentScenario.objectTypes.join("-"),
+                          objectId: workbenchAiContext.objectId || selectedObjectScope,
+                        }),
                         alert: {
                           id: targetId,
                           title: workbenchAiContext.title || currentScenario.title,
@@ -2207,10 +2215,17 @@ export function renderApp(state: AppViewState) {
                       workbenchAiContextEvidence: (context?.evidence || []).join("\n"),
                       workbenchAiContextOutputs: (context?.expectedOutputs || []).join("\n"),
                     };
+                    const assistant = opsAssistantForDomain(scenario.domain);
                     void runWorkbenchAi(state as any, {
                       domain: scenario.domain,
                       mode,
-                      assistantTemplate: opsAssistantForDomain(scenario.domain).employeeId,
+                      assistantTemplate: assistant.employeeId,
+                      sessionKey: workbenchScenarioAiSessionKey({
+                        employeeId: assistant.employeeId,
+                        scenarioId: scenario.id,
+                        objectType: context?.objectType || scenario.objectTypes.join("-"),
+                        objectId: context?.objectId || selectedObjectScope,
+                      }),
                       alert: {
                         id: targetId,
                         title: context?.title || scenario.title,
@@ -2344,12 +2359,17 @@ export function renderApp(state: AppViewState) {
                     const domainLabel = opsDomainLabel(alertDomain);
                     state.sessionKey = "main";
                     state.setTab("message");
+                    
+                    const activeResult = (state.workbenchAiObjectId === id && state.workbenchAiResult) ? state.workbenchAiResult : "";
                     const question =
                       mode === "action"
                         ? `请基于当前 ${domainLabel} 告警组给出处置建议：${alert.title}`
                         : mode === "similar"
                           ? `请分析当前 ${domainLabel} 告警组的相似告警聚合逻辑，并判断是否还需要继续降噪：${alert.title}`
-                          : `请基于当前 ${domainLabel} 告警组分析根因，并给出验证步骤：${alert.title}`;
+                          : activeResult
+                            ? `我需要深入分析该告警。侧边栏已有初步诊断结论，请以此为基础提供更深度的排查验证建议：${alert.title}`
+                            : `请基于当前 ${domainLabel} 告警组分析根因，并给出验证步骤：${alert.title}`;
+                    
                     state.chatMessage = question;
                     await loadChatHistory(state);
                     const runId = await sendChatMessage(state, question, [], state.chatModelRef ?? null, {
@@ -2367,6 +2387,7 @@ export function renderApp(state: AppViewState) {
                           alert.rootCause ? `根因候选: ${alert.rootCause}` : "",
                           alert.impact ? `影响范围: ${alert.impact}` : "",
                           alert.analysisMarkdown ? `分析材料: ${alert.analysisMarkdown}` : "",
+                          activeResult ? `工作台侧边栏已有诊断结论:\n${activeResult}` : "",
                         ]
                           .filter(Boolean)
                           .join("\n"),

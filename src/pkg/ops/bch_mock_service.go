@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"sync"
 )
 
 // MockBchService implements BchService.
@@ -570,4 +571,205 @@ func (s *MockBchService) ListEmployees() ([]BchEmployee, error) {
 			},
 		},
 	}, nil
+}
+
+var (
+	mockYarnQueues     []YarnQueueEvaluation
+	mockYarnQueuesOnce sync.Once
+	mockYarnMutex      sync.Mutex
+)
+
+func initMockYarnQueues() {
+	mockYarnQueues = mockYarnQueueDefaults()
+}
+
+func mockYarnQueueDefaults() []YarnQueueEvaluation {
+	return []YarnQueueEvaluation{
+		{
+			ID:                 "root.default",
+			Name:               "默认队列",
+			Cluster:            "prod-a",
+			Status:             "healthy",
+			RiskLevel:          "low",
+			CurrentCapacity:    10.0,
+			MaxCapacity:        100.0,
+			UsedCapacity:       2.5,
+			Metrics:            YarnQueueMetric{AvgCpuPercent: 2.5, MaxCpuPercent: 4.8, AvgMemPercent: 3.1, MaxMemPercent: 5.2, ActiveApps: 8},
+			PendingContainers:  0,
+			WaitingApps:        0,
+			PeakUsage30d:       4.8,
+			LastActiveTime:     "2026-06-09 07:30",
+			Reasons:            []string{"队列资源配置与历史使用量匹配良好。"},
+			Advice:             "运行状态健康，无需调整配置。",
+			Action:             "none",
+			TargetCapacity:     10.0,
+			TargetMaxCapacity:  100.0,
+			ConfigPatch:        "",
+			RollbackPlan:       "",
+		},
+		{
+			ID:                 "root.dev.flink",
+			Name:               "Flink 实时开发队列",
+			Cluster:            "prod-a",
+			Status:             "healthy",
+			RiskLevel:          "low",
+			CurrentCapacity:    25.0,
+			MaxCapacity:        60.0,
+			UsedCapacity:       12.0,
+			Metrics:            YarnQueueMetric{AvgCpuPercent: 12.0, MaxCpuPercent: 45.0, AvgMemPercent: 15.0, MaxMemPercent: 52.0, ActiveApps: 2},
+			PendingContainers:  5,
+			WaitingApps:        1,
+			PeakUsage30d:       45.0,
+			LastActiveTime:     "2026-06-09 07:55",
+			Reasons:            []string{"开发队列在高峰期使用率符合预期，水位合理。"},
+			Advice:             "运行状态健康，建议维持当前配额以支撑后续流式任务迭代。",
+			Action:             "none",
+			TargetCapacity:     25.0,
+			TargetMaxCapacity:  60.0,
+			ConfigPatch:        "",
+			RollbackPlan:       "",
+		},
+		{
+			ID:                 "root.prod.spark",
+			Name:               "Spark 生产队列",
+			Cluster:            "prod-b",
+			Status:             "under_allocated",
+			RiskLevel:          "medium",
+			CurrentCapacity:    35.0,
+			MaxCapacity:        80.0,
+			UsedCapacity:       78.5,
+			Metrics:            YarnQueueMetric{AvgCpuPercent: 78.5, MaxCpuPercent: 95.0, AvgMemPercent: 72.0, MaxMemPercent: 88.0, ActiveApps: 14},
+			PendingContainers:  120,
+			WaitingApps:        3,
+			PeakUsage30d:       80.0,
+			LastActiveTime:     "2026-06-09 07:58",
+			Reasons:            []string{"队列资源使用率长期处于极高水位", "队列内作业存在排队情况，当前有 120 个 Pending Container 和 3 个等待中的 Application"},
+			Advice:             "由于近期有大量日终对账和宽表关联批作业运行，该队列资源严重受限，建议从 root.offline.batch 回收资源并为该队列扩容至 50% 份额。",
+			Action:             "expand",
+			TargetCapacity:     50.0,
+			TargetMaxCapacity:  90.0,
+			ConfigPatch:        "<!-- fair-scheduler.xml allocations patch -->\n<queue name=\"prod\">\n  <queue name=\"spark\">\n    <weight>5.0</weight>\n    <maxResources>512000 mb, 200 vcores</maxResources>\n  </queue>\n</queue>",
+			RollbackPlan:       "<!-- fair-scheduler.xml rollback patch -->\n<queue name=\"prod\">\n  <queue name=\"spark\">\n    <weight>3.5</weight>\n    <maxResources>358400 mb, 140 vcores</maxResources>\n  </queue>\n</queue>",
+		},
+		{
+			ID:                 "root.offline.batch",
+			Name:               "离线批处理队列",
+			Cluster:            "prod-a",
+			Status:             "over_allocated",
+			RiskLevel:          "low",
+			CurrentCapacity:    20.0,
+			MaxCapacity:        80.0,
+			UsedCapacity:       2.1,
+			Metrics:            YarnQueueMetric{AvgCpuPercent: 2.1, MaxCpuPercent: 5.5, AvgMemPercent: 3.5, MaxMemPercent: 8.0, ActiveApps: 0},
+			PendingContainers:  0,
+			WaitingApps:        0,
+			PeakUsage30d:       5.5,
+			LastActiveTime:     "2026-06-09 05:00",
+			Reasons:            []string{"近 30 天最高资源峰值仅为 5.5%，均值低于 3%", "当前队列中无作业运行或排队，存在较大闲置空间"},
+			Advice:             "检测到队列容量过剩，建议缩容至 5% 份额，释放的 15% 份额可回收到主资源池以提供给其他高负载队列。",
+			Action:             "downsize",
+			TargetCapacity:     5.0,
+			TargetMaxCapacity:  50.0,
+			ConfigPatch:        "<!-- capacity-scheduler.xml capacity downsize patch -->\n<property>\n  <name>yarn.scheduler.capacity.root.offline.batch.capacity</name>\n  <value>5.0</value>\n</property>\n<property>\n  <name>yarn.scheduler.capacity.root.offline.batch.maximum-capacity</name>\n  <value>50.0</value>\n</property>",
+			RollbackPlan:       "<!-- capacity-scheduler.xml rollback patch -->\n<property>\n  <name>yarn.scheduler.capacity.root.offline.batch.capacity</name>\n  <value>20.0</value>\n</property>\n<property>\n  <name>yarn.scheduler.capacity.root.offline.batch.maximum-capacity</name>\n  <value>80.0</value>\n</property>",
+		},
+		{
+			ID:                 "root.test",
+			Name:               "临时测试队列",
+			Cluster:            "prod-a",
+			Status:             "idle",
+			RiskLevel:          "low",
+			CurrentCapacity:    8.0,
+			MaxCapacity:        20.0,
+			UsedCapacity:       0.1,
+			Metrics:            YarnQueueMetric{AvgCpuPercent: 0.1, MaxCpuPercent: 0.1, AvgMemPercent: 0.2, MaxMemPercent: 0.2, ActiveApps: 0},
+			PendingContainers:  0,
+			WaitingApps:        0,
+			PeakUsage30d:       0.1,
+			LastActiveTime:     "2026-05-12 14:20",
+			Reasons:            []string{"队列已超过 20 天无活跃作业提交", "近 30 天峰值资源利用率低于 0.5%", "测试任务流量已大部分迁移至临时沙箱集群"},
+			Advice:             "队列属于长期未使用状态，建议回收其 90% 的资源（配额下调至 1%），保留最低测试限额以防后续零星测试报错。",
+			Action:             "reclaim",
+			TargetCapacity:     1.0,
+			TargetMaxCapacity:  5.0,
+			ConfigPatch:        "<!-- capacity-scheduler.xml capacity reclaim patch -->\n<property>\n  <name>yarn.scheduler.capacity.root.test.capacity</name>\n  <value>1.0</value>\n</property>\n<property>\n  <name>yarn.scheduler.capacity.root.test.maximum-capacity</name>\n  <value>5.0</value>\n</property>",
+			RollbackPlan:       "<!-- capacity-scheduler.xml rollback patch -->\n<property>\n  <name>yarn.scheduler.capacity.root.test.capacity</name>\n  <value>8.0</value>\n</property>\n<property>\n  <name>yarn.scheduler.capacity.root.test.maximum-capacity</name>\n  <value>20.0</value>\n</property>",
+		},
+		{
+			ID:                 "root.temp_sandbox",
+			Name:               "沙箱实验队列",
+			Cluster:            "prod-b",
+			Status:             "idle",
+			RiskLevel:          "low",
+			CurrentCapacity:    2.0,
+			MaxCapacity:        10.0,
+			UsedCapacity:       0.0,
+			Metrics:            YarnQueueMetric{AvgCpuPercent: 0.0, MaxCpuPercent: 0.0, AvgMemPercent: 0.0, MaxMemPercent: 0.0, ActiveApps: 0},
+			PendingContainers:  0,
+			WaitingApps:        0,
+			PeakUsage30d:       0.0,
+			LastActiveTime:     "未见活跃",
+			Reasons:            []string{"队列历史使用率为 0%", "最后活跃时间无记录，该队列创建后长期处于空跑状态"},
+			Advice:             "建议完全回收该队列的所有资源，释放配额并清除配置。",
+			Action:             "reclaim",
+			TargetCapacity:     0.0,
+			TargetMaxCapacity:  0.0,
+			ConfigPatch:        "<!-- fair-scheduler.xml allocations delete patch -->\n<!-- 删除 root.temp_sandbox 节点 -->\n<queue name=\"temp_sandbox\" operation=\"delete\" />",
+			RollbackPlan:       "<!-- fair-scheduler.xml rollback patch -->\n<queue name=\"temp_sandbox\">\n  <weight>0.2</weight>\n  <maxResources>20480 mb, 8 vcores</maxResources>\n</queue>",
+		},
+	}
+}
+
+func (s *MockBchService) ListYarnQueues() ([]YarnQueueEvaluation, error) {
+	mockYarnQueuesOnce.Do(initMockYarnQueues)
+	mockYarnMutex.Lock()
+	defer mockYarnMutex.Unlock()
+	res := make([]YarnQueueEvaluation, len(mockYarnQueues))
+	copy(res, mockYarnQueues)
+	return res, nil
+}
+
+func (s *MockBchService) ExecuteYarnQueueAction(id string) (bool, error) {
+	mockYarnQueuesOnce.Do(initMockYarnQueues)
+	mockYarnMutex.Lock()
+	defer mockYarnMutex.Unlock()
+	for i, q := range mockYarnQueues {
+		if q.ID == id {
+			mockYarnQueues[i].Status = "healthy"
+			mockYarnQueues[i].CurrentCapacity = q.TargetCapacity
+			mockYarnQueues[i].MaxCapacity = q.TargetMaxCapacity
+			mockYarnQueues[i].Action = "none"
+			actionDesc := "缩容/回收"
+			if q.Action == "expand" {
+				actionDesc = "扩容"
+				mockYarnQueues[i].PendingContainers = 0
+				mockYarnQueues[i].WaitingApps = 0
+			}
+			mockYarnQueues[i].Reasons = []string{"闭环调优已成功执行", fmt.Sprintf("队列已%s至配置目标: %v%%", actionDesc, q.TargetCapacity)}
+			mockYarnQueues[i].Advice = "配置已动态重载，运行状态健康。"
+			mockYarnQueues[i].ConfigPatch = ""
+			return true, nil
+		}
+	}
+	return false, fmt.Errorf("queue %s not found", id)
+}
+
+func (s *MockBchService) RollbackYarnQueueAction(id string) (bool, error) {
+	mockYarnQueuesOnce.Do(initMockYarnQueues)
+	mockYarnMutex.Lock()
+	defer mockYarnMutex.Unlock()
+	for _, baseline := range mockYarnQueueDefaults() {
+		if baseline.ID != id {
+			continue
+		}
+		for i := range mockYarnQueues {
+			if mockYarnQueues[i].ID == id {
+				mockYarnQueues[i] = baseline
+				return true, nil
+			}
+		}
+		mockYarnQueues = append(mockYarnQueues, baseline)
+		return true, nil
+	}
+	return false, fmt.Errorf("queue %s not found", id)
 }

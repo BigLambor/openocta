@@ -579,7 +579,10 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /api/ops/bch/spark/jobs/{id}/tune", s.requireRbacOrGatewayToken("menu:hadoop", s.handleBchTuneSparkJob))
 	s.mux.HandleFunc("GET /api/ops/bch/hdfs/fsimage", s.requireRbacOrGatewayToken("menu:hadoop", s.handleBchGetHdfsFsImage))
 	s.mux.HandleFunc("GET /api/ops/bch/employees", s.requireRbacOrGatewayToken("menu:hadoop", s.handleBchListEmployees))
-
+	s.mux.HandleFunc("GET /api/ops/bch/yarn/queues", s.requireRbacOrGatewayToken("menu:hadoop", s.handleBchListYarnQueues))
+	s.mux.HandleFunc("POST /api/ops/bch/yarn/queues/{id}/execute", s.requireRbacOrGatewayToken("menu:hadoop", s.handleBchExecuteYarnQueue))
+	s.mux.HandleFunc("POST /api/ops/bch/yarn/queues/{id}/rollback", s.requireRbacOrGatewayToken("menu:hadoop", s.handleBchRollbackYarnQueue))
+	s.mux.HandleFunc("POST /api/ops/bch/yarn/queues/{id}/reclaim", s.requireRbacOrGatewayToken("menu:hadoop", s.handleBchReclaimYarnQueue))
 	s.mux.HandleFunc("GET /health", s.requireRbacOrGatewayToken("", s.handleHealth))
 	s.mux.HandleFunc("GET /api/health", s.requireRbacOrGatewayToken("", s.handleHealth))
 	s.mux.HandleFunc("POST /api/skills/upload", s.requireRbacOrGatewayToken("menu:config", s.handleSkillsUpload))

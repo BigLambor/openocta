@@ -213,3 +213,65 @@ func (s *Server) handleBchChatFlinkJob(w http.ResponseWriter, r *http.Request) {
 		"reply": reply,
 	})
 }
+
+func (s *Server) handleBchListYarnQueues(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	svc := getBchService()
+	data, err := svc.ListYarnQueues()
+	if err != nil {
+		opsWriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	opsWriteJSON(w, http.StatusOK, data)
+}
+
+func (s *Server) handleBchExecuteYarnQueue(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	id := strings.TrimSpace(r.PathValue("id"))
+	if id == "" {
+		opsWriteError(w, http.StatusBadRequest, "缺少 YARN 队列 ID")
+		return
+	}
+	svc := getBchService()
+	ok, err := svc.ExecuteYarnQueueAction(id)
+	if err != nil {
+		opsWriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	opsWriteJSON(w, http.StatusOK, map[string]interface{}{
+		"success": ok,
+		"message": "队列容量变更已执行，YARN 调度器配置刷新成功",
+	})
+}
+
+func (s *Server) handleBchRollbackYarnQueue(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	id := strings.TrimSpace(r.PathValue("id"))
+	if id == "" {
+		opsWriteError(w, http.StatusBadRequest, "缺少 YARN 队列 ID")
+		return
+	}
+	svc := getBchService()
+	ok, err := svc.RollbackYarnQueueAction(id)
+	if err != nil {
+		opsWriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	opsWriteJSON(w, http.StatusOK, map[string]interface{}{
+		"success": ok,
+		"message": "队列容量配置已回滚至基线",
+	})
+}
+
+func (s *Server) handleBchReclaimYarnQueue(w http.ResponseWriter, r *http.Request) {
+	s.handleBchExecuteYarnQueue(w, r)
+}
