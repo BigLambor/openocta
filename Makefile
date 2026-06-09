@@ -1,7 +1,7 @@
 # OpenOcta 构建
 # 构建顺序：前端 -> 复制 embed 资源 -> 后端
 
-.PHONY: ui embed go launcher build clean release snapshot docker run run-ui prepare-wails-icons wails wails-nsis wails-dmg wails-dmg-signed wails-dmg-arm64 wails-dmg-arm64-signed wails-dmg-amd64 wails-dmg-amd64-signed wails-dmg-all wails-dmg-all-signed wails-dev
+.PHONY: ui embed go launcher build clean release snapshot docker run run-ui prepare-wails-icons wails wails-nsis wails-dmg wails-dmg-signed wails-dmg-arm64 wails-dmg-arm64-signed wails-dmg-amd64 wails-dmg-amd64-signed wails-dmg-all wails-dmg-all-signed wails-dev windows-trial
 
 # 构建前端（输出到 src/embed/frontend）
 ui:
@@ -25,9 +25,13 @@ launcher: embed
 # 完整构建（默认）
 build: go
 
+# Windows 便携试用包（macOS/Linux 交叉编译，产物在 dist/windows-trial/）
+windows-trial:
+	./scripts/build-windows-trial.sh
+
 # 清理
 clean:
-	rm -rf dist dist-mac src/embed/frontend src/embed/config-schema.json src/embed/openocta.json.example openocta openocta.exe openocta-launcher openocta-launcher.exe src/build/bin
+	rm -rf dist dist-trial dist-mac src/embed/frontend src/embed/config-schema.json src/embed/openocta.json.example openocta openocta.exe openocta-launcher openocta-launcher.exe src/build/bin
 
 # GoReleaser 快照构建（不发布）
 snapshot:

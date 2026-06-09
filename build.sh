@@ -39,6 +39,7 @@ do_clean() {
   # 与 Makefile clean 对齐：embed 产物、Go 二进制、Wails 输出；根目录 build/ 为历史遗留副本，一并删除
   rm -rf \
     dist \
+    dist-trial \
     build \
     src/embed/frontend \
     src/embed/config-schema.json \
