@@ -7,12 +7,15 @@ const (
 	StatusRunning          = "running"
 	StatusWaitingApproval  = "waiting_approval"
 	StatusSucceeded        = "succeeded"
+	StatusPartial          = "partial"
 	StatusFailed           = "failed"
 	StatusCancelled        = "cancelled"
+	StatusTimeout          = "timeout"
 	TriggerCron            = "cron"
 	TriggerManual          = "manual"
 	TriggerInspection      = "inspection"
 	TriggerAlert           = "alert"
+	TriggerEscalation      = "escalation"
 )
 
 // JobRun is a persisted execution record for cron, inspection, or other jobs.
@@ -20,6 +23,7 @@ type JobRun struct {
 	ID          string                 `json:"id"`
 	JobID       string                 `json:"jobId"`
 	TaskID      string                 `json:"taskId,omitempty"`
+	ParentRunID string                 `json:"parentRunId,omitempty"`
 	TriggerType string                 `json:"triggerType"`
 	TriggerRef  string                 `json:"triggerRef,omitempty"`
 	Status      string                 `json:"status"`
@@ -52,6 +56,7 @@ type StartInput struct {
 	RunID       string
 	JobID       string
 	TaskID      string
+	ParentRunID string
 	TriggerType string
 	TriggerRef  string
 	Input       map[string]interface{}
@@ -65,6 +70,7 @@ type FinishInput struct {
 // ListFilter narrows job run queries.
 type ListFilter struct {
 	JobID       string
+	ParentRunID string
 	TriggerType string
 	TriggerRef  string
 	Limit       int

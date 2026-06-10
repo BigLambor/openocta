@@ -13,6 +13,11 @@ func TestScenarioKeyForInspection(t *testing.T) {
 		{jobID: "job-inspect-gbase", want: "ops-gbase-health"},
 		{jobID: "job-inspect-governance", want: "ops-governance-health"},
 		{jobID: "job-inspect-dataapps", want: "ops-dataapps-health"},
+		{jobID: "job-inspect-flink", want: "ops-flink-health"},
+		{jobID: "job-inspect-spark", want: "ops-spark-health"},
+		{jobID: "job-inspect-yarn", want: "ops-yarn-health"},
+		{jobID: "job-inspect-gbase-instances", want: "ops-gbase-instance-health"},
+		{jobID: "job-inspect-dataapps-pipelines", want: "ops-dataapps-pipeline-health"},
 		{domain: DomainHadoop, want: "ops-bch-health"},
 	}
 

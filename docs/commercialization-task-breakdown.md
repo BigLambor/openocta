@@ -132,6 +132,49 @@
 | C2-16 | 处置动作记录 | P1 | C2-14 | `remediation_actions`、`rollback_records` | 每个处置动作有操作者、审批、输入、输出、回滚信息 | 未开始 |
 | C2-17 | UI 下钻执行链路 | P1 | C2-1 | run detail 页面或面板 | 从任务/告警/巡检可查看 steps、tools、evidence、approval、audit | 部分完成（缺 approval/evidence/audit 展示） |
 
+## 4.5 触发与执行架构（TE）
+
+> 架构文档：[ops-trigger-execution-architecture.md](./ops-trigger-execution-architecture.md)
+
+### Phase A — 统一触发与队列骨架
+
+| 编号 | 任务 | 优先级 | 交付物 | 验收标准 | 完成状态 |
+|------|------|--------|--------|----------|----------|
+| TE-A1 | TriggerEnvelope / WorkPlan / Planner | P0 | `pkg/workqueue`, `pkg/cron/trigger.go` | Cron 可构建统一 envelope | 已完成 |
+| TE-A2 | SQLite work_plans / work_tasks + worker + reclaim | P0 | migration `010_work_queue.sql` | 入队出队、租约回收可测 | 已完成 |
+| TE-A3 | maxConcurrentL2Runs | P0 | `pkg/workqueue/config.go` | L2 并发不超配置上限 | 已完成 |
+| TE-A4 | Cron lastStatus 与父 Run 终态绑定 | P0 | cron + runnotify + chat defer | 不再 send 即 ok；支持 partial | 已完成 |
+| TE-A5 | job_runs.parent_run_id | P0 | migration + jobrun | 子 Run 可关联父 Run | 已完成 |
+| TE-A6 | 幂等键绑定调度计划时刻 | P0 | `cron:{jobId}:{scheduledAtMs}` | 同窗口重试不重复入队 | 已完成 |
+
+### Phase B — L0 批量样板（Flink）
+
+| 编号 | 任务 | 优先级 | 交付物 | 验收标准 | 完成状态 |
+|------|------|--------|--------|----------|----------|
+| TE-B1 | ops-flink-health scenario | P0 | `pkg/ops/scenario.go` | 注册 batch scenario | 已完成 |
+| TE-B2 | flink_metrics_batch Collector | P0 | L0 collector | 批量 PromQL，非 Mock | 已完成 |
+| TE-B3 | object_type=job health_signals | P0 | health store 扩展 | per-job signal + 域快照 | 已完成 |
+| TE-B4 | job-inspect-flink Cron | P0 | 默认 cron job | 500 级 L0 < 5min | 已完成（代码就绪；压测待环境） |
+
+### Phase C — 条件升级 L2 + 告警
+
+| 编号 | 任务 | 优先级 | 交付物 | 验收标准 | 完成状态 |
+|------|------|--------|--------|----------|----------|
+| TE-C1 | escalationPolicy 配置化 | P1 | `ops/escalation.go` + post-L0 enqueue | Cron 仅升级异常子集 | 已完成 |
+| TE-C2 | L2 冷却 + 告警覆盖 | P1 | `work_tasks` 查询 + `defaultL2CooldownMs` | 1h 冷却；告警优先 | 已完成 |
+| TE-C3 | 告警接入 TriggerRouter | P1 | `hooks.go` → `workqueue.Submit` | 与 Cron 共享队列 | 已完成 |
+| TE-C4 | Map-Reduce 域级汇总 | P2 | `domain_reduce` + `domain_reduce` task | 多 L2 → 1 域摘要；默认关 | 已完成 |
+
+### Phase D — 多场景复制（L0 批量）
+
+| 编号 | 任务 | 优先级 | 交付物 | 验收标准 | 完成状态 |
+|------|------|--------|--------|----------|----------|
+| TE-D1 | Spark 作业 L0 批量 | P1 | `ops-spark-health` | per-job signal + L2 升级 | 已完成 |
+| TE-D2 | YARN 队列 L0 批量 | P1 | `ops-yarn-health` | queue signal + 域快照 | 已完成 |
+| TE-D3 | GBase 实例 L0 批量 | P1 | `ops-gbase-instance-health` | db_instance signal | 已完成 |
+| TE-D4 | DataApp 管道 L0 批量 | P1 | `ops-dataapps-pipeline-health` | pipeline signal | 已完成 |
+| TE-D5 | 统一 batch L0 框架 | P1 | `IsBatchL0Scenario` + `RunBatchL0` | 5 场景共用 planner/executor/escalation | 已完成 |
+
 ## 5. Phase 3：权限、安全与企业认证
 
 目标：达到企业内网生产试点的安全基线。

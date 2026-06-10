@@ -16,6 +16,7 @@ import (
 	"github.com/openocta/openocta/pkg/db"
 	"github.com/openocta/openocta/pkg/jobrun"
 	"github.com/openocta/openocta/pkg/ops"
+	"github.com/openocta/openocta/pkg/workqueue"
 )
 
 // Service manages cron jobs.
@@ -413,12 +414,10 @@ func (s *Service) Run(id string, mode string, domain, clusterId, component, scen
 	deps := s.deps
 	s.mu.Unlock()
 
-	runID := uuid.New().String()
-	trackedRunID := startCronJobRun(id, mode, domain, clusterId, component, scenarioKey, runID)
-
 	status := "ok"
 	errMsg := ""
 	var sessionKey, cronSessionID string
+	var trackedRunID string
 	scenarioKey = strings.TrimSpace(scenarioKey)
 	if scenarioKey == "" {
 		scenarioKey = ops.ScenarioKeyForInspection(ops.InspectionReport{
@@ -466,57 +465,68 @@ func (s *Service) Run(id string, mode string, domain, clusterId, component, scen
 
 	// Execute side effects when not skipped and deps are available.
 	if status != "skipped" {
-		_, hasNativeScenario := ops.GetOpsScenario(scenarioKey)
+		useWorkQueue := workqueue.Enabled() && shouldUseWorkQueue(jobCopy)
+		legacyRunID := ""
+		if !useWorkQueue {
+			legacyRunID = uuid.New().String()
+			trackedRunID = startCronJobRun(id, mode, domain, clusterId, component, scenarioKey, legacyRunID)
+		}
 		if deps == nil {
 			status = "error"
 			errMsg = "cron deps not configured"
-		} else if hasNativeScenario {
-			// Run native OpsScenario
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-			defer cancel()
-			if cronSessionID == "" {
-				cronSessionID = runID
-			}
-			res, err := ops.RunScenario(ctx, scenarioKey, clusterId, ops.RunOpts{
-				SessionID:   cronSessionID,
-				RunID:       runID,
-				EmployeeID:  jobCopy.DigitalEmployeeID,
-				JobID:       id,
-				TriggerType: jobrun.TriggerTypeForCronMode(mode),
-				TriggerRef:  scenarioKey,
-			})
-			if err != nil {
-				status = "error"
-				errMsg = err.Error()
-			} else {
-				inspectionResult = &res
-				runSummary = strings.TrimSpace(res.ReportMarkdown)
-				if runSummary == "" && res.Score != nil {
-					runSummary = fmt.Sprintf("健康得分：%d", *res.Score)
+		} else if useWorkQueue {
+			scheduledAt := scheduledAtForJob(jobCopy, startMs)
+			trackedRunID, status, errMsg, runSummary, inspectionResult = s.executeViaWorkQueue(
+				jobCopy, mode, domain, clusterId, component, scenarioKey, scheduledAt,
+			)
+			runSummary = cronFinishSummary(status, runSummary)
+		} else {
+			_, hasNativeScenario := ops.GetOpsScenario(scenarioKey)
+			if hasNativeScenario {
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+				defer cancel()
+				if cronSessionID == "" {
+					cronSessionID = legacyRunID
 				}
-			}
-		} else if jobCopy.SessionTarget == "main" && jobCopy.Payload.Kind == "systemEvent" {
-			if deps.EnqueueSystemEvent != nil {
-				deps.EnqueueSystemEvent(jobCopy.Payload.Text)
-			}
-			if jobCopy.WakeMode == "now" && deps.RequestHeartbeatNow != nil {
-				deps.RequestHeartbeatNow("agent:main:cron:" + id)
-			}
-		} else if jobCopy.SessionTarget == "isolated" && jobCopy.Payload.Kind == "agentTurn" {
-			message := jobCopy.Payload.Message
-			if domain != "" {
-				prefix := tools.BuildOpsContextLine(domain, clusterId, component)
-				if prefix != "" && !strings.Contains(message, "[运维上下文]") {
-					message = prefix + "\n\n" + message
+				res, err := ops.RunScenario(ctx, scenarioKey, clusterId, ops.RunOpts{
+					SessionID:   cronSessionID,
+					RunID:       legacyRunID,
+					EmployeeID:  jobCopy.DigitalEmployeeID,
+					JobID:       id,
+					TriggerType: jobrun.TriggerTypeForCronMode(mode),
+					TriggerRef:  scenarioKey,
+				})
+				if err != nil {
+					status = "error"
+					errMsg = err.Error()
+				} else {
+					inspectionResult = &res
+					runSummary = strings.TrimSpace(res.ReportMarkdown)
+					if runSummary == "" && res.Score != nil {
+						runSummary = fmt.Sprintf("健康得分：%d", *res.Score)
+					}
 				}
-			}
-			// Prefer RunCronChat so that cron runs go through chat.send and
-			// produce proper transcripts and session store entries. Fall back
-			// to RunIsolatedAgentJob for backwards compatibility.
-			if deps.RunCronChat != nil {
-				deps.RunCronChat(jobCopy, sessionKey, cronSessionID, message)
-			} else if deps.RunIsolatedAgentJob != nil {
-				deps.RunIsolatedAgentJob(jobCopy, message)
+			} else if jobCopy.SessionTarget == "main" && jobCopy.Payload.Kind == "systemEvent" {
+				if deps.EnqueueSystemEvent != nil {
+					deps.EnqueueSystemEvent(jobCopy.Payload.Text)
+				}
+				if jobCopy.WakeMode == "now" && deps.RequestHeartbeatNow != nil {
+					deps.RequestHeartbeatNow("agent:main:cron:" + id)
+				}
+			} else if jobCopy.SessionTarget == "isolated" && jobCopy.Payload.Kind == "agentTurn" {
+				message := jobCopy.Payload.Message
+				if domain != "" {
+					prefix := tools.BuildOpsContextLine(domain, clusterId, component)
+					if prefix != "" && !strings.Contains(message, "[运维上下文]") {
+						message = prefix + "\n\n" + message
+					}
+				}
+				idempotencyKey := fmt.Sprintf("cron:%s:%d", jobCopy.ID, scheduledAtForJob(jobCopy, startMs))
+				if deps.RunCronChat != nil {
+					_, _ = deps.RunCronChat(jobCopy, sessionKey, cronSessionID, message, idempotencyKey)
+				} else if deps.RunIsolatedAgentJob != nil {
+					deps.RunIsolatedAgentJob(jobCopy, message)
+				}
 			}
 		}
 	}
@@ -540,7 +550,7 @@ func (s *Service) Run(id string, mode string, domain, clusterId, component, scen
 			}
 			j.State.RunningAtMs = nil
 			j.State.LastDurationMs = &durationMs
-			if status == "ok" {
+			if status == "ok" || status == "partial" {
 				j.State.ConsecutiveErrors = 0
 			} else if status == "error" {
 				j.State.ConsecutiveErrors++
@@ -563,7 +573,7 @@ func (s *Service) Run(id string, mode string, domain, clusterId, component, scen
 				}
 				s.store.Jobs[i].State.RunningAtMs = nil
 				s.store.Jobs[i].State.LastDurationMs = &durationMs
-				if status == "ok" {
+				if status == "ok" || status == "partial" {
 					s.store.Jobs[i].State.ConsecutiveErrors = 0
 				} else if status == "error" {
 					s.store.Jobs[i].State.ConsecutiveErrors++
@@ -900,7 +910,7 @@ func (s *Service) ensureDefaultJobs() error {
 				return err
 			}
 		}
-		return nil
+		return s.ensureDefaultBatchL0Jobs(now)
 	}
 
 	changed := false
@@ -959,7 +969,118 @@ func (s *Service) ensureDefaultJobs() error {
 	}
 
 	if changed {
-		return SaveStore(s.storePath, s.store)
+		if err := SaveStore(s.storePath, s.store); err != nil {
+			return err
+		}
+	}
+	return s.ensureDefaultBatchL0Jobs(now)
+}
+
+type defaultBatchL0Job struct {
+	ID          string
+	Name        string
+	Description string
+	Message     string
+	Schedule    string
+	EmployeeID  string
+}
+
+func defaultBatchL0Jobs() []defaultBatchL0Job {
+	return []defaultBatchL0Job{
+		{
+			ID: "job-inspect-flink", Name: "Flink 作业批量健康巡检",
+			Description: "每小时对 Flink 作业进行 L0 批量指标采集与规则评分",
+			Message:     "Flink L0 批量巡检：由 Work Queue 执行 flink_metrics_batch 采集与评分，异常作业条件升级 L2。",
+			Schedule:    "0 * * * *", EmployeeID: "emp_bch_inspect",
+		},
+		{
+			ID: "job-inspect-spark", Name: "Spark 作业批量健康巡检",
+			Description: "每小时对 Spark 作业进行 L0 批量采集与倾斜/失败规则评分",
+			Message:     "Spark L0 批量巡检：由 Work Queue 执行 spark_metrics_batch 采集与评分，异常作业条件升级 L2。",
+			Schedule:    "15 * * * *", EmployeeID: "emp_bch_inspect",
+		},
+		{
+			ID: "job-inspect-yarn", Name: "YARN 队列容量批量评估",
+			Description: "每 2 小时对 YARN 队列进行 L0 容量水位批量评估",
+			Message:     "YARN L0 批量巡检：由 Work Queue 执行 yarn_queue_batch 采集与评分，异常队列条件升级 L2。",
+			Schedule:    "0 */2 * * *", EmployeeID: "emp_bch_inspect",
+		},
+		{
+			ID: "job-inspect-gbase-instances", Name: "GBase 实例批量健康巡检",
+			Description: "每 4 小时对 GBase 实例连接与慢 SQL 进行 L0 批量评估",
+			Message:     "GBase 实例 L0 批量巡检：由 Work Queue 执行 gbase_instance_batch 采集与评分，异常实例条件升级 L2。",
+			Schedule:    "0 */4 * * *", EmployeeID: "emp_gbase_diagnose",
+		},
+		{
+			ID: "job-inspect-dataapps-pipelines", Name: "数据 App 管道批量 SLA 巡检",
+			Description: "每小时对数据 App 管道跑批 SLA 与失败链路进行 L0 批量评估",
+			Message:     "DataApp 管道 L0 批量巡检：由 Work Queue 执行 pipeline_batch 采集与评分，异常管道条件升级 L2。",
+			Schedule:    "30 * * * *", EmployeeID: "emp_dataapps_ops",
+		},
+	}
+}
+
+// ensureDefaultBatchL0Jobs adds default L0 batch inspection cron jobs (Phase B/D).
+func (s *Service) ensureDefaultBatchL0Jobs(now int64) error {
+	for _, dj := range defaultBatchL0Jobs() {
+		if err := s.ensureOneBatchL0Job(now, dj); err != nil {
+			return err
+		}
 	}
 	return nil
+}
+
+func (s *Service) ensureOneBatchL0Job(now int64, dj defaultBatchL0Job) error {
+	sched := CronSchedule{Kind: "cron", Expr: dj.Schedule}
+	empID := dj.EmployeeID
+	if empID == "" {
+		empID = "emp_bch_inspect"
+	}
+
+	if s.repo != nil {
+		j, found, err := s.repo.Get(dj.ID)
+		if err != nil {
+			return err
+		}
+		if found {
+			if j.DigitalEmployeeID == "" {
+				j.DigitalEmployeeID = empID
+				j.UpdatedAtMs = now
+				if err := s.repo.Upsert(j); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+		next := ComputeNextRunAtMs(sched, now)
+		return s.repo.Upsert(CronJob{
+			ID: dj.ID, AgentID: "main", Name: dj.Name, Description: dj.Description,
+			Enabled: true, CreatedAtMs: now, UpdatedAtMs: now, DigitalEmployeeID: empID,
+			Schedule: sched, SessionTarget: "isolated", SessionKey: "agent:main:cron:" + dj.ID,
+			WakeMode: "next-heartbeat",
+			Payload:  CronPayload{Kind: "agentTurn", Message: dj.Message},
+			State:    CronJobState{NextRunAtMs: &next},
+		})
+	}
+
+	for i, j := range s.store.Jobs {
+		if j.ID == dj.ID {
+			if s.store.Jobs[i].DigitalEmployeeID == "" {
+				s.store.Jobs[i].DigitalEmployeeID = empID
+				s.store.Jobs[i].UpdatedAtMs = now
+				return SaveStore(s.storePath, s.store)
+			}
+			return nil
+		}
+	}
+	next := ComputeNextRunAtMs(sched, now)
+	s.store.Jobs = append(s.store.Jobs, CronJob{
+		ID: dj.ID, AgentID: "main", Name: dj.Name, Description: dj.Description,
+		Enabled: true, CreatedAtMs: now, UpdatedAtMs: now, DigitalEmployeeID: empID,
+		Schedule: sched, SessionTarget: "isolated", SessionKey: "agent:main:cron:" + dj.ID,
+		WakeMode: "next-heartbeat",
+		Payload:  CronPayload{Kind: "agentTurn", Message: dj.Message},
+		State:    CronJobState{NextRunAtMs: &next},
+	})
+	return SaveStore(s.storePath, s.store)
 }

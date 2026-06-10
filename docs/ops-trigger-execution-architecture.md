@@ -1,8 +1,8 @@
 # OpenOcta 触发与执行架构方案：批量诊断、Cron 与告警统一编排
 
-> 版本：v0.1  
+> 版本：v0.2  
 > 日期：2026-06-10  
-> 状态：**规划稿，待评审**  
+> 状态：**已冻结，Phase A 实施中**  
 > 适用范围：批量对象健康评估、AI 诊断、Cron 定时巡检、告警事件响应、手动/Chat 触发  
 > 关联文档：  
 > - [ops-multi-source-ai-architecture.md](./ops-multi-source-ai-architecture.md)  
@@ -12,16 +12,23 @@
 > - [alert-integration.md](./alert-integration.md)  
 > - [product-architecture-digital-ops.md](./product-architecture-digital-ops.md)
 
-### 评审结论（待填写）
+### 评审结论（v0.2 已确认）
 
 ```text
-状态：规划稿，待产品 + 架构评审
+状态：已冻结，Phase A 实施中
 
-待决议项：
-- Work Queue 首期实现：进程内 + SQLite 表 vs 外部队列
-- L2 全局并发默认值（建议 5～10）
-- Cron 父 Run 完成语义：全部子任务完成 vs 超时后 partial succeeded
+已确认默认：
+- Work Queue 首期实现：进程内 worker + SQLite 表（work_plans / work_tasks）
+- L2 全局并发默认值：8（区间 5～10，留余量）
+- Cron 父 Run 完成语义：等待全部子任务完成或超时；超时记 partial
+- partial 是否算 cron 成功：lastStatus=partial，且不累加 consecutiveErrors（UI 区分展示）
+- Reduce 域级汇总 LLM：默认关闭，仅管理报告场景开启
 - 首个批量样板域：Flink 作业（ops-flink-health）
+
+仍需评审拍板（高风险，见 §6.3 / §10 Phase A）：
+- 父 Run 等待子任务的实现：轮询子 Run 状态 vs 事件回调
+- SQLite 队列的崩溃恢复策略（租约 / reclaim）
+- 多租户 scope 是否首期即落 tenantId 列
 ```
 
 ---
@@ -42,7 +49,7 @@
 
 1. **无并发治理**：到期任务各起 goroutine，配置项 `maxConcurrentRuns` 尚未落地。
 2. **完成语义失真**：Cron `Run()` 在 `chat.send` 返回后即记 `ok`，真实 Agent 仍在异步执行。
-3. **幂等粗糙**：固定 `idempotencyKey: cron:{jobId}`，长任务期间重触发返回 `in_flight` 或被跳过。
+3. **幂等粗糙**：固定 `idempotencyKey: cron:{jobId}`，长任务期间重触发返回 `in_flight` 或被跳过；且幂等键未绑定**调度计划时刻**，重试时易因 `time.Now()` 漂移生成不同 key。
 4. **成本不可控**：500 对象 × 每小时 × LLM = 不可接受的 token 与延迟。
 5. **Facts 与 Transcript 割裂**：UI 应读结构化 Facts，而非依赖会话文本抽分。
 
@@ -145,7 +152,7 @@
 | `scenarioKey` | 映射 `OpsScenario`，决定 tiers 与工具链 |
 | `scope` | 批量时 `objectIds: ["*"]` 表示域内全量；告警通常为单对象 |
 | `priority` | 队列排序：`alert > manual > cron` |
-| `idempotencyKey` | 含时间窗口，避免长任务 blocking 同 key |
+| `idempotencyKey` | 绑定**调度计划时刻**（非 `time.Now()`），含时间窗口；同一次调度的重试必须复用同一 key，避免长任务 blocking 或重复入队 |
 
 ### 3.2 WorkPlan（编排输出）
 
@@ -192,6 +199,11 @@ Planner 根据 `OpsScenario` + `EscalationPolicy` 生成：
 - 输出：每作业一条 Signal；域内聚合一条 Snapshot（健康分布、Top 风险）。
 
 **不写**完整 `InspectionReport`（除非策略要求）；L0 产出足以驱动驾驶舱与升级决策。
+
+> **对现有 Facts 的影响（需在 schema 演进中处理）**：当前 `HealthObjectCluster = "cluster"` 是唯一对象类型，`AggregateHealthSnapshot` 与 `DomainHealthPolicy` 均强绑 `Cluster`。L0 引入 `objectType=job` 的 **per-object signal**（每作业一条）+ **域级聚合 snapshot**（健康分布、Top 风险）后，需要：
+> 1. 新增对象类型常量（如 `HealthObjectJob`），`health_signals` 增加 `(object_type, object_id)` 复合索引；
+> 2. 扩展或旁路 `AggregateHealthSnapshot`，支持「object 级聚合 → 域级分布快照」而非仅 cluster 级；
+> 3. 避免 500 作业逐条调用 cluster 聚合路径导致的 N 次全表扫描。
 
 ### 4.2 L1：结构化巡检（无 LLM）
 
@@ -316,6 +328,8 @@ Alert Webhook
 | 任务风暴 | 每个 due job `go Run()` | 入队 + worker 池 |
 | 重叠执行 | `RunningAtMs` 仅清除未设防 | `scenarioKey+objectId` 锁或 merge |
 | 父子关系 | 扁平 `job_runs` | 父 Run + Task Run（子） |
+| 异步完成判定 | `RunCronChat` fire-and-forget，`status` 默认 `ok` | 父 Run 等待子任务终态后落终态（见 §6.3） |
+| 崩溃恢复 | 进程重启后 `running` 任务永久悬挂 | `work_tasks` 租约 + reclaim，重启回收 in-flight |
 
 ### 6.2 队列能力（首期建议）
 
@@ -327,6 +341,7 @@ Alert Webhook
 | **幂等** | `idempotencyKey` + 状态机，避免重复入队 |
 | **超时** | L0 父任务 30min；L2 单对象 10min；父 Run partial 策略可配置 |
 | **持久化** | 首期 SQLite 表 `work_plans` / `work_tasks`；进程内 worker；后期可换 Redis/NATS |
+| **崩溃恢复** | `work_tasks` 带 `lease_until` 租约；启动时 reclaim 超租约的 `running` 任务；幂等键保证重投不重复执行（**SQLite 方案必做项**） |
 
 ### 6.3 JobRun 父子模型
 
@@ -342,8 +357,19 @@ JobRun (父)  id=run-parent, trigger=cron, jobId=job-inspect-flink
 父 Run 终态：
 
 - `succeeded`：L0 成功且 L2 子任务全部完成（或 anomalies=0 无需 L2）。
-- `partial`：L0 成功但部分 L2 失败/超时（可配置是否仍记 cron ok）。
+- `partial`：L0 成功但部分 L2 失败/超时（默认 `lastStatus=partial`，不累加 `consecutiveErrors`）。
 - `failed`：L0 失败。
+
+#### 异步完成判定（高风险，评审拍板）
+
+现状 `RunCronChat` 是 fire-and-forget，父 Run 要在「所有 L2 子任务终态」后才落终态，**不是简单加队列就能解决**，需显式的子→父状态聚合机制。两种候选：
+
+| 方案 | 机制 | 取舍 |
+|------|------|------|
+| **A. 轮询子 Run 状态** | 父任务持有 `childRunIds[]`，worker 周期性查 `job_runs` 子状态，全部终态或父超时 → 落终态 | 实现简单、无新依赖；有轮询延迟与额外查询 |
+| **B. 事件回调** | 子 Run 完成时发事件/写 `work_tasks.parent_done_signal`，父 Run 监听聚合 | 实时性好；需事件总线或 DB 触发，复杂度高 |
+
+**首期建议方案 A**（轮询间隔 ~5s + 父 Run 超时兜底），避免引入事件总线。无论哪种，必须保证：父超时后对未完成子任务标记 `timeout` 并仍落父 `partial`，不得无限等待。
 
 ---
 
@@ -421,9 +447,14 @@ JobRun (父)  id=run-parent, trigger=cron, jobId=job-inspect-flink
 
 | 表 | 用途 |
 |----|------|
-| `work_plans` | 计划快照、状态、父 run_id |
-| `work_tasks` | 队列任务：tier、object_id、priority、idempotency_key |
+| `work_plans` | 计划快照、状态、父 run_id；预留 `tenant_id`（可空） |
+| `work_tasks` | 队列任务：tier、object_id、priority、idempotency_key、`lease_until`（租约/reclaim）、`tenant_id` |
 | `job_runs.parent_run_id` | 父子关联（或 `task_id` 复用） |
+| `health_signals` | 新增 `object_type=job` 数据；建 `(object_type, object_id)` 复合索引 |
+
+**schema 注意事项**：
+- **多租户前置**：`work_plans` / `work_tasks` / Facts 首期即预留 `tenant_id` 列（可空），避免后期二次 migration（对应开放问题 #4）。
+- **聚合路径**：`AggregateHealthSnapshot` 当前强绑 `Cluster` + `DomainHealthPolicy`，支持 `objectType=job` 需扩展或旁路（见 §4.1）。
 
 详见 [openocta-db-schema-v1.md](./openocta-db-schema-v1.md) 演进时补充 migration。
 
@@ -458,19 +489,20 @@ JobRun (父)  id=run-parent, trigger=cron, jobId=job-inspect-flink
 | 项 | 交付 | 验收 |
 |----|------|------|
 | A1 | `TriggerRouter` + `TriggerEnvelope` + `WorkPlan` 类型 | Cron / Manual 可走同一入口 |
-| A2 | SQLite `work_plans` / `work_tasks` + 进程内 worker | 入队、出队、优先级可测 |
+| A2 | SQLite `work_plans` / `work_tasks` + 进程内 worker | 入队、出队、优先级可测；**重启后能 reclaim 未完成任务，无僵尸 `running`** |
 | A3 | 实现 `maxConcurrentL2Runs` | 压力测试不超上限 |
-| A4 | Cron `lastStatus` 与父 Run 终态绑定 | 不再「send 即 ok」 |
+| A4 | Cron `lastStatus` 与父 Run 终态绑定（**含异步等待子任务，见 §6.3 方案 A**） | 不再「send 即 ok」；父超时落 `partial` 不悬挂 |
 | A5 | 父子 `job_runs` 模型 | UI / API 可查子 Run |
+| A6 | 幂等键绑定调度计划时刻 | 同次调度重试复用同 key，不重复执行 |
 
 ### Phase B — L0 批量样板：Flink（P0）
 
 | 项 | 交付 | 验收 |
 |----|------|------|
 | B1 | `ops-flink-health` scenario 定义 | 文档 + Go 注册 |
-| B2 | `flink_metrics_batch` Collector | 对接 VM/Prom；非 Mock 数据路径 |
-| B3 | L0 写 `health_signals` + 域级 `health_snapshots` | 驾驶舱可读 |
-| B4 | 单条 Cron `job-inspect-flink` 触发 L0 | 500 级规模压测 < 5min（指标侧依赖环境） |
+| B2 | `flink_metrics_batch` Collector | 对接 VM/Prom；非 Mock 数据路径。**明确：指标命名、按 `job_id` label 聚合维度、500 作业单次批量查询还是分批** |
+| B3 | L0 写 `health_signals`（per job）+ 域级 `health_snapshots` | 驾驶舱可读；新增 `object_type=job` 与索引 |
+| B4 | 单条 Cron `job-inspect-flink` 触发 L0 | 500 级规模压测 < 5min（指标侧依赖环境）；聚合无 N 次全表扫描 |
 
 ### Phase C — 条件升级 L2（P1）
 
@@ -494,7 +526,7 @@ JobRun (父)  id=run-parent, trigger=cron, jobId=job-inspect-flink
 
 ## 11. 成功标准（Release Gates）
 
-1. **健壮性**：500 对象 Cron 触发不产生无界 goroutine；L2 并发可配置且可观测。
+1. **健壮性**：500 对象 Cron 触发不产生无界 goroutine；L2 并发可配置且可观测；**进程重启后无悬挂 `running` 任务（reclaim 生效）**。
 2. **正确性**：Cron `lastStatus` 与父 Run 终态一致；Facts 与 run 可追溯关联。
 3. **成本**：全量巡检 LLM 调用量 ≈ 异常对象数，而非对象总数。
 4. **事件响应**：告警 P95 入队延迟 < 5s（不含 LLM 执行时间）。
@@ -504,11 +536,14 @@ JobRun (父)  id=run-parent, trigger=cron, jobId=job-inspect-flink
 
 ## 12. 开放问题（评审议程）
 
-1. Work Queue 首期是否坚持 SQLite only，还是预留 `queue.backend=redis` 接口？
-2. 父 Run `partial` 是否算 Cron 成功（影响 `consecutiveErrors`）？
-3. L0 失败时是否仍尝试 L2（告警路径除外）？
-4. 多租户下 `scope` 是否必须带 `tenantId`？
-5. Reduce 域级汇总 LLM 是否默认开启，还是仅管理报告场景？
+| # | 议题 | 默认建议 | 待评审确认点 |
+|---|------|----------|--------------|
+| 1 | Work Queue 首期 SQLite only vs 预留 `queue.backend=redis` | SQLite only，但 worker/queue 以接口抽象，便于后期替换 | 是否值得首期就抽象接口成本 |
+| 2 | 父 Run `partial` 是否算 Cron 成功 | `lastStatus=partial`，不累加 `consecutiveErrors`，UI 区分 | 告警/SLA 统计是否按 partial 计失败 |
+| 3 | L0 失败时是否仍尝试 L2（告警路径除外） | 否（L0 失败 → 父 Run `failed`，不升级 L2） | 是否需要「L0 失败仍对已知异常对象兜底 L2」 |
+| 4 | 多租户 `scope` 是否必须带 `tenantId` | 首期表即预留 `tenant_id` 列（可空），逻辑后置 | 单租户部署是否完全省略 |
+| 5 | Reduce 域级汇总 LLM 是否默认开启 | 默认关闭，仅管理报告场景开启 | 驾驶舱是否需要每次汇总摘要 |
+| 6 | 父 Run 等待子任务实现（§6.3） | 方案 A 轮询（~5s + 超时兜底） | 实时性要求是否需上事件回调 |
 
 ---
 
@@ -524,7 +559,14 @@ JobRun (父)  id=run-parent, trigger=cron, jobId=job-inspect-flink
 
 相关实现文件（当前基线）：
 
-- `src/pkg/cron/service.go` — Cron 定时与 `Run()`
+- `src/pkg/cron/service.go` — Cron 定时与 `Run()`；默认 `job-inspect-flink`
+- `src/pkg/ops/flink_collector.go` — Flink L0 批量采集与 Facts 写入
+- `src/pkg/workqueue/planner.go` / `executor.go` — L0-only plan 与 `RunFlinkHealthL0`
+- `src/pkg/ops/escalation.go` — Flink L0→L2 升级策略与结构化 L2 上下文
+- `src/pkg/workqueue/escalation.go` — L0 完成后条件入队 L2 子任务
+- `src/pkg/workqueue/trigger_alert.go` — 告警 `TriggerEnvelope`（`priority=high`）
+- `src/pkg/ops/domain_reduce.go` — Map-Reduce 域级汇总（规则默认，可选 LLM）
+- `src/pkg/workqueue/reduce.go` — L2 完成后条件入队 `domain_reduce` 任务
 - `src/pkg/ops/scenario_runner.go` — L1 `RunScenario`
 - `src/pkg/ops/alert_jobrun.go` — 告警 JobRun
 - `src/pkg/gateway/http/hooks.go` — 告警合并与触发
@@ -533,4 +575,32 @@ JobRun (父)  id=run-parent, trigger=cron, jobId=job-inspect-flink
 
 ---
 
-*文档维护：架构 / 平台组。评审通过后更新状态为「已冻结」，并同步任务到 [commercialization-task-breakdown.md](./commercialization-task-breakdown.md)。*
+## 14. Phase A 实施进度（代码）
+
+| 项 | 状态 | 实现位置 |
+|----|------|----------|
+| A1 TriggerEnvelope / WorkPlan / Planner | 已完成 | `pkg/workqueue/types.go`, `planner.go`, `pkg/cron/trigger.go` |
+| A2 work_plans / work_tasks + worker + reclaim | 已完成 | migration `010_work_queue.sql`, `pkg/workqueue/repository.go`, `service.go` |
+| A3 maxConcurrentL2Runs | 已完成 | `pkg/workqueue/config.go`, claim 时 L2 计数 |
+| A4 Cron lastStatus 绑定父 Run（含 L2 等待） | 已完成 | `pkg/cron/service_workqueue.go`, `runnotify`, `chat.go` defer |
+| A5 parent_run_id 父子 Run | 已完成 | migration `010`, `pkg/jobrun` |
+| A6 幂等键绑定调度时刻 | 已完成 | `cron:{jobId}:{scheduledAtMs}` |
+| B1 ops-flink-health scenario | 已完成 | `pkg/ops/scenario.go`, `inspection_facts.go` |
+| B2 flink_metrics_batch Collector | 已完成 | `pkg/ops/flink_collector.go`, `flink_metrics_vm.go`, `flink_score.go` |
+| B3 per-job signals + 域快照 | 已完成 | `object_type=job`, `hadoop:flink` domain snapshot |
+| B4 job-inspect-flink Cron（每小时） | 已完成 | `pkg/cron/service.go` `ensureDefaultFlinkJob` |
+| B5 WorkQueue L0 执行路径 | 已完成 | `pkg/workqueue/planner.go`, `executor.go` |
+| B6 BCH API 读 L3 Facts | 已完成 | `gateway/http/bch_api.go` → `ListFlinkJobsHealth` |
+| C1 escalationPolicy（Flink L0→L2） | 已完成 | `pkg/ops/escalation.go`, `workqueue/escalation.go` |
+| C2 L2 冷却（1h，告警可绕过） | 已完成 | `workqueue/repository.go` `lastSuccessfulL2At`, `config.DefaultL2CooldownMs` |
+| C3 告警接入 Work Queue | 已完成 | `gateway/http/hooks.go`, `workqueue/trigger_alert.go`, `Submit` |
+| C4 Map-Reduce 域级汇总 | 已完成 | `domain_reduce.go`, `workqueue/reduce.go`；默认关闭 |
+| D1 Spark 作业 L0 批量 | 已完成 | `spark_collector.go`, `job-inspect-spark` |
+| D2 YARN 队列 L0 批量 | 已完成 | `yarn_collector.go`, `job-inspect-yarn` |
+| D3 GBase 实例 L0 批量 | 已完成 | `gbase_instance_collector.go`, `db_instance` |
+| D4 DataApp 管道 L0 批量 | 已完成 | `dataapps_pipeline_collector.go`, `pipeline` |
+| D5 批量场景统一框架 | 已完成 | `batch_scenarios.go`, `batch_l0_runner.go`, 通用 escalation |
+
+---
+
+*文档维护：架构 / 平台组。任务条目同步见 [commercialization-task-breakdown.md](./commercialization-task-breakdown.md) §7。*

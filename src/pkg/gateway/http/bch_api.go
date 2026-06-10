@@ -34,8 +34,7 @@ func (s *Server) handleBchListFlinkJobs(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	svc := getBchService()
-	data, err := svc.ListFlinkJobs()
+	data, err := ops.ListFlinkJobsHealth()
 	if err != nil {
 		opsWriteError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -88,8 +87,7 @@ func (s *Server) handleBchListSparkJobs(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	svc := getBchService()
-	data, err := svc.ListSparkJobs()
+	data, err := ops.ListSparkJobsHealth()
 	if err != nil {
 		opsWriteError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -219,8 +217,7 @@ func (s *Server) handleBchListYarnQueues(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	svc := getBchService()
-	data, err := svc.ListYarnQueues()
+	data, err := ops.ListYarnQueuesHealth()
 	if err != nil {
 		opsWriteError(w, http.StatusInternalServerError, err.Error())
 		return

@@ -880,9 +880,15 @@ type ChannelHeartbeatVisibilityConfig struct {
 
 // CronConfig holds cron settings.
 type CronConfig struct {
-	Enabled           *bool   `json:"enabled,omitempty"`
-	Store             *string `json:"store,omitempty"`
-	MaxConcurrentRuns *int    `json:"maxConcurrentRuns,omitempty"`
+	Enabled             *bool   `json:"enabled,omitempty"`
+	Store               *string `json:"store,omitempty"`
+	MaxConcurrentRuns   *int    `json:"maxConcurrentRuns,omitempty"`
+	MaxConcurrentL2Runs *int    `json:"maxConcurrentL2Runs,omitempty"`
+	MaxL2PerParentRun   *int    `json:"maxL2PerParentRun,omitempty"`
+	DefaultL2CooldownMs *int    `json:"defaultL2CooldownMs,omitempty"`
+	ParentRunTimeoutMs  *int    `json:"parentRunTimeoutMs,omitempty"`
+	DomainReduceEnabled *bool   `json:"domainReduceEnabled,omitempty"`
+	DomainReduceUseLLM  *bool   `json:"domainReduceUseLLM,omitempty"`
 }
 
 // HooksConfig holds hooks settings.

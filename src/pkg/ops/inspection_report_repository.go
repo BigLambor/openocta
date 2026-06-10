@@ -74,3 +74,56 @@ func persistInspectionReport(report InspectionReport) error {
 	)
 	return err
 }
+
+// ListInspectionReportsByRunIDs loads reports whose run_id or id matches child L2 runs.
+func ListInspectionReportsByRunIDs(runIDs []string) (map[string]InspectionReport, error) {
+	sqliteDB := db.GetDB()
+	out := map[string]InspectionReport{}
+	if sqliteDB == nil || len(runIDs) == 0 {
+		return out, nil
+	}
+	keys := make([]string, 0, len(runIDs)*2)
+	for _, id := range runIDs {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		keys = append(keys, id, "inspection-"+id)
+	}
+	if len(keys) == 0 {
+		return out, nil
+	}
+	placeholders := strings.TrimRight(strings.Repeat("?,", len(keys)), ",")
+	args := make([]interface{}, len(keys))
+	for i, k := range keys {
+		args[i] = k
+	}
+	rows, err := sqliteDB.Query(`
+		SELECT report_json, run_id, id FROM inspection_reports
+		WHERE run_id IN (`+placeholders+`) OR id IN (`+placeholders+`)
+	`, append(args, args...)...)
+	if err != nil {
+		return out, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var body, runID, id string
+		if err := rows.Scan(&body, &runID, &id); err != nil {
+			return out, err
+		}
+		var report InspectionReport
+		if err := json.Unmarshal([]byte(body), &report); err != nil {
+			continue
+		}
+		for _, raw := range runIDs {
+			raw = strings.TrimSpace(raw)
+			if raw == "" {
+				continue
+			}
+			if id == raw || runID == raw || runID == "inspection-"+raw || id == "inspection-"+raw {
+				out[raw] = report
+			}
+		}
+	}
+	return out, rows.Err()
+}

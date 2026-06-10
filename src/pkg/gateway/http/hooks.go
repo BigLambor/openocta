@@ -14,7 +14,9 @@ import (
 	"github.com/openocta/openocta/pkg/config"
 	"github.com/openocta/openocta/pkg/gateway/handlers"
 	"github.com/openocta/openocta/pkg/logging"
+	"github.com/openocta/openocta/pkg/jobrun"
 	"github.com/openocta/openocta/pkg/ops"
+	"github.com/openocta/openocta/pkg/workqueue"
 )
 
 var (
@@ -596,15 +598,50 @@ func triggerMergedAlertAnalysis(ctx *handlers.Context, batch *alertBatch) {
 		})
 	}
 
-	_ = ctx.HooksAgent(handlers.HooksAgentParams{
-		Message:    builder.String(),
-		Name:       "AlertGroup",
-		SessionKey: sessionKey,
-		WakeMode:   "now",
-		Deliver:    true,
-		Channel:    channel,
-		To:         to,
-		RunID:      batch.RunID,
-	})
+	message := builder.String()
+	if !dispatchAlertViaWorkQueue(ctx, recorded, employeeID, sessionKey, message) {
+		_ = ctx.HooksAgent(handlers.HooksAgentParams{
+			Message:    message,
+			Name:       "AlertGroup",
+			SessionKey: sessionKey,
+			WakeMode:   "now",
+			Deliver:    true,
+			Channel:    channel,
+			To:         to,
+			RunID:      batch.RunID,
+		})
+	}
+}
+
+func dispatchAlertViaWorkQueue(ctx *handlers.Context, group ops.AlertGroup, employeeID, sessionKey, message string) bool {
+	if !workqueue.Enabled() {
+		return false
+	}
+	if strings.TrimSpace(employeeID) == "" {
+		if def, ok := automation.DefaultEmployeeForDomain(group.Domain); ok {
+			employeeID = def
+		}
+	}
+	env := workqueue.AlertTriggerEnvelope(group, employeeID, sessionKey, message)
+	if _, err := workqueue.Submit(env); err != nil {
+		hooksLog.Warn("work queue alert submit failed, falling back to HooksAgent: %v", err)
+		return false
+	}
+	if jr := jobrun.Default(); jr != nil && strings.TrimSpace(group.RunID) != "" {
+		if _, err := jr.Get(group.RunID); err != nil {
+			_, _ = jr.Start(jobrun.StartInput{
+				RunID:       group.RunID,
+				JobID:       ops.AlertDiagnosisJobID,
+				TriggerType: jobrun.TriggerAlert,
+				TriggerRef:  group.ID,
+				Input: map[string]interface{}{
+					"alertGroupId": group.ID,
+					"scenarioKey":  env.ScenarioKey,
+					"source":       "workqueue",
+				},
+			})
+		}
+	}
+	return true
 }
 

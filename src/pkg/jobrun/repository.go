@@ -35,10 +35,10 @@ func (r *jobRunRepository) Insert(run JobRun) error {
 	}
 	_, err = r.db.Exec(`
 		INSERT INTO job_runs (
-			id, job_id, task_id, trigger_type, trigger_ref, status,
+			id, job_id, task_id, parent_run_id, trigger_type, trigger_ref, status,
 			started_at, finished_at, error, input_json, output_json, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, run.ID, run.JobID, run.TaskID, run.TriggerType, run.TriggerRef, run.Status,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, run.ID, run.JobID, run.TaskID, run.ParentRunID, run.TriggerType, run.TriggerRef, run.Status,
 		run.StartedAt, run.FinishedAt, run.Error, string(inputJSON), string(outputJSON),
 		run.CreatedAt, run.UpdatedAt)
 	return err
@@ -58,10 +58,10 @@ func (r *jobRunRepository) Update(run JobRun) error {
 	}
 	res, err := r.db.Exec(`
 		UPDATE job_runs SET
-			job_id = ?, task_id = ?, trigger_type = ?, trigger_ref = ?, status = ?,
+			job_id = ?, task_id = ?, parent_run_id = ?, trigger_type = ?, trigger_ref = ?, status = ?,
 			started_at = ?, finished_at = ?, error = ?, input_json = ?, output_json = ?, updated_at = ?
 		WHERE id = ?
-	`, run.JobID, run.TaskID, run.TriggerType, run.TriggerRef, run.Status,
+	`, run.JobID, run.TaskID, run.ParentRunID, run.TriggerType, run.TriggerRef, run.Status,
 		run.StartedAt, run.FinishedAt, run.Error, string(inputJSON), string(outputJSON), run.UpdatedAt, run.ID)
 	if err != nil {
 		return err
@@ -82,7 +82,7 @@ func (r *jobRunRepository) Get(id string) (JobRun, error) {
 	}
 	id = strings.TrimSpace(id)
 	rows, err := r.db.Query(`
-		SELECT id, job_id, task_id, trigger_type, trigger_ref, status,
+		SELECT id, job_id, task_id, parent_run_id, trigger_type, trigger_ref, status,
 			started_at, finished_at, error, input_json, output_json, created_at, updated_at
 		FROM job_runs WHERE id = ?
 	`, id)
@@ -117,7 +117,7 @@ func (r *jobRunRepository) List(filter ListFilter) ([]JobRun, error) {
 	}
 
 	query := `
-		SELECT id, job_id, task_id, trigger_type, trigger_ref, status,
+		SELECT id, job_id, task_id, parent_run_id, trigger_type, trigger_ref, status,
 			started_at, finished_at, error, input_json, output_json, created_at, updated_at
 		FROM job_runs
 		WHERE 1=1`
@@ -125,6 +125,10 @@ func (r *jobRunRepository) List(filter ListFilter) ([]JobRun, error) {
 	if jobID := strings.TrimSpace(filter.JobID); jobID != "" {
 		query += ` AND job_id = ?`
 		args = append(args, jobID)
+	}
+	if parentRunID := strings.TrimSpace(filter.ParentRunID); parentRunID != "" {
+		query += ` AND parent_run_id = ?`
+		args = append(args, parentRunID)
 	}
 	if triggerType := strings.TrimSpace(filter.TriggerType); triggerType != "" {
 		query += ` AND trigger_type = ?`
@@ -158,7 +162,7 @@ func scanJobRun(rows *sql.Rows) (JobRun, error) {
 	var run JobRun
 	var inputJSON, outputJSON string
 	if err := rows.Scan(
-		&run.ID, &run.JobID, &run.TaskID, &run.TriggerType, &run.TriggerRef, &run.Status,
+		&run.ID, &run.JobID, &run.TaskID, &run.ParentRunID, &run.TriggerType, &run.TriggerRef, &run.Status,
 		&run.StartedAt, &run.FinishedAt, &run.Error, &inputJSON, &outputJSON, &run.CreatedAt, &run.UpdatedAt,
 	); err != nil {
 		return JobRun{}, err

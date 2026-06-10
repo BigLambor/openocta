@@ -23,6 +23,7 @@ import (
 	"github.com/openocta/openocta/pkg/cron"
 	"github.com/openocta/openocta/pkg/employees"
 	"github.com/openocta/openocta/pkg/jobrun"
+	"github.com/openocta/openocta/pkg/workqueue"
 	"github.com/openocta/openocta/pkg/gateway/handlers"
 	"github.com/openocta/openocta/pkg/gateway/protocol"
 	"github.com/openocta/openocta/pkg/gateway/swarmsvc"
@@ -124,6 +125,36 @@ func initStores(stateDir string) error {
 	}
 	if err := jobrun.Init(); err != nil {
 		return fmt.Errorf("failed to initialize job run service: %w", err)
+	}
+	return nil
+}
+
+func initWorkQueue(ctx *handlers.Context, cfg *config.OpenOctaConfig) error {
+	wqCfg := workqueue.ConfigFromOpenOcta(cfg)
+	deps := &workqueue.ExecutorDeps{
+		RunScenario: ops.RunScenario,
+		RunCronChat: func(job workqueue.CronJobSnapshot, sessionKey, sessionID, message, idempotencyKey string) (string, bool) {
+			if idempotencyKey == "" {
+				idempotencyKey = "cron:" + job.ID
+			}
+			if sessionKey == "" {
+				sessionKey = "agent:main:cron:" + job.ID
+			}
+			lowerKey := strings.TrimSpace(strings.ToLower(sessionKey))
+			if strings.HasPrefix(lowerKey, "agent:") && strings.Contains(lowerKey, ":employee:") && !strings.Contains(lowerKey, ":run:") {
+				_, _, _ = ctx.InvokeMethod("sessions.ensure", map[string]interface{}{"key": sessionKey})
+				sessionID = ""
+			}
+			return handlers.InvokeChatSend(ctx, handlers.ChatSendParams{
+				SessionKey:     sessionKey,
+				Message:        message,
+				SessionID:      sessionID,
+				IdempotencyKey: idempotencyKey,
+			})
+		},
+	}
+	if err := workqueue.Init(wqCfg, deps); err != nil {
+		return fmt.Errorf("failed to initialize work queue: %w", err)
 	}
 	return nil
 }
@@ -325,7 +356,7 @@ func setupCronDeps(cronSvc *cron.Service, ctx *handlers.Context, hub *ws.Hub, cf
 			}
 			handlers.RunIsolatedAgentTurn(ctx, agentID, "agent:main:cron:"+job.ID, message)
 		},
-		RunCronChat: func(job cron.CronJob, sessionKey, sessionId, message string) {
+		RunCronChat: func(job cron.CronJob, sessionKey, sessionId, message, idempotencyKey string) (string, bool) {
 			if sessionKey == "" {
 				sessionKey = "agent:main:cron:" + job.ID
 			}
@@ -336,11 +367,14 @@ func setupCronDeps(cronSvc *cron.Service, ctx *handlers.Context, hub *ws.Hub, cf
 			} else if sessionId == "" {
 				sessionId = job.ID
 			}
-			handlers.InvokeChatSend(ctx, handlers.ChatSendParams{
+			if strings.TrimSpace(idempotencyKey) == "" {
+				idempotencyKey = "cron:" + job.ID
+			}
+			return handlers.InvokeChatSend(ctx, handlers.ChatSendParams{
 				SessionKey:     sessionKey,
 				Message:        message,
 				SessionID:      sessionId,
-				IdempotencyKey: "cron:" + job.ID,
+				IdempotencyKey: idempotencyKey,
 			})
 		},
 	})
@@ -425,6 +459,10 @@ func NewServer(addr string, version string) *Server {
 
 	ctx := buildGatewayContext(version, stateDir, env, cfg, hub, chReg, outReg, chRuntimeMgr, cronSvc)
 	setupGatewayHandlers(ctx, hub, cfg, env)
+
+	if err := initWorkQueue(ctx, cfg); err != nil {
+		slog.Warn("work queue init failed", "error", err)
+	}
 
 	if cronSvc != nil {
 		setupCronDeps(cronSvc, ctx, hub, cfg)

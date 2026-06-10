@@ -29,6 +29,7 @@ import (
 	"github.com/openocta/openocta/pkg/logging"
 	"github.com/openocta/openocta/pkg/ops"
 	"github.com/openocta/openocta/pkg/rbac"
+	"github.com/openocta/openocta/pkg/runnotify"
 	"github.com/openocta/openocta/pkg/session"
 	"github.com/stellarlinkco/agentsdk-go/pkg/api"
 	"github.com/stellarlinkco/agentsdk-go/pkg/model"
@@ -1732,6 +1733,11 @@ func ChatSendHandler(opts HandlerOpts) error {
 			chatSucceeded := false
 			var chatErrMsg string
 			defer func() {
+				status := "error"
+				if chatSucceeded {
+					status = "ok"
+				}
+				runnotify.Complete(runId, status, chatErrMsg)
 				if opsContext.ObjectType == "alert" {
 					ops.SyncAlertDiagnosisAfterChat(sessionKey, runId, chatSucceeded, chatErrMsg)
 				}

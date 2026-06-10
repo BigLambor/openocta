@@ -53,6 +53,7 @@ func (s *Service) Start(input StartInput) (JobRun, error) {
 		ID:          newRunID(input.RunID),
 		JobID:       strings.TrimSpace(input.JobID),
 		TaskID:      strings.TrimSpace(input.TaskID),
+		ParentRunID: strings.TrimSpace(input.ParentRunID),
 		TriggerType: strings.TrimSpace(input.TriggerType),
 		TriggerRef:  strings.TrimSpace(input.TriggerRef),
 		Status:      StatusRunning,

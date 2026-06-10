@@ -3,7 +3,6 @@ package ops
 import (
 	"encoding/json"
 	"fmt"
-	"math"
 	"sync"
 )
 
@@ -101,148 +100,14 @@ func (s *MockBchService) GetClustersHealth() ([]BchClusterHealth, error) {
 	return clusters, nil
 }
 
-
-// Internal helper to calculate scores for Flink Jobs (matching JS engine in flink_doctor.html)
-func computeFlinkJobAnalysis(id, name, owner, cluster string, lagTrend int, maxLag, avgLag int64, isBP bool, cpuMax, cpuAvg, heapMax, fullGc, restarts int) FlinkJob {
-	score := 100
-	stabilityPenalty := 0
-	perfPenalty := 0
-	effPenalty := 0
-	var penalties []FlinkPenalty
-
-	rootCause := "S0"
-	rootCauseText := "运行健康"
-	diagnosis := "各项指标正常，无积压。"
-	actions := []string{"无需干预，持续观察。"}
-
-	step1 := FlinkCotStep{Text: "Lag 趋势平稳，无数据倾斜。", State: "active"}
-	step2 := FlinkCotStep{Text: "无反压现象，数据流通顺畅。", State: "active"}
-	step3 := FlinkCotStep{Text: "计算资源与内存利用率处于健康区间。", State: "active"}
-
-	// 1. Stability
-	if restarts > 3 {
-		stabilityPenalty += 100
-		penalties = append(penalties, FlinkPenalty{Item: "频繁重启 (>3次/h)", Deduction: 100, Type: "fatal"})
-		rootCause = "Fatal"
-		rootCauseText = "频繁重启"
-		diagnosis = "作业陷入死亡循环。"
-		actions = []string{"检查 JobManager 日志", "排查代码逻辑错误"}
-		step3 = FlinkCotStep{Text: "检测到 1h 内重启 > 3次，触发一票否决。", State: "critical"}
-	} else if fullGc > 0 {
-		p := fullGc * 20
-		stabilityPenalty += p
-		penalties = append(penalties, FlinkPenalty{Item: fmt.Sprintf("GC 雪崩 (%d次)", fullGc), Deduction: p, Type: "fatal"})
-		rootCause = "S2"
-		rootCauseText = "内存不足/GC停顿"
-		diagnosis = "发生 Full GC，面临 OOM 风险，业务线程停顿。"
-		actions = []string{"扩容 TaskManager Heap 内存", "检查 State TTL 设置"}
-		step3 = FlinkCotStep{Text: fmt.Sprintf("检测到 %d 次 Full GC，内存触发红线。", fullGc), State: "critical"}
-	}
-
-	// 2. Performance
-	hasLag := lagTrend > 0
-	hasSkew := avgLag > 0 && maxLag > (5*avgLag)
-
-	if hasLag {
-		perfPenalty += 20
-		penalties = append(penalties, FlinkPenalty{Item: "积压恶化 (LagTrend>0)", Deduction: 20, Type: "fatal"})
-		step1 = FlinkCotStep{Text: fmt.Sprintf("Lag 趋势向上 (斜率 %d)，出现严重积压。", lagTrend), State: "critical"}
-	}
-	if hasSkew {
-		perfPenalty += 15
-		penalties = append(penalties, FlinkPenalty{Item: "数据倾斜 (Max>5*Avg)", Deduction: 15, Type: "warning"})
-		rootCause = "S4"
-		rootCauseText = "数据倾斜"
-		diagnosis = "Max Lag 远超 Avg Lag，存在严重单点倾斜。"
-		actions = []string{"开启 LocalKeyBy 预聚合", "增加随机盐 (Salting) 打散数据"}
-		step1 = FlinkCotStep{Text: fmt.Sprintf("Max Lag (%d) 远大于 Avg Lag (%d)，存在单点倾斜。", maxLag, avgLag), State: "warning"}
-	}
-	if isBP {
-		perfPenalty += 10
-		penalties = append(penalties, FlinkPenalty{Item: "持续反压", Deduction: 10, Type: "warning"})
-		step2 = FlinkCotStep{Text: "检测到持续反压，瓶颈在 Flink 内部或下游。", State: "warning"}
-	} else if hasLag && !isBP {
-		step2 = FlinkCotStep{Text: "有积压但无反压，判定为 Source 端读取瓶颈。", State: "warning"}
-	}
-
-	// 3. Efficiency
-	if rootCause == "S0" || rootCause == "S4" {
-		if hasLag && isBP && cpuMax > 90 {
-			rootCause = "S1"
-			rootCauseText = "计算资源瓶颈"
-			diagnosis = "CPU被打满，算力不足导致积压反压。"
-			actions = []string{"增加并行度 (Parallelism)", "Profile 热点代码优化"}
-			effPenalty += 5
-			penalties = append(penalties, FlinkPenalty{Item: "计算过载 (CPU>90%)", Deduction: 5, Type: "info"})
-			step3 = FlinkCotStep{Text: "CPU Max > 90%，结合反压判定为计算瓶颈。", State: "critical"}
-		} else if hasLag && isBP && cpuMax < 40 {
-			rootCause = "S3"
-			rootCauseText = "外部 IO 阻塞"
-			diagnosis = "CPU 闲置但存在反压，说明线程在等待下游 IO 响应。"
-			actions = []string{"检查 Sink 端数据库负载", "开启批量写入 (Batch Flush)"}
-			step3 = FlinkCotStep{Text: fmt.Sprintf("CPU Max仅 %d%% 但存在反压，判定为假性空闲 (IO 阻塞)，严禁缩容。", cpuMax), State: "warning"}
-		} else if !hasLag && !isBP && cpuMax < 30 {
-			rootCause = "S7"
-			rootCauseText = "资源过度配置"
-			diagnosis = "无积压无反压且峰值 CPU 极低，资源严重浪费。"
-			actions = []string{"降低作业并行度", "减少 TaskManager 数量以节约成本"}
-			effPenalty += 10
-			penalties = append(penalties, FlinkPenalty{Item: "资源浪费 (闲置)", Deduction: 10, Type: "info"})
-			step3 = FlinkCotStep{Text: "无积压且 CPU < 30%，判定为资源过度配置。", State: "warning"}
-		}
-	}
-
-	score = 100 - stabilityPenalty - perfPenalty - effPenalty
-	if score < 0 {
-		score = 0
-	}
-
-	sScore := 100 - int(math.Min(100.0, float64(stabilityPenalty)*2.5))
-	pScore := 100 - int(math.Min(100.0, float64(perfPenalty)*2.8))
-	eScore := 100 - int(math.Min(100.0, float64(effPenalty)*4.0))
-
-	return FlinkJob{
-		ID:            id,
-		Name:          name,
-		Owner:         owner,
-		Cluster:       cluster,
-		Status:        "RUNNING",
-		Score:         score,
-		SScore:        sScore,
-		PScore:        pScore,
-		EScore:        eScore,
-		Metrics: FlinkJobMetric{
-			LagTrend:        lagTrend,
-			MaxLag:          maxLag,
-			AvgLag:          avgLag,
-			IsBackpressured: isBP,
-			CpuMax:          cpuMax,
-			CpuAvg:          cpuAvg,
-			HeapMax:         heapMax,
-			FullGcCount:     fullGc,
-			Restarts:        restarts,
-		},
-		Penalties:     penalties,
-		Diagnosis:     diagnosis,
-		RootCause:     rootCause,
-		RootCauseText: rootCauseText,
-		Actions:       actions,
-		CotSteps: FlinkCotSteps{
-			Step1: step1,
-			Step2: step2,
-			Step3: step3,
-		},
-	}
-}
-
 func (s *MockBchService) ListFlinkJobs() ([]FlinkJob, error) {
 	return []FlinkJob{
-		computeFlinkJobAnalysis("job_tx_core", "交易核心链路 (Trade_Analysis)", "cui.chao", "prod-a", 0, 10, 8, false, 60, 55, 60, 0, 0),
-		computeFlinkJobAnalysis("job_log_sink", "日志归档 (Log_ES_Sink)", "lu.yang", "prod-a", 500, 8000, 7800, true, 25, 15, 40, 0, 0),
-		computeFlinkJobAnalysis("job_risk_calc", "风控实时计算 (Risk_Model)", "tom", "prod-b", 800, 12000, 11500, true, 98, 95, 70, 0, 0),
-		computeFlinkJobAnalysis("job_user_tag", "用户画像流 (User_Tagging)", "peter", "prod-b", 50, 50000, 2000, true, 99, 45, 65, 0, 0),
-		computeFlinkJobAnalysis("job_click_heat", "点击热力图 (Click_Heatmap)", "zhang.san", "prod-a", 0, 0, 0, false, 15, 10, 20, 0, 0),
-		computeFlinkJobAnalysis("job_state_heavy", "大促状态机 (Promo_State)", "li.si", "prod-b", 1200, 15000, 14000, true, 75, 40, 95, 2, 1),
+		ComputeFlinkJobAnalysis("job_tx_core", "交易核心链路 (Trade_Analysis)", "cui.chao", "prod-a", FlinkMetricInput{LagTrend: 0, MaxLag: 10, AvgLag: 8, CpuMax: 60, CpuAvg: 55, HeapMax: 60}),
+		ComputeFlinkJobAnalysis("job_log_sink", "日志归档 (Log_ES_Sink)", "lu.yang", "prod-a", FlinkMetricInput{LagTrend: 500, MaxLag: 8000, AvgLag: 7800, IsBP: true, CpuMax: 25, CpuAvg: 15, HeapMax: 40}),
+		ComputeFlinkJobAnalysis("job_risk_calc", "风控实时计算 (Risk_Model)", "tom", "prod-b", FlinkMetricInput{LagTrend: 800, MaxLag: 12000, AvgLag: 11500, IsBP: true, CpuMax: 98, CpuAvg: 95, HeapMax: 70}),
+		ComputeFlinkJobAnalysis("job_user_tag", "用户画像流 (User_Tagging)", "peter", "prod-b", FlinkMetricInput{LagTrend: 50, MaxLag: 50000, AvgLag: 2000, IsBP: true, CpuMax: 99, CpuAvg: 45, HeapMax: 65}),
+		ComputeFlinkJobAnalysis("job_click_heat", "点击热力图 (Click_Heatmap)", "zhang.san", "prod-a", FlinkMetricInput{CpuMax: 15, CpuAvg: 10, HeapMax: 20}),
+		ComputeFlinkJobAnalysis("job_state_heavy", "大促状态机 (Promo_State)", "li.si", "prod-b", FlinkMetricInput{LagTrend: 1200, MaxLag: 15000, AvgLag: 14000, IsBP: true, CpuMax: 75, CpuAvg: 40, HeapMax: 95, FullGc: 2, Restarts: 1}),
 	}, nil
 }
 

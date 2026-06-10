@@ -211,6 +211,18 @@ func ScenarioKeyForInspection(report InspectionReport) string {
 	if domain == "" {
 		domain = DomainFromInspectJobID(report.JobID)
 	}
+	switch strings.TrimSpace(report.JobID) {
+	case "job-inspect-flink":
+		return ScenarioFlinkHealth
+	case "job-inspect-spark":
+		return ScenarioSparkHealth
+	case "job-inspect-yarn":
+		return ScenarioYarnHealth
+	case "job-inspect-gbase-instances":
+		return ScenarioGBaseInstanceHealth
+	case "job-inspect-dataapps-pipelines":
+		return ScenarioDataAppsPipelineHealth
+	}
 	switch domain {
 	case DomainHadoop:
 		return "ops-bch-health"

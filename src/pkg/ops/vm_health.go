@@ -30,7 +30,8 @@ type promInstantResponse struct {
 	Data   struct {
 		ResultType string `json:"resultType"`
 		Result     []struct {
-			Value []interface{} `json:"value"`
+			Metric map[string]string `json:"metric"`
+			Value  []interface{}     `json:"value"`
 		} `json:"result"`
 	} `json:"data"`
 	Error string `json:"error"`
@@ -147,6 +148,69 @@ func (c *vmClient) queryInstant(ctx context.Context, query string) ([]float64, e
 		values = append(values, v)
 	}
 	return values, nil
+}
+
+// queryInstantByLabel returns one scalar per time series keyed by a label (e.g. job_id).
+func (c *vmClient) queryInstantByLabel(ctx context.Context, query, labelKey string) (map[string]float64, error) {
+	if !c.configured() {
+		return nil, fmt.Errorf("vm client not configured")
+	}
+	apiURL, err := url.Parse(c.baseURL + "/api/v1/query")
+	if err != nil {
+		return nil, err
+	}
+	q := apiURL.Query()
+	q.Set("query", query)
+	apiURL.RawQuery = q.Encode()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("VM API %d: %s", resp.StatusCode, truncate(string(body), 120))
+	}
+
+	var parsed promInstantResponse
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return nil, err
+	}
+	if parsed.Status != "success" {
+		if parsed.Error != "" {
+			return nil, fmt.Errorf("%s", parsed.Error)
+		}
+		return nil, fmt.Errorf("query failed: %s", parsed.Status)
+	}
+
+	out := map[string]float64{}
+	for _, r := range parsed.Data.Result {
+		if len(r.Value) < 2 {
+			continue
+		}
+		key := strings.TrimSpace(r.Metric[labelKey])
+		if key == "" {
+			key = strings.TrimSpace(r.Metric["job_name"])
+		}
+		if key == "" {
+			continue
+		}
+		v, ok := scalarToFloat(r.Value[1])
+		if !ok {
+			continue
+		}
+		out[key] = v
+	}
+	return out, nil
 }
 
 func scalarToFloat(v interface{}) (float64, bool) {

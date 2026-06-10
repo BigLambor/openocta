@@ -11,7 +11,6 @@ type Deps struct {
 	// produce proper transcripts and session store entries.
 	RunIsolatedAgentJob func(job CronJob, message string)
 	// RunCronChat triggers a chat.send-style run for a cron job, using the
-	// provided sessionKey, sessionId and message. Implemented by the gateway so that
-	// cron jobs reuse the normal chat pipeline (sessions.json + transcripts).
-	RunCronChat func(job CronJob, sessionKey, sessionId, message string)
+	// provided sessionKey, sessionId and message. idempotencyKey becomes chat runId.
+	RunCronChat func(job CronJob, sessionKey, sessionId, message, idempotencyKey string) (runID string, ok bool)
 }
