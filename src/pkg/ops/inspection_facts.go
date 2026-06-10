@@ -20,6 +20,12 @@ func PersistInspectionFacts(report InspectionReport) error {
 		return saveDraftReport(report)
 	}
 
+	if strings.TrimSpace(report.ID) != "" {
+		if err := persistInspectionReport(report); err != nil {
+			return err
+		}
+	}
+
 	if healthStore == nil || strings.TrimSpace(report.ClusterID) == "" || report.ClusterID == "all" {
 		return nil
 	}
@@ -66,6 +72,10 @@ func inspectionSignalFromReport(cluster Cluster, report InspectionReport) (Healt
 	if len(report.Errors) > 0 {
 		errText = strings.Join(report.Errors, "; ")
 	}
+	confidence := strings.TrimSpace(report.Confidence)
+	if confidence == "" {
+		confidence = "medium"
+	}
 	return HealthSignal{
 		SchemaVersion: "1",
 		ID:            "sig-" + uuid.New().String(),
@@ -79,16 +89,22 @@ func inspectionSignalFromReport(cluster Cluster, report InspectionReport) (Healt
 		Type:          SignalTypeInspection,
 		Status:        status,
 		Score:         score,
-		Confidence:    "medium",
+		Confidence:    confidence,
 		Source:        "inspection:" + strings.TrimSpace(report.JobID),
 		SourceKind:    SourceKindCollector,
 		Evidence: map[string]interface{}{
-			"jobId":      report.JobID,
-			"sessionId":  report.ID,
-			"component":  report.Component,
-			"toolRuns":   report.ToolRuns,
-			"startedAt":  report.StartedAt,
-			"finishedAt": report.FinishedAt,
+			"jobId":                report.JobID,
+			"sessionId":            report.ID,
+			"component":            report.Component,
+			"toolRuns":             report.ToolRuns,
+			"startedAt":            report.StartedAt,
+			"finishedAt":           report.FinishedAt,
+			"summary":              report.Summary,
+			"risks":                report.Risks,
+			"recommendedActions":   report.RecommendedActions,
+			"requiresApproval":     report.RequiresApproval,
+			"validationStatus":     report.ValidationStatus,
+			"metricsEvidence":      report.MetricsEvidence,
 		},
 		Error:      errText,
 		ObservedAt: observedAtFromReport(report),

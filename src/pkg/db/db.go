@@ -239,3 +239,28 @@ func CloseDB() error {
 	}
 	return nil
 }
+
+// MaxEmbeddedMigrationVersion returns the highest migration version shipped with this binary.
+func MaxEmbeddedMigrationVersion() (int64, error) {
+	migrations, err := loadMigrations()
+	if err != nil {
+		return 0, err
+	}
+	var max int64
+	for _, m := range migrations {
+		if m.version > max {
+			max = m.version
+		}
+	}
+	return max, nil
+}
+
+// AppliedMigrationVersion returns the highest applied migration version in the database.
+func AppliedMigrationVersion(sqliteDB *sql.DB) (int64, error) {
+	if sqliteDB == nil {
+		return 0, fmt.Errorf("nil database")
+	}
+	var version int64
+	err := sqliteDB.QueryRow(`SELECT COALESCE(MAX(version), 0) FROM schema_migrations`).Scan(&version)
+	return version, err
+}

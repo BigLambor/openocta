@@ -45,10 +45,6 @@ var healthStore HealthSignalStore
 func InitHealthStore(stateDir string) error {
 	sqliteDB := db.GetDB()
 	if sqliteDB != nil {
-		if err := createHealthTables(sqliteDB); err != nil {
-			return fmt.Errorf("failed to create health tables: %w", err)
-		}
-
 		signalsPath := filepath.Join(stateDir, "ops", "health_signals.json")
 		snapshotsPath := filepath.Join(stateDir, "ops", "health_snapshots.json")
 
@@ -337,32 +333,6 @@ func AggregateDomainSnapshot(domain string) (DomainHealthSnapshot, error) {
 
 type sqliteHealthSignalStore struct {
 	db *sql.DB
-}
-
-func createHealthTables(db *sql.DB) error {
-	_, err := db.Exec(`
-		CREATE TABLE IF NOT EXISTS health_signals (
-			object_type TEXT,
-			object_id TEXT,
-			type TEXT,
-			source TEXT,
-			detail_json TEXT,
-			PRIMARY KEY (object_type, object_id, type, source)
-		);
-	`)
-	if err != nil {
-		return err
-	}
-	_, err = db.Exec(`
-		CREATE TABLE IF NOT EXISTS health_snapshots (
-			object_type TEXT,
-			object_id TEXT,
-			domain TEXT,
-			detail_json TEXT,
-			PRIMARY KEY (object_type, object_id)
-		);
-	`)
-	return err
 }
 
 func migrateJSONToSQLite(db *sql.DB, signalsPath, snapshotsPath string) error {

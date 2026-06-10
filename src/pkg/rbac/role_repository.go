@@ -128,6 +128,8 @@ func (r *roleRepository) SeedDefaults() error {
 		{PermToolExecuteShell, "Tool: 执行 Shell/命令", "tool"},
 		{PermToolExecuteWrite, "Tool: 写入/编辑文件", "tool"},
 		{PermToolExecuteMCP, "Tool: 执行 MCP/扩展工具", "tool"},
+		{PermSessionRead, "Session: 读取会话列表与用量", "session"},
+		{PermSessionWrite, "Session: 创建/修改/删除会话", "session"},
 	}
 	for _, perm := range permissions {
 		if err := r.EnsurePermission(perm.code, perm.name, perm.ptype); err != nil {
@@ -156,9 +158,16 @@ func (r *roleRepository) SeedDefaults() error {
 			}
 		}
 	}
-	for _, code := range []string{"menu:overview", "menu:hadoop", "menu:fi", "menu:gbase", "menu:governance", "menu:dataapps"} {
+	for _, code := range []string{"menu:overview", "menu:hadoop", "menu:fi", "menu:gbase", "menu:governance", "menu:dataapps", PermSessionRead} {
 		if err := r.EnsureRolePermission(5, code); err != nil {
 			return err
+		}
+	}
+	for _, roleID := range []int{2, 3, 4} {
+		for _, code := range []string{PermSessionRead, PermSessionWrite} {
+			if err := r.EnsureRolePermission(roleID, code); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

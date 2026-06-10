@@ -141,7 +141,7 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 	if opts.Config != nil && opts.Config.Security != nil {
 		sec := opts.Config.Security
 		sandboxRoot = sec.Sandbox
-		commandPolicy = ResolveCommandPolicy(sec)
+		commandPolicy = ApplyCommercialHighRiskDefaults(ResolveCommandPolicy(sec))
 		if sec.ApprovalQueue != nil {
 			approvalQueueCfg = sec.ApprovalQueue
 			approvalStorePath = resolveApprovalQueueStorePath(sandboxRoot, opts.Env)

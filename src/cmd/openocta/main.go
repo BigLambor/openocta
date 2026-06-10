@@ -1,37 +1,107 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
-	"strings"
 
-	"github.com/openocta/openocta/cmd/openocta/commands"
-	"github.com/openocta/openocta/pkg/agent/runtime"
-	"github.com/openocta/openocta/pkg/config"
+	"github.com/openocta/openocta/pkg/backup"
 	"github.com/openocta/openocta/pkg/paths"
+	"github.com/spf13/cobra"
 )
 
 func main() {
-	// Load .env from current working directory so config and rest of process see these vars
-	if err := config.LoadEnvFromCurrentDir(); err != nil {
-		fmt.Fprintf(os.Stderr, "openocta: warning: load .env: %v\n", err)
+	root := &cobra.Command{
+		Use:   "openocta",
+		Short: "OpenOcta gateway and operations CLI",
 	}
-	if err := config.EnsureDefaultConfig(config.DefaultEnv); err != nil {
-		fmt.Fprintf(os.Stderr, "openocta: init config: %v\n", err)
+	root.AddCommand(newBackupCmd(), newRestoreCmd(), newVerifyCmd())
+	if err := root.Execute(); err != nil {
 		os.Exit(1)
 	}
-	// Deploy: if ~/.openocta/workspace/prompt has no .md files, copy from cwd/prompt
-	stateDir := paths.ResolveStateDir(config.DefaultEnv)
-	profile := strings.TrimSpace(config.DefaultEnv("OPENOCTA_PROFILE"))
-	workspaceDir := filepath.Join(stateDir, "workspace")
-	if profile != "" && strings.ToLower(profile) != "default" {
-		workspaceDir = filepath.Join(stateDir, "workspace-"+profile)
+}
+
+func stateDirFlag(cmd *cobra.Command) string {
+	dir, _ := cmd.Flags().GetString("state-dir")
+	if dir != "" {
+		return dir
 	}
-	cwd, _ := os.Getwd()
-	promptSourceDir := filepath.Join(cwd, "prompt")
-	if err := runtime.EnsureWorkspacePrompts(workspaceDir, promptSourceDir); err != nil {
-		fmt.Fprintf(os.Stderr, "openocta: warning: ensure workspace prompts: %v\n", err)
+	return paths.ResolveStateDir(os.Getenv)
+}
+
+func newBackupCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "backup",
+		Short: "Create an online backup of openocta.db and attachment directories",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			output, _ := cmd.Flags().GetString("output")
+			if output == "" {
+				return fmt.Errorf("--output is required")
+			}
+			manifest, err := backup.Create(backup.Options{
+				StateDir:   stateDirFlag(cmd),
+				OutputPath: output,
+			})
+			if err != nil {
+				return err
+			}
+			b, _ := json.MarshalIndent(manifest, "", "  ")
+			fmt.Fprintf(os.Stdout, "backup written to %s\n%s\n", output, string(b))
+			return nil
+		},
 	}
-	commands.Execute()
+	cmd.Flags().String("state-dir", "", "State directory (default: OPENOCTA_STATE_DIR or ~/.openocta)")
+	cmd.Flags().StringP("output", "o", "", "Output .tar.gz path")
+	return cmd
+}
+
+func newRestoreCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "restore",
+		Short: "Restore openocta.db and attachments from a backup archive",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			input, _ := cmd.Flags().GetString("input")
+			if input == "" {
+				return fmt.Errorf("--input is required")
+			}
+			force, _ := cmd.Flags().GetBool("force")
+			manifest, err := backup.Restore(backup.RestoreOptions{
+				ArchivePath: input,
+				StateDir:    stateDirFlag(cmd),
+				Force:       force,
+			})
+			if err != nil {
+				return err
+			}
+			b, _ := json.MarshalIndent(manifest, "", "  ")
+			fmt.Fprintf(os.Stdout, "restore completed into %s\n%s\n", stateDirFlag(cmd), string(b))
+			return nil
+		},
+	}
+	cmd.Flags().String("state-dir", "", "State directory (default: OPENOCTA_STATE_DIR or ~/.openocta)")
+	cmd.Flags().StringP("input", "i", "", "Backup .tar.gz path")
+	cmd.Flags().Bool("force", false, "Overwrite existing state directory contents")
+	return cmd
+}
+
+func newVerifyCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "backup-verify",
+		Short: "Verify backup archive checksums without restoring",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			input, _ := cmd.Flags().GetString("input")
+			if input == "" {
+				return fmt.Errorf("--input is required")
+			}
+			manifest, err := backup.VerifyArchive(input)
+			if err != nil {
+				return err
+			}
+			b, _ := json.MarshalIndent(manifest, "", "  ")
+			fmt.Fprintf(os.Stdout, "backup verified: %s\n%s\n", input, string(b))
+			return nil
+		},
+	}
+	cmd.Flags().StringP("input", "i", "", "Backup .tar.gz path")
+	return cmd
 }

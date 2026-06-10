@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/openocta/openocta/pkg/gateway/protocol"
+	"github.com/openocta/openocta/pkg/rbac"
 )
 
 // HealthSnapshot is a minimal health payload (compatible with protocol).
@@ -216,13 +217,19 @@ func NewRegistry(ctx *Context) Registry {
 		"web.login.wait":             {Handler: WebLoginStubHandler},
 	}
 	if ctx != nil && ctx.CronService != nil {
-		r["cron.list"] = MethodDescriptor{Handler: CronListHandler, RequiredPermission: "menu:config"}
+		r["cron.list"] = MethodDescriptor{Handler: CronListHandler}
 		r["cron.status"] = MethodDescriptor{Handler: CronStatusHandler}
-		r["cron.add"] = MethodDescriptor{Handler: CronAddHandler, RequiredPermission: "menu:config"}
-		r["cron.remove"] = MethodDescriptor{Handler: CronRemoveHandler, RequiredPermission: "menu:config"}
-		r["cron.update"] = MethodDescriptor{Handler: CronUpdateHandler, RequiredPermission: "menu:config"}
-		r["cron.run"] = MethodDescriptor{Handler: CronRunHandler, RequiredPermission: "menu:config"}
+		r["cron.add"] = MethodDescriptor{Handler: CronAddHandler}
+		r["cron.remove"] = MethodDescriptor{Handler: CronRemoveHandler}
+		r["cron.update"] = MethodDescriptor{Handler: CronUpdateHandler}
+		r["cron.run"] = MethodDescriptor{Handler: CronRunHandler}
 		r["cron.runs"] = MethodDescriptor{Handler: CronRunsHandler}
+	}
+	for method, perm := range rbac.MethodPermissions {
+		if desc, ok := r[method]; ok {
+			desc.RequiredPermission = perm
+			r[method] = desc
+		}
 	}
 	return r
 }

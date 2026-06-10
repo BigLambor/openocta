@@ -22,8 +22,16 @@ func formatApprovalCommand(toolName, target string) string {
 	return fmt.Sprintf("%s(%s)", name, target)
 }
 
-// approvalQueueMiddleware blocks bash execution until the OpenOcta approval queue allows it
-// (agentsdk-go v2 移除了内置 PermissionResolver / ApprovalQueue 挂载点).
+func approvalTargetFromToolCall(call model.ToolCall) string {
+	for _, key := range []string{"command", "path", "file_path", "target", "content"} {
+		if v, ok := call.Arguments[key].(string); ok && strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
+}
+
+// approvalQueueMiddleware blocks high-risk tool execution until the approval queue allows it.
 func approvalQueueMiddleware(q *octasecurity.ApprovalQueue, blockWait bool) middleware.Middleware {
 	return middleware.Funcs{
 		Identifier: "openocta-approval-queue",
@@ -35,18 +43,19 @@ func approvalQueueMiddleware(q *octasecurity.ApprovalQueue, blockWait bool) midd
 			if !ok {
 				return nil
 			}
-			if !strings.EqualFold(strings.TrimSpace(call.Name), "bash") && !strings.EqualFold(strings.TrimSpace(call.Name), "windows_exec_cmd") {
+			toolName := strings.TrimSpace(call.Name)
+			if !octasecurity.ToolRequiresApproval(toolName) {
 				return nil
 			}
-			cmd, _ := call.Arguments["command"].(string)
-			if strings.TrimSpace(cmd) == "" {
+			target := approvalTargetFromToolCall(call)
+			if target == "" && !strings.EqualFold(toolName, "write") && !strings.EqualFold(toolName, "edit") {
 				return nil
 			}
 			sid, _ := st.Values["session_id"].(string)
 			if strings.TrimSpace(sid) == "" {
 				return fmt.Errorf("openocta: approval queue requires session_id")
 			}
-			line := formatApprovalCommand("Bash", strings.TrimSpace(cmd))
+			line := formatApprovalCommand(toolName, target)
 			rec, err := q.Request(sid, line, nil)
 			if err != nil {
 				return err
@@ -55,7 +64,7 @@ func approvalQueueMiddleware(q *octasecurity.ApprovalQueue, blockWait bool) midd
 				return nil
 			}
 			if !blockWait {
-				return fmt.Errorf("bash approval required (requestId=%s); approve via gateway", rec.ID)
+				return fmt.Errorf("%s approval required (requestId=%s); approve via gateway", toolName, rec.ID)
 			}
 			resolved, err := q.Wait(ctx, rec.ID)
 			if err != nil {
@@ -69,9 +78,9 @@ func approvalQueueMiddleware(q *octasecurity.ApprovalQueue, blockWait bool) midd
 				if reason == "" {
 					reason = "denied"
 				}
-				return fmt.Errorf("bash execution denied: %s", reason)
+				return fmt.Errorf("%s execution denied: %s", toolName, reason)
 			default:
-				return fmt.Errorf("bash approval left pending")
+				return fmt.Errorf("%s approval left pending", toolName)
 			}
 		},
 	}

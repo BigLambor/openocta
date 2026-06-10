@@ -45,6 +45,7 @@ func TestInitDBRunsMigrations(t *testing.T) {
 		"role_permissions",
 		"user_tokens",
 		"job_schedules",
+		"inspection_reports",
 	} {
 		var count int
 		if err := sqliteDB.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?`, table).Scan(&count); err != nil {

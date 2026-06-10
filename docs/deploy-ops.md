@@ -15,6 +15,25 @@
 | `OPS_CMDB_SYNC_URL` | CMDB 导出 HTTP GET 地址（资产页「同步 CMDB」） |
 | `OPS_CMDB_SYNC_TOKEN` | 可选，访问 CMDB 时的 Bearer Token |
 
+## 备份与恢复（C4-11 / C4-12）
+
+```bash
+cd src
+go build -o openocta ./cmd/openocta
+
+# 在线备份（SQLite VACUUM INTO + 附件目录 tar.gz）
+export OPENOCTA_STATE_DIR=/var/lib/openocta
+./openocta backup -o /var/backups/openocta-$(date +%Y%m%d).tar.gz
+
+# 校验备份包
+./openocta backup-verify -i /var/backups/openocta-20260610.tar.gz
+
+# 恢复到空目录（含 schema 版本兼容检查）
+./openocta restore -i /var/backups/openocta-20260610.tar.gz --state-dir /var/lib/openocta-new --force
+```
+
+备份包包含：`openocta.db`、`openocta.json`、`sessions/`、`ops/`、`credentials/`、`workspace/`、`employees/` 及 `manifest.json`（SHA-256 校验）。
+
 ## 启动
 
 ```bash

@@ -13,11 +13,11 @@
 
 | 阶段 | 目标 | 建议周期 | 完成状态 |
 |------|------|----------|----------|
-| Phase 0 | 商用化基线冻结，停止新增主业务 JSON store，关闭生产 demo seed | 1-2 周 | 已完成 |
-| Phase 1 | 统一数据底座，核心资产、告警、任务、Cron 入库 | 3-5 周 | 部分完成（约 75%） |
-| Phase 2 | 任务、审计、Agent 结构化闭环 | 4-6 周 | 部分完成（约 50%） |
-| Phase 3 | 权限、安全、企业认证 | 3-5 周 | 部分完成（身份认证 P0 已完成） |
-| Phase 4 | 企业部署、可运维、备份恢复 | 3-6 周 | 部分完成 |
+| Phase 0 | 商用化基线冻结，停止新增主业务 JSON store，关闭生产 demo seed | 1-2 周 | 部分完成（6/7，缺 C0-6 版本边界） |
+| Phase 1 | 统一数据底座，核心资产、告警、任务、Cron 入库 | 3-5 周 | 部分完成（约 91%） |
+| Phase 2 | 任务、审计、Agent 结构化闭环 | 4-6 周 | 部分完成（约 76%） |
+| Phase 3 | 权限、安全、企业认证 | 3-5 周 | 部分完成（约 57%） |
+| Phase 4 | 企业部署、可运维、备份恢复 | 3-6 周 | 部分完成（约 35%） |
 | Phase 5 | 商业能力、多租户、插件市场、License | 持续迭代 | 未开始 |
 
 ## 2. Phase 0：商用化基线冻结
@@ -44,7 +44,7 @@
 |------|------|--------|------|--------|----------|----------|
 | C1-1 | 建立 `schema_migrations` 表 | P0 | C0-2 | `pkg/db` migration runner 与首个 migration | 启动时执行迁移；重复启动幂等；迁移失败服务启动失败 | 已完成 |
 | C1-2 | 新增 `db/migrations` 目录 | P0 | C1-1 | [`pkg/db/migrations`](../src/pkg/db/migrations) SQL migration 文件结构 | migration 命名、顺序、回滚策略在 README 中说明 | 已完成 |
-| C1-3 | 统一 DB 初始化入口 | P0 | C1-1 | `pkg/db` 初始化流程重构 | `openocta.db` 已通过 migration 管理 foundation 与商用核心表；模块级建表仍作为少量兼容 guard，待 repository 迁移时退役 | 部分完成 |
+| C1-3 | 统一 DB 初始化入口 | P0 | C1-1 | `pkg/db` 初始化流程重构 | `openocta.db` 已通过 migration 管理 foundation 与商用核心表；health_store 模块级建表 guard 已退役 | 已完成 |
 | C1-4 | 设计 SQLite / Postgres 方言边界 | P1 | C1-1 | repository SQL 方言说明 | 新 repository 不依赖 SQLite 特有行为；ID 不暴露自增主键 | 未开始 |
 
 ### 3.2 RBAC 数据收敛
@@ -118,9 +118,9 @@
 
 | 编号 | 任务 | 优先级 | 依赖 | 交付物 | 验收标准 | 完成状态 |
 |------|------|--------|------|--------|----------|----------|
-| C2-10 | 定义 InspectionReport JSON schema | P0 | C1-12 | schema 文档 + Go struct | 包含 status、score、confidence、summary、evidence、risks、recommendedActions、requiresApproval | 部分完成 |
+| C2-10 | 定义 InspectionReport JSON schema | P0 | C1-12 | schema 文档 + Go struct | 包含 status、score、confidence、summary、evidence、risks、recommendedActions、requiresApproval | 已完成 |
 | C2-11 | Agent 输出结构化校验 | P0 | C2-10 | parser/validator | 非法结构化输出进入 failed/degraded，不静默正则猜分 | 已完成 |
-| C2-12 | 巡检结果写入 Facts | P0 | C2-10 | inspection_reports + health_signals 写入路径 | UI 高频读走 L3 Facts；报告可追溯 evidence | 部分完成 |
+| C2-12 | 巡检结果写入 Facts | P0 | C2-10 | inspection_reports + health_signals 写入路径 | UI 高频读走 L3 Facts；报告可追溯 evidence | 已完成 |
 | C2-13 | 退役自然语言正则抽分 | P1 | C2-11 | inspection parsing 重构 | 商用路径不依赖 transcript 文本抽分；保留兼容告警日志 | 未开始 |
 
 ### 4.4 审批与处置闭环
@@ -128,7 +128,7 @@
 | 编号 | 任务 | 优先级 | 依赖 | 交付物 | 验收标准 | 完成状态 |
 |------|------|--------|------|--------|----------|----------|
 | C2-14 | 审批队列持久化 | P0 | C1-1 | `approvals`、`approval_steps` migration | DB schema 已具备；运行时从 JSON queue 切换到 DB repository | 已完成 |
-| C2-15 | 高风险动作策略 | P0 | C2-14 | policy 配置 | 执行命令、改配置、重启、回滚、扩容默认需要审批 | 部分完成 |
+| C2-15 | 高风险动作策略 | P0 | C2-14 | policy 配置 | 执行命令、改配置、重启、回滚、扩容默认需要审批 | 已完成 |
 | C2-16 | 处置动作记录 | P1 | C2-14 | `remediation_actions`、`rollback_records` | 每个处置动作有操作者、审批、输入、输出、回滚信息 | 未开始 |
 | C2-17 | UI 下钻执行链路 | P1 | C2-1 | run detail 页面或面板 | 从任务/告警/巡检可查看 steps、tools、evidence、approval、audit | 部分完成（缺 approval/evidence/audit 展示） |
 
@@ -151,8 +151,8 @@
 | 编号 | 任务 | 优先级 | 依赖 | 交付物 | 验收标准 | 完成状态 |
 |------|------|--------|------|--------|----------|----------|
 | C3-6 | 定义 action/object/scope 权限模型 | P0 | C0-1 | 权限模型文档 + 常量 | 覆盖 read/write/execute/approve/admin 与 domain/asset/job/tool/secret | 部分完成 |
-| C3-7 | REST API 权限统一 | P0 | C3-6 | middleware + route policy | Ops、RBAC、config、skills、channels、jobs API 均有权限声明 | 部分完成 |
-| C3-8 | WebSocket method 权限统一 | P0 | C3-6 | method policy registry | `sessions.*`、`cron.*`、`config.*`、`skills.*` 等方法权限一致 | 部分完成 |
+| C3-7 | REST API 权限统一 | P0 | C3-6 | middleware + route policy | Ops、RBAC、config、skills、channels、jobs API 均有权限声明 | 已完成 |
+| C3-8 | WebSocket method 权限统一 | P0 | C3-6 | method policy registry | `sessions.*`、`cron.*`、`config.*`、`skills.*` 等方法权限一致 | 已完成 |
 | C3-9 | Tool 执行权限 | P0 | C3-6 | tool policy gate | 用户无权限时 Agent 不能绕过 UI 直接执行高风险 tool | 已完成 |
 | C3-10 | 资产域权限过滤 | P1 | C3-6 | domain/asset scope filter | 非 admin 只能看到授权 domain/asset 的告警、任务、巡检、会话 | 部分完成 |
 
@@ -193,8 +193,8 @@
 
 | 编号 | 任务 | 优先级 | 依赖 | 交付物 | 验收标准 | 完成状态 |
 |------|------|--------|------|--------|----------|----------|
-| C4-11 | SQLite 备份命令 | P0 | C1-1 | `openocta backup` CLI | 在线备份 DB 和附件目录；产物可校验 | 未开始 |
-| C4-12 | SQLite 恢复命令 | P0 | C4-11 | `openocta restore` CLI | 可在空环境恢复并启动；恢复前有版本兼容检查 | 未开始 |
+| C4-11 | SQLite 备份命令 | P0 | C1-1 | `openocta backup` CLI | 在线备份 DB 和附件目录；产物可校验 | 已完成 |
+| C4-12 | SQLite 恢复命令 | P0 | C4-11 | `openocta restore` CLI | 可在空环境恢复并启动；恢复前有版本兼容检查 | 已完成 |
 | C4-13 | 升级前自动备份 | P1 | C4-11 | upgrade hook | migration 前自动创建恢复点；失败可回滚 | 未开始 |
 | C4-14 | Postgres 备份恢复文档 | P1 | C4-4 | ops doc | 明确 pg_dump/PITR 推荐方式和恢复演练步骤 | 未开始 |
 
@@ -225,10 +225,10 @@
 | D-6 | 部分 demo seed 默认写入 | 污染生产数据 | Phase 0 | 已完成 |
 | D-7 | 密码哈希强度不足 | 安全审计风险 | Phase 3 | 已完成（C3-2 Argon2id + 登录后升级） |
 | D-8 | token 存在 localStorage | XSS 风险 | Phase 3 | 已完成（C3-3 HttpOnly Cookie） |
-| D-9 | Agent 结果仍有文本解析路径 | 结果不稳定、不可验证 | Phase 2 | 部分完成 |
-| D-10 | 工具/MCP 调用审计不统一 | 高风险动作不可追溯 | Phase 2 | 部分完成（C2-8/C2-9 已埋点；非全路径覆盖） |
+| D-9 | Agent 结果仍有文本解析路径 | 结果不稳定、不可验证 | Phase 2 | 部分完成（C2-10/11/12 已落地；C2-13 正则抽分退役待做） |
+| D-10 | 工具/MCP 调用审计不统一 | 高风险动作不可追溯 | Phase 2 | 部分完成（C2-8/C2-9/C2-15 已埋点；C2-16 处置记录待做） |
 | D-11 | 配置与密钥混用 env/json | 凭据泄漏风险 | Phase 3 | 未开始 |
-| D-12 | 缺备份恢复命令 | 生产不可运维 | Phase 4 | 未开始 |
+| D-12 | 缺备份恢复命令 | 生产不可运维 | Phase 4 | 已完成（C4-11/12：`openocta backup`/`restore` + `backup_test` round-trip） |
 
 ## 9. 最小商用版本任务范围
 
@@ -238,10 +238,10 @@
 |------|----------|
 | 数据底座 | C1-1 到 C1-3、C1-8 到 C1-17、C1-21 到 C1-23 |
 | demo 风险 | C0-4、C1-15 |
-| 任务闭环 | C2-1 到 C2-4、C2-10 到 C2-12、C2-14 到 C2-15 |
-| 安全基线 | C3-1～C3-5、C3-9 已完成；C3-6～C3-7、C3-13～C3-14 进行中 |
-| 运维基线 | C4-1、C4-2、C4-6 到 C4-8、C4-11 到 C4-12 |
-| 测试门禁 | C1-7、C1-20、权限越权测试、E2E 闭环测试 |
+| 任务闭环 | C2-1 到 C2-4、C2-10 到 C2-15 已完成；C2-1 IM/Webhook 挂接待补 |
+| 安全基线 | C3-1～C3-5、C3-7～C3-9 已完成；C3-6/10/13/14 进行中 |
+| 运维基线 | C4-11/12 已完成；C4-1/2/6/8 进行中；C4-7 `/metrics` 未开始 |
+| 测试门禁 | C1-7、备份恢复单测已完成；C1-20 并发测试、域过滤越权、E2E 闭环进行中 |
 
 最小商用版本不建议纳入：
 
@@ -257,13 +257,13 @@
 
 | 测试项 | 覆盖任务 | 验收标准 | 完成状态 |
 |--------|----------|----------|----------|
-| JSON 迁移测试 | C1-10、C1-14、C1-17、C1-19 | 旧数据自动导入、备份、幂等、无重复 | 部分完成 |
-| DB 并发写测试 | C1-9、C1-13、C1-20 | 并发创建/更新/删除无数据丢失 | 未开始 |
-| 权限越权测试 | C3-7、C3-8、C3-9、C3-10 | 非授权用户无法读写、执行、审批越权资源 | 部分完成（C3-9：viewer chat.send/tool RBAC 单测） |
+| JSON 迁移测试 | C1-10、C1-14、C1-17、C1-19、C1-21/22 | 旧数据自动导入、备份、幂等、无重复 | 部分完成（集群/告警/任务/Cron/Session 有单测；缺统一 migration 集成套件） |
+| DB 并发写测试 | C1-9、C1-13、C1-20 | 并发创建/更新/删除无数据丢失 | 部分完成（Cron/Session 有并发测；集群/告警 repository 并发测未覆盖） |
+| 权限越权测试 | C3-7、C3-8、C3-9、C3-10 | 非授权用户无法读写、执行、审批越权资源 | 部分完成（REST/WS route policy + viewer chat.send/config.get 集成测；域过滤 C3-10 待补） |
 | 登录安全测试 | C3-1 到 C3-5 | 默认账号不可用、失败限制、token 吊销生效 | 已完成（含 lockout/logout-all 单测；UI 未接 logout-all） |
-| Agent 执行链路测试 | C2-1 到 C2-12 | 一次巡检可追溯 run、steps、tool、model、evidence、facts | 部分完成（C2-11 校验已落地；facts/evidence 结构化未完全达标） |
-| 审批测试 | C2-14 到 C2-16 | 高风险动作等待审批；拒绝后不执行；重启不丢审批 | 部分完成（C2-14：DB 持久化 + JSON 一次性导入） |
-| 备份恢复测试 | C4-11、C4-12 | 备份包可恢复到空环境并通过 readyz | 未开始 |
+| Agent 执行链路测试 | C2-1 到 C2-12 | 一次巡检可追溯 run、steps、tool、model、evidence、facts | 部分完成（run/steps/tool/model + inspection_reports/health_signals 已写入；UI evidence 展示待 C2-17） |
+| 审批测试 | C2-14 到 C2-16 | 高风险动作等待审批；拒绝后不执行；重启不丢审批 | 部分完成（C2-14/15：DB 持久化 + 默认 ask 策略 + write/bash 审批；C2-16 处置记录未做） |
+| 备份恢复测试 | C4-11、C4-12 | 备份包可恢复到空环境并通过 readyz | 部分完成（`pkg/backup` round-trip 单测通过；缺与 gateway `/_ready` 联调 E2E） |
 | E2E 商用闭环 | MVP 范围 | 登录 -> 建资产 -> 接告警 -> AI 诊断 -> 审批 -> 处置 -> 审计 -> 报表 | 部分完成 |
 
 ## 11. 当前状态判断
@@ -271,32 +271,58 @@
 基于当前代码和文档观察（更新于 2026-06-10），项目处于：
 
 ```text
-Phase 1 数据底座收敛中（约 75%）
-  -> 已完成：迁移框架、RBAC 合并、集群/告警/任务/Cron DB 主路径、demo seed 关闭
-  -> 进行中：模块级建表 guard 退役（C1-3）
-  -> 已完成：Session 结构化入库（C1-21/22）、transcript 归档边界文档（C1-23）
-  -> 未开始：Postgres 方言验证（C1-4）
+Phase 0 商用化基线（约 86%）
+  -> 已完成：C0-1～C0-5、C0-7
+  -> 未开始：C0-6 版本边界（需产品决策）
 
-Phase 2 任务/审计闭环（约 50%）
-  -> 已完成：JobRun service、Cron/巡检/告警诊断挂接、tool/model 埋点与脱敏
-  -> 进行中：结构化巡检报告（C2-10/12）、高风险动作策略（C2-15）、UI 下钻深化（C2-17）
-  -> 已完成：审批队列 DB 持久化（C2-14）
-  -> 已完成：Agent 输出结构化校验（C2-11）
-  -> 未开始：处置动作记录（C2-16）；正则抽分退役（C2-13）
+Phase 1 数据底座（约 91%）
+  -> 已完成：迁移框架（C1-1/2/3）、RBAC（C1-5～7）、集群/告警/任务/Cron/Session 全链路入库
+  -> 部分完成：C1-20 Cron 并发测试
+  -> 未开始：C1-4 Postgres 方言边界
 
-Phase 3 权限与安全（约 50%）
-  -> 已完成：身份认证 P0 全项（C3-1 到 C3-5）、Tool 执行 RBAC gate（C3-9）
-  -> 进行中：REST/WS 权限统一（C3-7/8）、域过滤（C3-10）、Secret/配置审计 schema（C3-13/14）
-  -> 未开始：OIDC/LDAP（C3-11/12）
+Phase 2 任务/审计闭环（约 76%）
+  -> 已完成：JobRun（C2-2～9）、结构化巡检（C2-10～12/11）、审批 DB + 高风险策略（C2-14/15）
+  -> 部分完成：C2-1（IM/Webhook 待挂接）、C2-17（UI 下钻缺 approval/evidence）
+  -> 未开始：C2-13 正则抽分退役、C2-16 处置动作记录
 
-Phase 4 部署运维（约 25%）
-  -> 进行中：systemd/Compose/healthz/日志雏形
-  -> 未开始：backup/restore CLI（C4-11/12，MVP 硬门槛）、/metrics（C4-7）
+Phase 3 权限与安全（约 57%）
+  -> 已完成：身份认证 P0（C3-1～5）、REST/WS 权限统一（C3-7/8）、Tool gate（C3-9）
+  -> 部分完成：C3-6 权限模型文档、C3-10 域过滤、C3-13/14 Secret/配置审计
+  -> 未开始：C3-11/12 OIDC/LDAP
+
+Phase 4 部署运维（约 35%）
+  -> 已完成：backup/restore CLI（C4-11/12）
+  -> 部分完成：systemd/Compose/healthz/日志/trace 雏形（C4-1/2/6/8/9）
+  -> 未开始：/metrics（C4-7）、Helm/HA/分布式锁（C4-3～5）、升级自动备份（C4-13）
+
+Phase 5 商业能力：未开始（C5-1～C5-8 全项）
 ```
 
-**任务计数（C0～C5，共 86 项）**：已完成 42 · 部分完成 19 · 未开始 25
+**任务计数（C0～C5，共 83 项编号任务）**：已完成 **50** · 部分完成 **12** · 未开始 **21**
 
-### 11.1 近期完成项（2026-06-10）
+| 阶段 | 已完成 | 部分完成 | 未开始 |
+|------|--------|----------|--------|
+| Phase 0（7） | 6 | 0 | 1 |
+| Phase 1（23） | 21 | 1 | 1 |
+| Phase 2（17） | 13 | 2 | 2 |
+| Phase 3（14） | 8 | 4 | 2 |
+| Phase 4（14） | 2 | 5 | 7 |
+| Phase 5（8） | 0 | 0 | 8 |
+
+### 11.1 近期完成项
+
+**2026-06-10 第二批（MVP 硬门槛补齐）**
+
+| 任务 | 交付 | 质量评估 |
+|------|------|----------|
+| C1-3 | 统一 DB 初始化；`health_store` 模块级建表 guard 退役 | 良好：health 表仅由 migration 管理 |
+| C2-10 | [inspection-report-schema.md](./inspection-report-schema.md) + Go struct | 良好：字段与 validator 对齐 |
+| C2-12 | `009_inspection_reports.sql` + `PersistInspectionFacts` 双写 Facts | 良好：含 `inspection_facts_test` |
+| C2-15 | 商用默认 ask 策略 + write/bash 审批 middleware | 良好：含 `high_risk_policy_test` |
+| C3-7/8 | `route_policy.go` REST/WS 中央权限表 + dispatch 统一校验 | 良好：含 `route_policy_test`、`security_test` |
+| C4-11/12 | `cmd/openocta backup/restore` + `pkg/backup` | 良好：含 round-trip 单测；见 [deploy-ops.md](./deploy-ops.md) |
+
+**2026-06-10 第一批（安全与数据底座）**
 
 | 任务 | 交付 | 质量评估 |
 |------|------|----------|
@@ -307,26 +333,26 @@ Phase 4 部署运维（约 25%）
 | C2-2 ~ C2-9 / C2-17 | JobRun 闭环 + 告警/Cron/巡检挂接 + 实时 tool/LLM 埋点 + UI 下钻 | 良好：chat 流式 tool 事件写 run_steps/tool_invocations；SummarizePayload 脱敏；model_usage 记录 LLM token |
 | C2-11 | InspectionReport 校验器 + 商用路径禁用静默正则抽分 | 良好：含 `inspection_validator_test`；legacy 需 `OPENOCTA_INSPECTION_ALLOW_LEGACY_SCORE=1` |
 | C2-14 | 审批队列 DB repository + JSON 一次性导入 + approval_steps | 良好：含 `approval_repository_test`；回退 `OPENOCTA_APPROVAL_JSON_STORE=1` |
-| C1-21 ~ C1-22 | sessions_v1 规范化表 + repository + legacy/JSON 导入 | 良好：含 `repository_test`、并发/隔离测试；JSON 仅 fallback |
-| C1-23 | Transcript 归档边界策略文档 | 良好：明确 DB 列表主路径 vs JSONL 原文归档；见 `session-transcript-strategy.md` |
-| C1-16 ~ C1-17 | `tasks` 表 + `task_repository` + `InitTaskStore` | 良好：List/Load/Save/Delete 走 DB；legacy JSON 导入后备份至 `employee_tasks_backup/<ts>/`；含迁移幂等与重启测试 |
-| C1-5 ~ C1-7 | RBAC 合并至 `openocta.db` + repository 封装 + legacy 迁移 + 四类迁移/in-memory 测试 | 良好：service 经 User/Role/Token repository 访问数据；memory repo 支持无 DB 单测 |
-| C0-1 ~ C0-5、C0-7 | 领域对象、schema v1、准入规则、迁移矩阵、发布门禁 | 文档齐全，可作为后续 PR 审查依据 |
+| C1-21 ~ C1-23 | sessions_v1 + repository + transcript 策略文档 | 良好：含 `repository_test`；JSONL 仍作 transcript 归档 |
+| C1-16 ~ C1-17 | `tasks` 表 + `task_repository` | 良好：legacy JSON 导入后备份；含迁移幂等测试 |
+| C1-5 ~ C1-7 | RBAC 合并 + repository + legacy 迁移测试 | 良好：四类迁移场景 + memory repo |
+| C0-1 ~ C0-5、C0-7 | 领域对象、schema v1、准入规则、迁移矩阵、发布门禁 | 文档齐全 |
 
 ### 11.2 已知质量缺口
 
 1. **Repository 单测不足**：集群/告警/任务测试主要在 service 层，缺少独立 repository 单元测试。
 2. **告警读写不对称**：写入规范化列 + `detail_json`，读取仅反序列化 `detail_json`。
-3. **Cron 双轨**：已收敛至规范化 `jobs` + `job_schedules`；`cron_jobs` blob 仅作一次性导入来源。
-4. **Transcript 全文仍走 JSONL**：元数据已入库；消息级 DB 与冷归档待 Phase 2（见 [session-transcript-strategy.md](./session-transcript-strategy.md)）。
-5. **JobRun 闭环**：run/steps/tool 已可下钻；审批步骤、audit 事件与 evidence 附件展示仍待补（C2-17 深化）。
-6. **授权模型未完成**：REST/WS 全路由策略（C3-7/8）仍是安全基线剩余 P0；Tool gate（C3-9）已落地。
-7. **运维基线缺失**：无 `openocta backup`/`restore` CLI，生产试点风险最高（C4-11/12）。
+3. **Cron legacy blob**：`cron_jobs` 表仅作一次性导入来源，规范化表为 `jobs` + `job_schedules`。
+4. **Transcript 全文仍走 JSONL**：元数据已入库；消息级 DB 与冷归档待后续（见 [session-transcript-strategy.md](./session-transcript-strategy.md)）。
+5. **JobRun UI 下钻不完整**：run/steps/tool 可查看；approval 步骤、audit 事件与 evidence 附件展示待补（C2-17）。
+6. **域权限与 Secret/配置审计**：C3-10 域过滤、C3-13/14 API 接入未完成。
+7. **可观测性缺口**：`/metrics`（C4-7）、readyz 深度检查（C4-6）、升级前自动备份（C4-13）未做。
+8. **MVP 测试门禁未闭环**：备份恢复缺 gateway 联调 E2E；DB 并发写、域越权、商用 E2E 仍待补。
 
 ### 11.3 最建议优先推进的 5 个任务
 
-1. **C4-11 ~ C4-12**：`openocta backup` / `restore` CLI（MVP 运维硬门槛）。
-2. **C2-15**：高风险动作策略补全（配置变更/重启/回滚默认需审批）。
-3. **C3-7 ~ C3-8**：REST/WS 全路由权限统一（安全基线剩余 P0）。
-4. **C2-10 / C2-12**：InspectionReport schema 文档化 + Facts 写入路径补全。
-5. **C4-11 ~ C4-12**：`openocta backup` / `restore` CLI（MVP 运维硬门槛）。
+1. **C4-7**：`/metrics` Prometheus 指标（运维可观测 P0）。
+2. **C2-13**：商用路径完全退役 transcript 正则抽分。
+3. **C3-10**：资产域权限过滤（告警/任务/巡检按 domain 隔离）。
+4. **C2-16 + C2-17**：处置动作记录 + UI 下钻补全 approval/evidence/audit。
+5. **C4-6**：`/readyz` 深度检查（DB、migration、queue、connector）并与备份恢复 E2E 联调。
