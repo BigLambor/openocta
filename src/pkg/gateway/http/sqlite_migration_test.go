@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -16,6 +17,10 @@ import (
 
 func TestSQLiteMigration(t *testing.T) {
 	tempDir := t.TempDir()
+	t.Cleanup(func() {
+		session.ResetSessionRepositoryForTest()
+		_ = db.CloseDB()
+	})
 
 	// 1. Prepare JSON files for migration
 	// A. Prepare ops health signals and snapshots JSON
@@ -100,13 +105,18 @@ func TestSQLiteMigration(t *testing.T) {
 		t.Errorf("Expected cron jobs to be migrated, got list=%+v, err=%v", jobs, err)
 	}
 	var jobCount int
-	err = sqliteDB.QueryRow("SELECT COUNT(*) FROM cron_jobs WHERE id = 'job-test-1'").Scan(&jobCount)
+	err = sqliteDB.QueryRow("SELECT COUNT(*) FROM jobs WHERE id = 'job-test-1' AND kind = 'cron'").Scan(&jobCount)
 	if err != nil || jobCount != 1 {
-		t.Errorf("Expected test job to be in DB, got count=%d, err=%v", jobCount, err)
+		t.Errorf("Expected test job in normalized jobs table, got count=%d, err=%v", jobCount, err)
+	}
+	var scheduleCount int
+	err = sqliteDB.QueryRow("SELECT COUNT(*) FROM job_schedules WHERE job_id = 'job-test-1'").Scan(&scheduleCount)
+	if err != nil || scheduleCount != 1 {
+		t.Errorf("Expected test job schedule row, got count=%d, err=%v", scheduleCount, err)
 	}
 	// D. Verify sessions
 	var sessCount int
-	err = sqliteDB.QueryRow("SELECT COUNT(*) FROM sessions WHERE session_key = 'session-key-1'").Scan(&sessCount)
+	err = sqliteDB.QueryRow("SELECT COUNT(*) FROM sessions_v1 WHERE session_key = 'session-key-1'").Scan(&sessCount)
 	if err != nil || sessCount != 1 {
 		t.Errorf("Expected test session to be in DB, got count=%d, err=%v", sessCount, err)
 	}
@@ -121,19 +131,49 @@ func TestSQLiteMigration(t *testing.T) {
 	if _, err := os.Stat(jobsPath); !os.IsNotExist(err) {
 		t.Errorf("Expected jobs JSON to be renamed/deleted, but it exists")
 	}
-	if _, err := os.Stat(jobsPath + ".bak"); err != nil {
-		t.Errorf("Expected jobs JSON .bak backup file to exist")
+	if !hasCronJSONBackup(filepath.Dir(jobsPath)) {
+		t.Errorf("Expected jobs JSON backup with timestamp suffix")
 	}
 	if _, err := os.Stat(sessionsPath); !os.IsNotExist(err) {
-		t.Errorf("Expected sessions JSON to be renamed/deleted, but it exists")
+		t.Errorf("Expected sessions JSON to be removed after import, but it exists")
 	}
-	if _, err := os.Stat(sessionsPath + ".bak"); err != nil {
-		t.Errorf("Expected sessions JSON .bak backup file to exist")
+	if !hasSessionJSONBackup(filepath.Dir(sessionsPath)) {
+		t.Errorf("Expected sessions JSON backup with timestamp suffix")
 	}
+}
+
+func hasSessionJSONBackup(dir string) bool {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), "sessions.json.bak.") {
+			return true
+		}
+	}
+	return false
+}
+
+func hasCronJSONBackup(dir string) bool {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), "jobs.json.bak.") {
+			return true
+		}
+	}
+	return false
 }
 
 func TestSQLiteSessionConcurrentWrite(t *testing.T) {
 	tempDir := t.TempDir()
+	t.Cleanup(func() {
+		session.ResetSessionRepositoryForTest()
+		_ = db.CloseDB()
+	})
 	if err := db.InitDB(tempDir); err != nil {
 		t.Fatalf("db.InitDB: %v", err)
 	}

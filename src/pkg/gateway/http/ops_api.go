@@ -1,12 +1,16 @@
 package http
 
 import (
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/openocta/openocta/pkg/gateway/handlers"
+	"github.com/openocta/openocta/pkg/jobrun"
 	"github.com/openocta/openocta/pkg/ops"
 	"github.com/openocta/openocta/pkg/rbac"
 )
@@ -503,6 +507,72 @@ func (s *Server) handleOpsInspectionIMStatus(w http.ResponseWriter, r *http.Requ
 	}
 	enabled := listEnabledIMChannels(s.ctx)
 	opsWriteJSON(w, http.StatusOK, ops.InspectionIMStatusFromChannels(enabled))
+}
+
+func (s *Server) handleOpsListJobRuns(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	svc := jobrun.Default()
+	if svc == nil {
+		opsWriteJSON(w, http.StatusOK, map[string]interface{}{
+			"runs":  []jobrun.JobRun{},
+			"total": 0,
+		})
+		return
+	}
+	limit := 50
+	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	filter := jobrun.ListFilter{
+		JobID:       strings.TrimSpace(r.URL.Query().Get("jobId")),
+		TriggerType: strings.TrimSpace(r.URL.Query().Get("triggerType")),
+		TriggerRef:  strings.TrimSpace(r.URL.Query().Get("triggerRef")),
+		Limit:       limit,
+	}
+	runs, err := svc.List(filter)
+	if err != nil {
+		opsWriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if runs == nil {
+		runs = []jobrun.JobRun{}
+	}
+	opsWriteJSON(w, http.StatusOK, map[string]interface{}{
+		"runs":  runs,
+		"total": len(runs),
+	})
+}
+
+func (s *Server) handleOpsGetJobRun(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	id := strings.TrimSpace(r.PathValue("id"))
+	if id == "" {
+		opsWriteError(w, http.StatusBadRequest, "缺少 JobRun ID")
+		return
+	}
+	svc := jobrun.Default()
+	if svc == nil {
+		opsWriteError(w, http.StatusServiceUnavailable, "JobRun 服务未初始化")
+		return
+	}
+	detail, err := svc.GetDetail(id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			opsWriteError(w, http.StatusNotFound, "JobRun 不存在")
+			return
+		}
+		opsWriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	opsWriteJSON(w, http.StatusOK, detail)
 }
 
 func listEnabledIMChannels(ctx *handlers.Context) []string {

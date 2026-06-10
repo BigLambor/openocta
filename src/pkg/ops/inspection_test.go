@@ -3,7 +3,7 @@ package ops
 import "testing"
 
 func TestParseInspectionResultWithExplicitContext(t *testing.T) {
-	res := ParseInspectionResultWithContext(
+	res := ParseInspectionResultWithOptions(
 		"session-1",
 		"job-inspect-hadoop-deep",
 		"健康得分: 82\n存在 YARN 队列压力。",
@@ -11,6 +11,7 @@ func TestParseInspectionResultWithExplicitContext(t *testing.T) {
 		1000,
 		250,
 		InspectionContext{Domain: DomainHadoop, ClusterID: "cluster-1", Component: "YARN", ScenarioKey: "ops-hadoop-health"},
+		ParseInspectionOptions{AllowLegacyTextScore: true},
 	)
 
 	if res.Domain != DomainHadoop || res.ClusterID != "cluster-1" || res.Component != "YARN" || res.ScenarioKey != "ops-hadoop-health" {
@@ -44,8 +45,11 @@ func TestParseInspectionResultPrefersStructuredJSON(t *testing.T) {
 	if res.Score == nil || *res.Score != 91 || res.ScoreStatus != "ok" {
 		t.Fatalf("structured score not applied: %+v", res)
 	}
-	if res.ScoreSource != "structured" {
+	if res.ScoreSource != ScoreSourceStructured {
 		t.Fatalf("expected structured score source, got %s", res.ScoreSource)
+	}
+	if res.ValidationStatus != ValidationStatusValid {
+		t.Fatalf("expected valid validation status, got %s", res.ValidationStatus)
 	}
 	if res.ScenarioKey != "ops-gbase-health" {
 		t.Fatalf("expected inferred GBase scenario key, got %s", res.ScenarioKey)

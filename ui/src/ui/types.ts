@@ -726,6 +726,8 @@ export type CronStatus = {
 export type CronRunLogEntry = {
   ts: number;
   jobId: string;
+  runId?: string;
+  runAtMs?: number;
   status: "ok" | "error" | "skipped";
   durationMs?: number;
   error?: string;

@@ -4,6 +4,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/openocta/openocta/pkg/db"
 	"github.com/openocta/openocta/pkg/employees"
 	"github.com/openocta/openocta/pkg/gateway/protocol"
 )
@@ -11,6 +12,12 @@ import (
 func TestEmployeeTasksCreateHandlerPersistsBchAlertDecision(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("OPENOCTA_STATE_DIR", tmp)
+	if err := db.InitDB(tmp); err != nil {
+		t.Fatalf("db.InitDB: %v", err)
+	}
+	if err := employees.InitTaskStore(tmp); err != nil {
+		t.Fatalf("InitTaskStore: %v", err)
+	}
 
 	var (
 		ok      bool

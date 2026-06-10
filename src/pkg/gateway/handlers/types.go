@@ -108,6 +108,7 @@ type HooksAgentParams struct {
 	Model          string
 	Thinking       string
 	TimeoutSeconds *int
+	RunID          string
 }
 
 // Handler processes a request and calls respond.

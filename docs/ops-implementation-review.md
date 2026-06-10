@@ -48,7 +48,7 @@
 
 ### 3. 告警组持久化和查询 API 已经实现
 
-告警 hook 会按 source 聚合窗口，触发 Agent 分析前会写入 `alerts.json`；前端告警 Tab 通过 API 获取告警组、统计降噪比并可标记处理。
+告警 hook 会按 source 聚合窗口，触发 Agent 分析前会写入 `openocta.db` 的告警表；前端告警 Tab 通过 API 获取告警组、统计降噪比并可标记处理。
 
 证据：
 

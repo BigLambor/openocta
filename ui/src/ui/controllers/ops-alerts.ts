@@ -1,5 +1,7 @@
 /** Ops alert groups API (P2-B). */
 
+import { authFetch, type AuthFetchHost } from "../auth-http.ts";
+
 export type OpsAlertGroupRecord = {
   id: string;
   source: string;
@@ -40,21 +42,9 @@ export type OpsAlertGroupPatch = {
   reviewNote?: string;
 };
 
-type OpsAlertHost = {
+type OpsAlertHost = AuthFetchHost & {
   gatewayHttpUrl: string;
-  rbacToken: string | null;
-  settings: { token: string };
 };
-
-function authHeaders(host: OpsAlertHost): Record<string, string> {
-  const headers: Record<string, string> = { Accept: "application/json" };
-  if (host.rbacToken) {
-    headers.Authorization = `Bearer ${host.rbacToken}`;
-  } else if (host.settings.token.trim()) {
-    headers.Authorization = `Bearer ${host.settings.token.trim()}`;
-  }
-  return headers;
-}
 
 function baseUrl(host: OpsAlertHost): string {
   return host.gatewayHttpUrl.replace(/\/$/, "");
@@ -73,9 +63,7 @@ export async function fetchOpsAlertGroups(
     params.set("status", status);
   }
   const q = params.toString() ? `?${params.toString()}` : "";
-  const res = await fetch(`${baseUrl(host)}/api/ops/alerts/groups${q}`, {
-    headers: authHeaders(host),
-  });
+  const res = await authFetch(host, `${baseUrl(host)}/api/ops/alerts/groups${q}`);
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as { error?: string };
     throw new Error(body.error || `加载告警组失败 (${res.status})`);
@@ -88,9 +76,9 @@ export async function patchOpsAlertGroup(
   id: string,
   patch: OpsAlertGroupPatch,
 ): Promise<OpsAlertGroupRecord> {
-  const res = await fetch(`${baseUrl(host)}/api/ops/alerts/groups/${encodeURIComponent(id)}`, {
+  const res = await authFetch(host, `${baseUrl(host)}/api/ops/alerts/groups/${encodeURIComponent(id)}`, {
     method: "PATCH",
-    headers: { ...authHeaders(host), "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(patch),
   });
   if (!res.ok) {
@@ -125,6 +113,7 @@ export function mapAlertGroupForUI(g: OpsAlertGroupRecord) {
     status: g.status === "resolved" ? ("resolved" as const) : ("active" as const),
     analysisMarkdown: g.rootCauseMarkdown?.trim() || "",
     sessionKey: g.sessionKey?.trim() || "",
+    runId: g.runId?.trim() || "",
     suppressionCategory: g.suppressionCategory?.trim() || "none",
     suppressionDetail: g.suppressionDetail?.trim() || "",
     reviewStatus: g.reviewStatus?.trim() || "pending",

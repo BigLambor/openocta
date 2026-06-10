@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/gorilla/websocket"
+	"github.com/openocta/openocta/pkg/db"
 	"github.com/openocta/openocta/pkg/gateway/protocol"
 	"github.com/openocta/openocta/pkg/rbac"
 )
@@ -18,8 +19,11 @@ func TestHTTPAuthHardening_RejectsUnauthorized(t *testing.T) {
 	t.Setenv("OPENOCTA_SKIP_CRON", "1")
 	t.Setenv("OPENOCTA_GATEWAY_TOKEN", "test-token-12345")
 
-	if err := rbac.InitDB(tempDir); err != nil {
+	if err := db.InitDB(tempDir); err != nil {
 		t.Fatalf("InitDB: %v", err)
+	}
+	if err := rbac.InitDB(tempDir); err != nil {
+		t.Fatalf("rbac InitDB: %v", err)
 	}
 
 	srv := NewServer(":0", "test-1.0.0")
@@ -62,8 +66,11 @@ func TestPprofAuthHardening(t *testing.T) {
 	t.Setenv("OPENOCTA_SKIP_CHANNELS", "1")
 	t.Setenv("OPENOCTA_SKIP_CRON", "1")
 
-	if err := rbac.InitDB(tempDir); err != nil {
+	if err := db.InitDB(tempDir); err != nil {
 		t.Fatalf("InitDB: %v", err)
+	}
+	if err := rbac.InitDB(tempDir); err != nil {
+		t.Fatalf("rbac InitDB: %v", err)
 	}
 
 	// 1. By default, OPENOCTA_ENABLE_PPROF is not set, so pprof routes are not registered -> 404
@@ -107,8 +114,11 @@ func TestWebSocketOriginChecks(t *testing.T) {
 	t.Setenv("OPENOCTA_SKIP_CHANNELS", "1")
 	t.Setenv("OPENOCTA_SKIP_CRON", "1")
 
-	if err := rbac.InitDB(tempDir); err != nil {
+	if err := db.InitDB(tempDir); err != nil {
 		t.Fatalf("InitDB: %v", err)
+	}
+	if err := rbac.InitDB(tempDir); err != nil {
+		t.Fatalf("rbac InitDB: %v", err)
 	}
 
 	// Test case 1: Desktop mode WebSocket origin checks
@@ -163,13 +173,20 @@ func TestWebSocketMethodPermissions(t *testing.T) {
 	t.Setenv("OPENOCTA_SKIP_CRON", "1")
 	t.Setenv("OPENOCTA_GATEWAY_TOKEN", "gateway-token-secret")
 
-	if err := rbac.InitDB(tempDir); err != nil {
+	if err := db.InitDB(tempDir); err != nil {
 		t.Fatalf("InitDB: %v", err)
+	}
+	if err := rbac.InitDB(tempDir); err != nil {
+		t.Fatalf("rbac InitDB: %v", err)
 	}
 
 	srv := NewServer(":0", "test-1.0.0")
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
+
+	if _, err := rbac.SetupInitialAdmin("admin", "admin888!"); err != nil {
+		t.Fatalf("SetupInitialAdmin: %v", err)
+	}
 
 	// 1. Create a Viewer user (role ID = 5, has no menu:config or ops:ack permissions)
 	err := rbac.CreateUser("test_viewer", "password123", 5)
@@ -182,8 +199,7 @@ func TestWebSocketMethodPermissions(t *testing.T) {
 		t.Fatalf("Failed to authenticate test_viewer: %v", err)
 	}
 
-	// 2. Create an Admin user (role ID = 1, has all permissions)
-	adminToken, err := rbac.AuthenticateUser("admin", "admin888")
+	adminToken, err := rbac.AuthenticateUser("admin", "admin888!")
 	if err != nil {
 		t.Fatalf("Failed to authenticate admin: %v", err)
 	}
@@ -272,5 +288,25 @@ func TestWebSocketMethodPermissions(t *testing.T) {
 	ok, errShape = callWSMethod("gateway-token-secret", "config.get", nil)
 	if !ok {
 		t.Errorf("Expected config.get to succeed for legacy gateway token, got error: %+v", errShape)
+	}
+
+	// Test case 2.5: Viewer calling chat.send (requires tool:execute) should be rejected
+	ok, errShape = callWSMethod(viewerToken, "chat.send", map[string]interface{}{
+		"sessionKey": "main",
+		"message":    "hello",
+	})
+	if ok {
+		t.Errorf("Expected chat.send to be rejected for viewer, but it succeeded")
+	} else if errShape == nil || errShape.Code != "forbidden" {
+		t.Errorf("Expected forbidden for viewer chat.send, got: %+v", errShape)
+	}
+
+	// Test case 2.6: Admin calling chat.send should pass RBAC gate (may fail later without model config)
+	ok, errShape = callWSMethod(adminToken, "chat.send", map[string]interface{}{
+		"sessionKey": "main",
+		"message":    "ping",
+	})
+	if !ok && errShape != nil && errShape.Code == "forbidden" {
+		t.Errorf("Expected admin chat.send not forbidden, got: %+v", errShape)
 	}
 }

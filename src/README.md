@@ -43,6 +43,7 @@ go run ./cmd/openocta agent -m "Hello, echo test"
 | `OPENOCTA_SKIP_CHANNELS` | 设为 `1` 跳过 channel 加载 |
 | `OPENOCTA_SKIP_CRON` | 设为 `1` 跳过 Cron 服务 |
 | `OPENOCTA_SKIP_PROVIDERS` | 同 `SKIP_CHANNELS` 的兼容别名 |
+| `OPENOCTA_SEED_DEMO_DATA` | 设为 `1`/`true`/`yes`/`on` 时写入演示集群和演示告警；默认关闭 |
 | `ANTHROPIC_API_KEY` | Agent 模型认证（agent 命令必填） |
 
 ## 测试

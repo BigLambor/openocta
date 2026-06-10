@@ -2,16 +2,29 @@ package employees
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
+
+	"github.com/openocta/openocta/pkg/db"
 )
 
+func initTestTaskStore(t *testing.T, tempDir string) {
+	t.Helper()
+	if err := db.InitDB(tempDir); err != nil {
+		t.Fatalf("db.InitDB: %v", err)
+	}
+	if err := InitTaskStore(tempDir); err != nil {
+		t.Fatalf("InitTaskStore: %v", err)
+	}
+}
+
 func TestTaskStore(t *testing.T) {
-	// Setup temporary state dir
 	tempDir, err := os.MkdirTemp("", "openocta-test-*")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tempDir)
+	initTestTaskStore(t, tempDir)
 
 	mockEnv := func(key string) string {
 		if key == "OPENOCTA_STATE_DIR" || key == "HOME" {
@@ -20,7 +33,6 @@ func TestTaskStore(t *testing.T) {
 		return ""
 	}
 
-	// 1. Test Save & Load
 	task1 := &EmployeeTask{
 		ID:              "test-task-1",
 		EmployeeID:      "emp-sre-1",
@@ -53,7 +65,6 @@ func TestTaskStore(t *testing.T) {
 		t.Errorf("Expected normalized execution status, got %+v", loaded)
 	}
 
-	// 2. Test ListTasks
 	task2 := &EmployeeTask{
 		ID:              "test-task-2",
 		EmployeeID:      "emp-sre-1",
@@ -61,7 +72,7 @@ func TestTaskStore(t *testing.T) {
 		CapabilityKey:   "diagnosis-incident",
 		ExecutionStatus: ExecutionFailed,
 		WorkflowStatus:  WorkflowOpen,
-		StartedAt:       3000, // newer than task1
+		StartedAt:       3000,
 		FinishedAt:      4000,
 		Evaluation:      "unrated",
 	}
@@ -80,12 +91,10 @@ func TestTaskStore(t *testing.T) {
 		t.Errorf("Expected 2 tasks, got %d", len(tasks))
 	}
 
-	// ListTasks should sort by StartedAt descending (newest first)
 	if tasks[0].ID != "test-task-2" || tasks[1].ID != "test-task-1" {
 		t.Errorf("ListTasks did not sort correctly by StartedAt descending")
 	}
 
-	// 3. Test DeleteTask
 	err = DeleteTask("test-task-1", mockEnv)
 	if err != nil {
 		t.Errorf("DeleteTask failed: %v", err)
@@ -112,6 +121,7 @@ func TestTaskStoreRejectsUnsafeIDs(t *testing.T) {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tempDir)
+	initTestTaskStore(t, tempDir)
 
 	mockEnv := func(key string) string {
 		if key == "OPENOCTA_STATE_DIR" || key == "HOME" {
@@ -140,6 +150,7 @@ func TestSaveTaskGeneratesID(t *testing.T) {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tempDir)
+	initTestTaskStore(t, tempDir)
 
 	mockEnv := func(key string) string {
 		if key == "OPENOCTA_STATE_DIR" || key == "HOME" {
@@ -157,5 +168,110 @@ func TestSaveTaskGeneratesID(t *testing.T) {
 	}
 	if _, err := LoadTask(task.ID, mockEnv); err != nil {
 		t.Fatalf("generated task not loadable: %v", err)
+	}
+}
+
+func TestTaskStoreImportsLegacyJSON(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "openocta-test-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	mockEnv := func(key string) string {
+		if key == "OPENOCTA_STATE_DIR" || key == "HOME" {
+			return tempDir
+		}
+		return ""
+	}
+
+	dir := ResolveEmployeeTasksDir(mockEnv)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir employee_tasks: %v", err)
+	}
+	legacy := &EmployeeTask{
+		ID:              "legacy-task-1",
+		EmployeeID:      "emp-legacy",
+		DomainKey:       "hadoop",
+		CapabilityKey:   "health-inspection",
+		ExecutionStatus: ExecutionSucceeded,
+		StartedAt:       5000,
+		FinishedAt:      6000,
+		Evaluation:      EvaluationUnrated,
+	}
+	if err := saveTaskToJSON(legacy, mockEnv); err != nil {
+		t.Fatalf("seed legacy json: %v", err)
+	}
+
+	initTestTaskStore(t, tempDir)
+
+	if _, err := os.Stat(filepath.Join(dir, "legacy-task-1.json")); !os.IsNotExist(err) {
+		t.Fatalf("expected legacy json to be moved after import, stat err=%v", err)
+	}
+
+	loaded, err := LoadTask("legacy-task-1", mockEnv)
+	if err != nil {
+		t.Fatalf("LoadTask after import: %v", err)
+	}
+	if loaded.EmployeeID != "emp-legacy" {
+		t.Fatalf("unexpected imported employee id: %s", loaded.EmployeeID)
+	}
+
+	if err := db.InitDB(tempDir); err != nil {
+		t.Fatalf("re-init db: %v", err)
+	}
+	if err := InitTaskStore(tempDir); err != nil {
+		t.Fatalf("re-init task store: %v", err)
+	}
+	tasks, err := ListTasks(mockEnv)
+	if err != nil {
+		t.Fatalf("ListTasks after re-init: %v", err)
+	}
+	if len(tasks) != 1 || tasks[0].ID != "legacy-task-1" {
+		t.Fatalf("expected idempotent import to keep one task, got %+v", tasks)
+	}
+}
+
+func TestTaskStorePersistsAcrossRestart(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "openocta-test-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+	initTestTaskStore(t, tempDir)
+
+	mockEnv := func(key string) string {
+		if key == "OPENOCTA_STATE_DIR" || key == "HOME" {
+			return tempDir
+		}
+		return ""
+	}
+
+	task := &EmployeeTask{
+		ID:              "persist-task-1",
+		EmployeeID:      "emp-persist",
+		DomainKey:       "fi",
+		CapabilityKey:   "diagnosis-incident",
+		ExecutionStatus: ExecutionSucceeded,
+		StartedAt:       9000,
+	}
+	if err := SaveTask(task, mockEnv); err != nil {
+		t.Fatalf("SaveTask: %v", err)
+	}
+	db.CloseDB()
+
+	if err := db.InitDB(tempDir); err != nil {
+		t.Fatalf("restart db: %v", err)
+	}
+	if err := InitTaskStore(tempDir); err != nil {
+		t.Fatalf("restart task store: %v", err)
+	}
+
+	loaded, err := LoadTask("persist-task-1", mockEnv)
+	if err != nil {
+		t.Fatalf("LoadTask after restart: %v", err)
+	}
+	if loaded.EmployeeID != "emp-persist" {
+		t.Fatalf("unexpected employee after restart: %s", loaded.EmployeeID)
 	}
 }

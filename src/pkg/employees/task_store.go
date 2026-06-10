@@ -9,9 +9,17 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/openocta/openocta/pkg/db"
 	"github.com/openocta/openocta/pkg/paths"
+)
+
+var (
+	taskStoreMu sync.RWMutex
+	taskRepo    *taskRepository
+	tasksDir    string
 )
 
 var taskIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$`)
@@ -20,6 +28,20 @@ var taskIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$`)
 func ResolveEmployeeTasksDir(env func(string) string) string {
 	stateDir := paths.ResolveStateDir(env)
 	return filepath.Join(stateDir, "employee_tasks")
+}
+
+// InitTaskStore loads employee tasks into openocta.db and imports legacy JSON files once.
+func InitTaskStore(stateDir string) error {
+	taskStoreMu.Lock()
+	defer taskStoreMu.Unlock()
+
+	tasksDir = filepath.Join(stateDir, "employee_tasks")
+	taskRepo = newTaskRepository(db.GetDB())
+	if taskRepo == nil {
+		return nil
+	}
+	_, err := taskRepo.ImportJSONDir(tasksDir)
+	return err
 }
 
 func NewTaskID() string {
@@ -32,21 +54,6 @@ func NewTaskID() string {
 
 func IsValidTaskID(id string) bool {
 	return taskIDPattern.MatchString(strings.TrimSpace(id))
-}
-
-func taskPathForID(id string, env func(string) string) (string, error) {
-	id = strings.TrimSpace(id)
-	if !IsValidTaskID(id) {
-		return "", os.ErrInvalid
-	}
-	dir := ResolveEmployeeTasksDir(env)
-	taskPath := filepath.Join(dir, id+".json")
-	cleanDir := filepath.Clean(dir)
-	cleanPath := filepath.Clean(taskPath)
-	if filepath.Dir(cleanPath) != cleanDir {
-		return "", os.ErrInvalid
-	}
-	return cleanPath, nil
 }
 
 func NormalizeTask(t *EmployeeTask) {
@@ -90,6 +97,98 @@ func firstNonEmpty(values ...string) string {
 
 // ListTasks returns all saved SRE task records, sorted by startedAt descending.
 func ListTasks(env func(string) string) ([]EmployeeTask, error) {
+	taskStoreMu.RLock()
+	repo := taskRepo
+	taskStoreMu.RUnlock()
+
+	if repo != nil {
+		out, err := repo.List()
+		if err != nil {
+			return nil, err
+		}
+		sort.Slice(out, func(i, j int) bool {
+			return out[i].StartedAt > out[j].StartedAt
+		})
+		return out, nil
+	}
+	return listTasksFromJSON(env)
+}
+
+// LoadTask loads a specific SRE task record by ID.
+func LoadTask(id string, env func(string) string) (*EmployeeTask, error) {
+	id = strings.TrimSpace(id)
+	if !IsValidTaskID(id) {
+		return nil, os.ErrNotExist
+	}
+
+	taskStoreMu.RLock()
+	repo := taskRepo
+	taskStoreMu.RUnlock()
+
+	if repo != nil {
+		return repo.Get(id)
+	}
+	return loadTaskFromJSON(id, env)
+}
+
+// SaveTask writes a SRE task record to openocta.db.
+func SaveTask(t *EmployeeTask, env func(string) string) error {
+	if t == nil {
+		return os.ErrInvalid
+	}
+	id := strings.TrimSpace(t.ID)
+	if id == "" {
+		id = NewTaskID()
+		t.ID = id
+	}
+	if !IsValidTaskID(id) {
+		return os.ErrInvalid
+	}
+	NormalizeTask(t)
+
+	taskStoreMu.RLock()
+	repo := taskRepo
+	taskStoreMu.RUnlock()
+
+	if repo != nil {
+		return repo.Upsert(t)
+	}
+	return saveTaskToJSON(t, env)
+}
+
+// DeleteTask removes an SRE task record.
+func DeleteTask(id string, env func(string) string) error {
+	id = strings.TrimSpace(id)
+	if !IsValidTaskID(id) {
+		return os.ErrInvalid
+	}
+
+	taskStoreMu.RLock()
+	repo := taskRepo
+	taskStoreMu.RUnlock()
+
+	if repo != nil {
+		return repo.Delete(id)
+	}
+	return deleteTaskFromJSON(id, env)
+}
+
+func taskPathForID(id string, env func(string) string) (string, error) {
+	id = strings.TrimSpace(id)
+	if !IsValidTaskID(id) {
+		return "", os.ErrInvalid
+	}
+	dir := ResolveEmployeeTasksDir(env)
+	taskPath := filepath.Join(dir, id+".json")
+	cleanDir := filepath.Clean(dir)
+	cleanPath := filepath.Clean(taskPath)
+	if filepath.Dir(cleanPath) != cleanDir {
+		return "", os.ErrInvalid
+	}
+	return cleanPath, nil
+}
+
+func listTasksFromJSON(env func(string) string) ([]EmployeeTask, error) {
 	var out []EmployeeTask
 	dir := ResolveEmployeeTasksDir(env)
 
@@ -121,8 +220,7 @@ func ListTasks(env func(string) string) ([]EmployeeTask, error) {
 	return out, nil
 }
 
-// LoadTask loads a specific SRE task record by ID.
-func LoadTask(id string, env func(string) string) (*EmployeeTask, error) {
+func loadTaskFromJSON(id string, env func(string) string) (*EmployeeTask, error) {
 	taskPath, err := taskPathForID(id, env)
 	if err != nil {
 		return nil, os.ErrNotExist
@@ -139,21 +237,11 @@ func LoadTask(id string, env func(string) string) (*EmployeeTask, error) {
 	return &task, nil
 }
 
-// SaveTask writes a SRE task record to disk.
-func SaveTask(t *EmployeeTask, env func(string) string) error {
-	if t == nil {
-		return os.ErrInvalid
-	}
-	id := strings.TrimSpace(t.ID)
-	if id == "" {
-		id = NewTaskID()
-		t.ID = id
-	}
-	taskPath, err := taskPathForID(id, env)
+func saveTaskToJSON(t *EmployeeTask, env func(string) string) error {
+	taskPath, err := taskPathForID(t.ID, env)
 	if err != nil {
 		return err
 	}
-	NormalizeTask(t)
 	dir := filepath.Dir(taskPath)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
@@ -165,8 +253,7 @@ func SaveTask(t *EmployeeTask, env func(string) string) error {
 	return os.WriteFile(taskPath, data, 0644)
 }
 
-// DeleteTask removes an SRE task record from disk.
-func DeleteTask(id string, env func(string) string) error {
+func deleteTaskFromJSON(id string, env func(string) string) error {
 	taskPath, err := taskPathForID(id, env)
 	if err != nil {
 		return err

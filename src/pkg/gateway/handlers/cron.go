@@ -398,6 +398,7 @@ func CronRunHandler(opts HandlerOpts) error {
 type cronRunLogEntry struct {
 	Ts          int64                 `json:"ts"`
 	JobID       string                `json:"jobId"`
+	RunID       string                `json:"runId,omitempty"`
 	Action      string                `json:"action"`
 	Status      string                `json:"status,omitempty"`
 	Error       string                `json:"error,omitempty"`

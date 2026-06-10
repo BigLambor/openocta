@@ -8,10 +8,11 @@ import (
 
 // AlertTimelineEvent represents an audit timeline event in an alert group's lifecycle.
 type AlertTimelineEvent struct {
-	Type        string `json:"type"`        // status_change, assignee_change, ack_note, resolved_reason, etc.
-	Operator    string `json:"operator"`    // operator username or system
+	Type        string `json:"type"` // status_change, assignee_change, ack_note, resolved_reason, etc.
+	Operator    string `json:"operator"` // operator username or system
 	TimestampMs int64  `json:"timestampMs"`
 	Message     string `json:"message"`
+	RunID       string `json:"runId,omitempty"`
 }
 
 // FingerprintFields determines which fields are used to build alert fingerprint keys.

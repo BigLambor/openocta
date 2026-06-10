@@ -1,3 +1,5 @@
+import { authFetch, type AuthFetchHost } from "../auth-http.ts";
+
 export interface BchClusterHealth {
   id: string;
   name: string;
@@ -165,30 +167,16 @@ export interface BchEmployee {
   recentTasks: BchEmployeeTask[];
 }
 
-interface BchClientHost {
+type BchClientHost = AuthFetchHost & {
   gatewayHttpUrl: string;
-  rbacToken: string | null;
-  settings: { token: string };
-}
-
-function authHeaders(host: BchClientHost): Record<string, string> {
-  const headers: Record<string, string> = { Accept: "application/json" };
-  if (host.rbacToken) {
-    headers.Authorization = `Bearer ${host.rbacToken}`;
-  } else if (host.settings.token.trim()) {
-    headers.Authorization = `Bearer ${host.settings.token.trim()}`;
-  }
-  return headers;
-}
+};
 
 function baseUrl(host: BchClientHost): string {
   return host.gatewayHttpUrl.replace(/\/$/, "");
 }
 
 export async function fetchBchClustersHealth(host: BchClientHost): Promise<BchClusterHealth[]> {
-  const res = await fetch(`${baseUrl(host)}/api/ops/bch/clusters/health`, {
-    headers: authHeaders(host),
-  });
+  const res = await authFetch(host, `${baseUrl(host)}/api/ops/bch/clusters/health`);
   if (!res.ok) {
     throw new Error(`加载 BCH 集群健康状态失败 (${res.status})`);
   }
@@ -197,9 +185,7 @@ export async function fetchBchClustersHealth(host: BchClientHost): Promise<BchCl
 }
 
 export async function fetchBchFlinkJobs(host: BchClientHost): Promise<FlinkJob[]> {
-  const res = await fetch(`${baseUrl(host)}/api/ops/bch/flink/jobs`, {
-    headers: authHeaders(host),
-  });
+  const res = await authFetch(host, `${baseUrl(host)}/api/ops/bch/flink/jobs`);
   if (!res.ok) {
     throw new Error(`加载 Flink 作业列表失败 (${res.status})`);
   }
@@ -208,9 +194,7 @@ export async function fetchBchFlinkJobs(host: BchClientHost): Promise<FlinkJob[]
 }
 
 export async function fetchBchFlinkJobConfig(host: BchClientHost, id: string): Promise<any> {
-  const res = await fetch(`${baseUrl(host)}/api/ops/bch/flink/jobs/${encodeURIComponent(id)}/config`, {
-    headers: authHeaders(host),
-  });
+  const res = await authFetch(host, `${baseUrl(host)}/api/ops/bch/flink/jobs/${encodeURIComponent(id)}/config`);
   if (!res.ok) {
     throw new Error(`提取 Flink 作业运行配置失败 (${res.status})`);
   }
@@ -218,10 +202,7 @@ export async function fetchBchFlinkJobConfig(host: BchClientHost, id: string): P
 }
 
 export async function diagnoseBchFlinkJob(host: BchClientHost, id: string): Promise<FlinkJob> {
-  const res = await fetch(`${baseUrl(host)}/api/ops/bch/flink/jobs/${encodeURIComponent(id)}/diagnose`, {
-    method: "POST",
-    headers: authHeaders(host),
-  });
+  const res = await authFetch(host, `${baseUrl(host)}/api/ops/bch/flink/jobs/${encodeURIComponent(id)}/diagnose`, { method: "POST" });
   if (!res.ok) {
     throw new Error(`智能诊断 Flink 作业失败 (${res.status})`);
   }
@@ -229,9 +210,7 @@ export async function diagnoseBchFlinkJob(host: BchClientHost, id: string): Prom
 }
 
 export async function fetchBchSparkJobs(host: BchClientHost): Promise<SparkJob[]> {
-  const res = await fetch(`${baseUrl(host)}/api/ops/bch/spark/jobs`, {
-    headers: authHeaders(host),
-  });
+  const res = await authFetch(host, `${baseUrl(host)}/api/ops/bch/spark/jobs`);
   if (!res.ok) {
     throw new Error(`加载 Spark 作业列表失败 (${res.status})`);
   }
@@ -240,10 +219,7 @@ export async function fetchBchSparkJobs(host: BchClientHost): Promise<SparkJob[]
 }
 
 export async function tuneBchSparkJob(host: BchClientHost, id: string): Promise<SparkJob> {
-  const res = await fetch(`${baseUrl(host)}/api/ops/bch/spark/jobs/${encodeURIComponent(id)}/tune`, {
-    method: "POST",
-    headers: authHeaders(host),
-  });
+  const res = await authFetch(host, `${baseUrl(host)}/api/ops/bch/spark/jobs/${encodeURIComponent(id)}/tune`, { method: "POST" });
   if (!res.ok) {
     throw new Error(`智能调优 Spark 作业失败 (${res.status})`);
   }
@@ -251,9 +227,7 @@ export async function tuneBchSparkJob(host: BchClientHost, id: string): Promise<
 }
 
 export async function fetchBchHdfsFsImage(host: BchClientHost, namespace: string): Promise<HdfsFsImageStats> {
-  const res = await fetch(`${baseUrl(host)}/api/ops/bch/hdfs/fsimage?namespace=${encodeURIComponent(namespace)}`, {
-    headers: authHeaders(host),
-  });
+  const res = await authFetch(host, `${baseUrl(host)}/api/ops/bch/hdfs/fsimage?namespace=${encodeURIComponent(namespace)}`);
   if (!res.ok) {
     throw new Error(`加载 HDFS FSImage 分析失败 (${res.status})`);
   }
@@ -281,9 +255,7 @@ export async function fetchBchHdfsFsImage(host: BchClientHost, namespace: string
 }
 
 export async function fetchBchEmployees(host: BchClientHost): Promise<BchEmployee[]> {
-  const res = await fetch(`${baseUrl(host)}/api/ops/bch/employees`, {
-    headers: authHeaders(host),
-  });
+  const res = await authFetch(host, `${baseUrl(host)}/api/ops/bch/employees`);
   if (!res.ok) {
     throw new Error(`加载 BCH 数字员工失败 (${res.status})`);
   }
@@ -292,12 +264,9 @@ export async function fetchBchEmployees(host: BchClientHost): Promise<BchEmploye
 }
 
 export async function chatBchFlinkJob(host: BchClientHost, id: string, message: string): Promise<string> {
-  const res = await fetch(`${baseUrl(host)}/api/ops/bch/flink/jobs/${encodeURIComponent(id)}/chat`, {
+  const res = await authFetch(host, `${baseUrl(host)}/api/ops/bch/flink/jobs/${encodeURIComponent(id)}/chat`, {
     method: "POST",
-    headers: {
-      ...authHeaders(host),
-      "Content-Type": "application/json",
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ message }),
   });
   if (!res.ok) {
@@ -339,9 +308,7 @@ export interface YarnQueueEvaluation {
 }
 
 export async function fetchBchYarnQueues(host: any): Promise<YarnQueueEvaluation[]> {
-  const res = await fetch(`${baseUrl(host)}/api/ops/bch/yarn/queues`, {
-    headers: authHeaders(host),
-  });
+  const res = await authFetch(host, `${baseUrl(host)}/api/ops/bch/yarn/queues`);
   if (!res.ok) {
     throw new Error(`加载 YARN 队列评估列表失败 (${res.status})`);
   }
@@ -350,10 +317,7 @@ export async function fetchBchYarnQueues(host: any): Promise<YarnQueueEvaluation
 }
 
 export async function executeBchYarnQueueAction(host: any, id: string): Promise<{ success: boolean; message: string }> {
-  const res = await fetch(`${baseUrl(host)}/api/ops/bch/yarn/queues/${encodeURIComponent(id)}/execute`, {
-    method: "POST",
-    headers: authHeaders(host),
-  });
+  const res = await authFetch(host, `${baseUrl(host)}/api/ops/bch/yarn/queues/${encodeURIComponent(id)}/execute`, { method: "POST" });
   if (!res.ok) {
     throw new Error(`执行 YARN 队列容量变更失败 (${res.status})`);
   }
@@ -361,10 +325,7 @@ export async function executeBchYarnQueueAction(host: any, id: string): Promise<
 }
 
 export async function rollbackBchYarnQueueAction(host: any, id: string): Promise<{ success: boolean; message: string }> {
-  const res = await fetch(`${baseUrl(host)}/api/ops/bch/yarn/queues/${encodeURIComponent(id)}/rollback`, {
-    method: "POST",
-    headers: authHeaders(host),
-  });
+  const res = await authFetch(host, `${baseUrl(host)}/api/ops/bch/yarn/queues/${encodeURIComponent(id)}/rollback`, { method: "POST" });
   if (!res.ok) {
     throw new Error(`回滚 YARN 队列容量变更失败 (${res.status})`);
   }

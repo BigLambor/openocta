@@ -14,6 +14,7 @@ import (
 	"github.com/openocta/openocta/pkg/agent/tools"
 	"github.com/openocta/openocta/pkg/config"
 	"github.com/openocta/openocta/pkg/gateway/protocol"
+	"github.com/openocta/openocta/pkg/rbac"
 	"github.com/stellarlinkco/agentsdk-go/pkg/api"
 )
 
@@ -75,6 +76,10 @@ func AgentHandler(opts HandlerOpts) error {
 			projectRoot = "."
 		}
 	}
+	var userSession *rbac.UserSession
+	if opts.Client != nil {
+		userSession = opts.Client.Session
+	}
 	rt, err := runtime.New(ctx, runtime.Options{
 		Tools:              agentTools,
 		ModelFactory:       modelFactory,
@@ -84,6 +89,7 @@ func AgentHandler(opts HandlerOpts) error {
 		EnableSubagents:    true,
 		EnableSystemPrompt: true,
 		Env:                os.Getenv,
+		UserSession:        userSession,
 	})
 	if err != nil {
 		opts.Respond(false, nil, &protocol.ErrorShape{

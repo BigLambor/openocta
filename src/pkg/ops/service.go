@@ -2,113 +2,66 @@ package ops
 
 import (
 	"context"
-	"flag"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/openocta/openocta/pkg/db"
 )
 
 var (
-	serviceMu sync.RWMutex
-	storePath string
-	clusters  []Cluster
+	serviceMu   sync.RWMutex
+	storePath   string
+	clusters    []Cluster
+	clusterRepo *clusterRepository
 )
 
-// InitStore loads or creates the cluster store under stateDir/ops/clusters.json.
+const envSeedDemoData = "OPENOCTA_SEED_DEMO_DATA"
+
+func seedDemoDataEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(envSeedDemoData))) {
+	case "1", "true", "yes", "y", "on":
+		return true
+	default:
+		return false
+	}
+}
+
+// InitStore loads cluster assets into openocta.db and keeps an in-memory read cache.
 func InitStore(stateDir string) error {
 	serviceMu.Lock()
 	defer serviceMu.Unlock()
 
 	storePath = filepath.Join(stateDir, "ops", "clusters.json")
-	store, err := LoadStore(storePath)
+	clusterRepo = newClusterRepository(db.GetDB())
+	if clusterRepo == nil {
+		clusters = []Cluster{}
+		return fmt.Errorf("openocta.db 未初始化")
+	}
+
+	if _, err := clusterRepo.ImportJSON(storePath); err != nil {
+		return err
+	}
+	loaded, err := clusterRepo.List("")
 	if err != nil {
 		return err
 	}
-	clusters = store.Clusters
-	for i := range clusters {
-		clusters[i].MetricsBaseUrl = normalizeMetricsBaseURL(clusters[i].MetricsBaseUrl)
-		clusters[i].VMUrlRef = strings.TrimSpace(clusters[i].VMUrlRef)
-	}
-
-	if len(clusters) == 0 && flag.Lookup("test.v") == nil {
-		clusters = []Cluster{
-			{
-				ID:             "cluster-bch-prod-a",
-				Name:           "哈池 BCH 生产集群 A",
-				Domain:         DomainHadoop,
-				Region:         "哈池",
-				NodeCount:      3457,
-				Components:     []string{"HDFS", "YARN", "HIVE", "SPARK"},
-				Owner:          "彭晓东",
-				Status:         "healthy",
-				CreatedAtMs:    nowMs(),
-				UpdatedAtMs:    nowMs(),
-				MonitorLabels:  "job=hadoop-prod",
-				MetricsBaseUrl: "http://127.0.0.1:18900",
-			},
-			{
-				ID:             "cluster-gbase-prod",
-				Name:           "哈池 GBase 生产数据库",
-				Domain:         DomainGBase,
-				Region:         "哈池",
-				NodeCount:      12,
-				Components:     []string{"GBase 8a", "GBase 8t", "ConnectionPool"},
-				Owner:          "赵铁柱",
-				Status:         "healthy",
-				CreatedAtMs:    nowMs(),
-				UpdatedAtMs:    nowMs(),
-				MonitorLabels:  "job=gbase-prod",
-				MetricsBaseUrl: "http://127.0.0.1:18900",
-			},
-			{
-				ID:             "cluster-fi-prod",
-				Name:           "呼池 FusionInsight 生产集群",
-				Domain:         DomainFI,
-				Region:         "呼和浩特",
-				NodeCount:      85,
-				Components:     []string{"FI-YARN", "FI-HBase", "FI-Kafka"},
-				Owner:          "王小明",
-				Status:         "warning",
-				CreatedAtMs:    nowMs(),
-				UpdatedAtMs:    nowMs(),
-				MonitorLabels:  "job=fi-prod",
-				MetricsBaseUrl: "http://127.0.0.1:18900",
-			},
-			{
-				ID:             "cluster-gov-platform",
-				Name:           "数据开发治理中心平台",
-				Domain:         DomainGovernance,
-				Region:         "北京",
-				NodeCount:      5,
-				Components:     []string{"MetadataRegistry", "LineageEngine", "DataQuality"},
-				Owner:          "李华",
-				Status:         "healthy",
-				CreatedAtMs:    nowMs(),
-				UpdatedAtMs:    nowMs(),
-				MonitorLabels:  "job=gov-platform",
-				MetricsBaseUrl: "http://127.0.0.1:18900",
-			},
-			{
-				ID:             "cluster-dataapp-scheduler",
-				Name:           "核心数据 App 调度平台",
-				Domain:         DomainDataApps,
-				Region:         "北京",
-				NodeCount:      8,
-				Components:     []string{"Airflow", "DolphinScheduler", "SLA-Monitor"},
-				Owner:          "陈刚",
-				Status:         "healthy",
-				CreatedAtMs:    nowMs(),
-				UpdatedAtMs:    nowMs(),
-				MonitorLabels:  "job=dataapp-scheduler",
-				MetricsBaseUrl: "http://127.0.0.1:18900",
-			},
+	if len(loaded) == 0 && seedDemoDataEnabled() {
+		for _, c := range demoClusters() {
+			if err := clusterRepo.Upsert(c); err != nil {
+				return err
+			}
 		}
-		_ = SaveStore(storePath, &storeFile{Version: 1, Clusters: clusters})
+		loaded, err = clusterRepo.List("")
+		if err != nil {
+			return err
+		}
 	}
+	clusters = loaded
 	return nil
 }
 
@@ -118,13 +71,10 @@ func ListClusters(domain string) ([]Cluster, error) {
 	defer serviceMu.RUnlock()
 
 	domain = strings.TrimSpace(strings.ToLower(domain))
-	out := make([]Cluster, 0, len(clusters))
-	for _, c := range clusters {
-		if domain == "" || c.Domain == domain {
-			out = append(out, c)
-		}
+	if clusterRepo == nil {
+		return []Cluster{}, nil
 	}
-	return out, nil
+	return clusterRepo.List(domain)
 }
 
 // GetCluster returns one cluster by ID.
@@ -132,13 +82,10 @@ func GetCluster(id string) (Cluster, error) {
 	serviceMu.RLock()
 	defer serviceMu.RUnlock()
 
-	id = strings.TrimSpace(id)
-	for _, c := range clusters {
-		if c.ID == id {
-			return c, nil
-		}
+	if clusterRepo == nil {
+		return Cluster{}, fmt.Errorf("ops store 未初始化")
 	}
-	return Cluster{}, fmt.Errorf("集群不存在: %s", id)
+	return clusterRepo.Get(id)
 }
 
 // CreateCluster registers a new cluster.
@@ -192,14 +139,18 @@ func CreateCluster(in ClusterCreate) (Cluster, error) {
 	serviceMu.Lock()
 	defer serviceMu.Unlock()
 
-	for _, existing := range clusters {
-		if existing.Domain == domain && strings.EqualFold(existing.Name, name) {
-			return Cluster{}, fmt.Errorf("该业务域下已存在同名集群: %s", name)
-		}
+	if clusterRepo == nil {
+		return Cluster{}, fmt.Errorf("ops store 未初始化")
 	}
-	clusters = append(clusters, c)
-	if err := persistLocked(); err != nil {
-		clusters = clusters[:len(clusters)-1]
+	if existing, ok, err := clusterRepo.FindByDomainName(domain, name); err != nil {
+		return Cluster{}, err
+	} else if ok && existing.ID != c.ID {
+		return Cluster{}, fmt.Errorf("该业务域下已存在同名集群: %s", name)
+	}
+	if err := clusterRepo.Create(c); err != nil {
+		return Cluster{}, err
+	}
+	if err := reloadClustersLocked(); err != nil {
 		return Cluster{}, err
 	}
 	return c, nil
@@ -210,27 +161,23 @@ func PatchCluster(id string, patch ClusterPatch) (Cluster, error) {
 	serviceMu.Lock()
 	defer serviceMu.Unlock()
 
-	idx := -1
-	for i, c := range clusters {
-		if c.ID == id {
-			idx = i
-			break
-		}
-	}
-	if idx < 0 {
-		return Cluster{}, fmt.Errorf("集群不存在: %s", id)
+	if clusterRepo == nil {
+		return Cluster{}, fmt.Errorf("ops store 未初始化")
 	}
 
-	c := clusters[idx]
+	c, err := clusterRepo.Get(id)
+	if err != nil {
+		return Cluster{}, err
+	}
 	if patch.Name != nil {
 		name := strings.TrimSpace(*patch.Name)
 		if name == "" {
 			return Cluster{}, fmt.Errorf("集群名称不能为空")
 		}
-		for _, existing := range clusters {
-			if existing.ID != c.ID && existing.Domain == c.Domain && strings.EqualFold(existing.Name, name) {
-				return Cluster{}, fmt.Errorf("该业务域下已存在同名集群: %s", name)
-			}
+		if existing, ok, err := clusterRepo.FindByDomainName(c.Domain, name); err != nil {
+			return Cluster{}, err
+		} else if ok && existing.ID != c.ID {
+			return Cluster{}, fmt.Errorf("该业务域下已存在同名集群: %s", name)
 		}
 		c.Name = name
 	}
@@ -298,8 +245,10 @@ func PatchCluster(id string, patch ClusterPatch) (Cluster, error) {
 		c.MonitorLabels = normalized
 	}
 	c.UpdatedAtMs = nowMs()
-	clusters[idx] = c
-	if err := persistLocked(); err != nil {
+	if err := clusterRepo.Update(c); err != nil {
+		return Cluster{}, err
+	}
+	if err := reloadClustersLocked(); err != nil {
 		return Cluster{}, err
 	}
 	return c, nil
@@ -311,13 +260,13 @@ func DeleteCluster(id string) error {
 	defer serviceMu.Unlock()
 
 	id = strings.TrimSpace(id)
-	for i, c := range clusters {
-		if c.ID == id {
-			clusters = append(clusters[:i], clusters[i+1:]...)
-			return persistLocked()
-		}
+	if clusterRepo == nil {
+		return fmt.Errorf("ops store 未初始化")
 	}
-	return fmt.Errorf("集群不存在: %s", id)
+	if err := clusterRepo.Delete(id, nowMs()); err != nil {
+		return err
+	}
+	return reloadClustersLocked()
 }
 
 // BuildDashboardSummary builds overview metrics from registered clusters.
@@ -467,10 +416,95 @@ func applySnapshotHealthToSummary(summary *DashboardSummary, snapshots []HealthS
 }
 
 func persistLocked() error {
-	if storePath == "" {
+	if clusterRepo == nil {
 		return fmt.Errorf("ops store 未初始化")
 	}
-	return SaveStore(storePath, &storeFile{Version: 1, Clusters: clusters})
+	return reloadClustersLocked()
+}
+
+func reloadClustersLocked() error {
+	loaded, err := clusterRepo.List("")
+	if err != nil {
+		return err
+	}
+	clusters = loaded
+	return nil
+}
+
+func demoClusters() []Cluster {
+	now := nowMs()
+	return []Cluster{
+		{
+			ID:             "cluster-bch-prod-a",
+			Name:           "哈池 BCH 生产集群 A",
+			Domain:         DomainHadoop,
+			Region:         "哈池",
+			NodeCount:      3457,
+			Components:     []string{"HDFS", "YARN", "HIVE", "SPARK"},
+			Owner:          "彭晓东",
+			Status:         "healthy",
+			CreatedAtMs:    now,
+			UpdatedAtMs:    now,
+			MonitorLabels:  "job=hadoop-prod",
+			MetricsBaseUrl: "http://127.0.0.1:18900",
+		},
+		{
+			ID:             "cluster-gbase-prod",
+			Name:           "哈池 GBase 生产数据库",
+			Domain:         DomainGBase,
+			Region:         "哈池",
+			NodeCount:      12,
+			Components:     []string{"GBase 8a", "GBase 8t", "ConnectionPool"},
+			Owner:          "赵铁柱",
+			Status:         "healthy",
+			CreatedAtMs:    now,
+			UpdatedAtMs:    now,
+			MonitorLabels:  "job=gbase-prod",
+			MetricsBaseUrl: "http://127.0.0.1:18900",
+		},
+		{
+			ID:             "cluster-fi-prod",
+			Name:           "呼池 FusionInsight 生产集群",
+			Domain:         DomainFI,
+			Region:         "呼和浩特",
+			NodeCount:      85,
+			Components:     []string{"FI-YARN", "FI-HBase", "FI-Kafka"},
+			Owner:          "王小明",
+			Status:         "warning",
+			CreatedAtMs:    now,
+			UpdatedAtMs:    now,
+			MonitorLabels:  "job=fi-prod",
+			MetricsBaseUrl: "http://127.0.0.1:18900",
+		},
+		{
+			ID:             "cluster-gov-platform",
+			Name:           "数据开发治理中心平台",
+			Domain:         DomainGovernance,
+			Region:         "北京",
+			NodeCount:      5,
+			Components:     []string{"MetadataRegistry", "LineageEngine", "DataQuality"},
+			Owner:          "李华",
+			Status:         "healthy",
+			CreatedAtMs:    now,
+			UpdatedAtMs:    now,
+			MonitorLabels:  "job=gov-platform",
+			MetricsBaseUrl: "http://127.0.0.1:18900",
+		},
+		{
+			ID:             "cluster-dataapp-scheduler",
+			Name:           "核心数据 App 调度平台",
+			Domain:         DomainDataApps,
+			Region:         "北京",
+			NodeCount:      8,
+			Components:     []string{"Airflow", "DolphinScheduler", "SLA-Monitor"},
+			Owner:          "陈刚",
+			Status:         "healthy",
+			CreatedAtMs:    now,
+			UpdatedAtMs:    now,
+			MonitorLabels:  "job=dataapp-scheduler",
+			MetricsBaseUrl: "http://127.0.0.1:18900",
+		},
+	}
 }
 
 func strPtr(s string) *string {

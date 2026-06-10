@@ -88,12 +88,13 @@ func checkWebSocketOrigin(r *http.Request, h *Hub) bool {
 
 // Client represents a connected WebSocket client.
 type Client struct {
-	ConnID   string
-	Conn     *websocket.Conn
-	Send     chan []byte
-	Hub      *Hub
-	Handlers *handlers.Registry
-	Context  *handlers.Context
+	ConnID          string
+	Conn            *websocket.Conn
+	Send            chan []byte
+	Hub             *Hub
+	Handlers        *handlers.Registry
+	Context         *handlers.Context
+	UpgradeRequest  *http.Request
 	// ConnectParams set after successful handshake
 	Connect *protocol.ConnectParams
 	Session *rbac.UserSession
@@ -318,12 +319,13 @@ func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request) {
 	}
 	connID := uuid.New().String()
 	client := &Client{
-		ConnID:   connID,
-		Conn:     conn,
-		Send:     make(chan []byte, 2048),
-		Hub:      h,
-		Handlers: h.handlers,
-		Context:  h.context,
+		ConnID:         connID,
+		Conn:           conn,
+		Send:           make(chan []byte, 2048),
+		Hub:            h,
+		Handlers:       h.handlers,
+		Context:        h.context,
+		UpgradeRequest: r,
 	}
 	h.register <- client
 	go client.writePump()
@@ -474,6 +476,17 @@ func (c *Client) handleConnect(id string, params interface{}) {
 		if s, err := rbac.ValidateToken(gotToken); err == nil {
 			rbacValid = true
 			session = s
+		}
+	}
+	if !rbacValid && c.UpgradeRequest != nil {
+		if cookie, err := c.UpgradeRequest.Cookie(rbac.SessionCookieName); err == nil {
+			if token := strings.TrimSpace(cookie.Value); token != "" {
+				if s, err := rbac.ValidateToken(token); err == nil {
+					rbacValid = true
+					session = s
+					gotToken = token
+				}
+			}
 		}
 	}
 

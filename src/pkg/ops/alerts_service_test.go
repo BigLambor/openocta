@@ -1,15 +1,15 @@
 package ops
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/openocta/openocta/pkg/db"
 )
 
 func TestRecordAndListAlertGroups(t *testing.T) {
-	dir := t.TempDir()
-	if err := InitAlertsStore(dir); err != nil {
-		t.Fatal(err)
-	}
+	dir := initTestAlertsStore(t)
 
 	g, err := RecordMergedAlertGroup("hadoop-prod", "agent:main:alert:abc", "run-1", []MergedAlertInput{
 		{
@@ -61,10 +61,29 @@ func TestRecordAndListAlertGroups(t *testing.T) {
 	if list2.Total != 1 {
 		t.Fatalf("reload expected 1 group, got %d", list2.Total)
 	}
+	if len(list2.Groups[0].Events) != 2 || len(list2.Groups[0].Timeline) == 0 {
+		t.Fatalf("expected events and timeline to survive reload, got %+v", list2.Groups[0])
+	}
+	var eventRows, timelineRows int
+	if err := db.GetDB().QueryRow(`SELECT COUNT(*) FROM alert_events WHERE group_id = ?`, g.ID).Scan(&eventRows); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.GetDB().QueryRow(`SELECT COUNT(*) FROM incident_timeline WHERE subject_type = 'alert_group' AND subject_id = ?`, g.ID).Scan(&timelineRows); err != nil {
+		t.Fatal(err)
+	}
+	if eventRows != 2 || timelineRows == 0 {
+		t.Fatalf("expected normalized alert rows, events=%d timeline=%d", eventRows, timelineRows)
+	}
 }
 
 func TestInitAlertsStoreMigratesExistingGroupsWithoutReplacing(t *testing.T) {
 	dir := t.TempDir()
+	_ = db.CloseDB()
+	if err := db.InitDB(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.CloseDB() })
+
 	path := filepath.Join(dir, "ops", "alerts.json")
 	existing := AlertGroup{
 		ID:            "existing-alert",
@@ -94,13 +113,24 @@ func TestInitAlertsStoreMigratesExistingGroupsWithoutReplacing(t *testing.T) {
 	if got.SuppressionCategory != "none" || got.ReviewStatus != "pending" {
 		t.Fatalf("expected migrated defaults, got suppression=%q review=%q", got.SuppressionCategory, got.ReviewStatus)
 	}
-}
-
-func TestPatchAlertGroupValidationAndTimeline(t *testing.T) {
-	dir := t.TempDir()
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("expected alerts.json to be moved to backup, stat err=%v", err)
+	}
+	backups, err := filepath.Glob(path + ".bak.*")
+	if err != nil || len(backups) != 1 {
+		t.Fatalf("expected one alerts backup, got %v err=%v", backups, err)
+	}
 	if err := InitAlertsStore(dir); err != nil {
 		t.Fatal(err)
 	}
+	list2 := ListAlertGroups(DomainHadoop, "")
+	if list2.Total != 1 {
+		t.Fatalf("expected repeated InitAlertsStore to remain idempotent, got %d", list2.Total)
+	}
+}
+
+func TestPatchAlertGroupValidationAndTimeline(t *testing.T) {
+	initTestAlertsStore(t)
 
 	g, err := RecordMergedAlertGroup("hadoop-prod", "agent:main:alert:abc", "run-1", []MergedAlertInput{
 		{Title: "Alert", Severity: "critical", Message: "msg"},

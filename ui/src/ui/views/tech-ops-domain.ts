@@ -54,13 +54,17 @@ export type TechOpsDomainProps = {
     impact: string;
     analysisMarkdown?: string;
     status: "resolved" | "active";
+    runId?: string;
+    sessionKey?: string;
   }>;
   selectedAlertGroupId: string | null;
   onSelectAlertGroup: (id: string) => void;
+  onOpenJobRun?: (runId: string) => void;
   // Inspection Props
   inspectionsLoading: boolean;
   inspections: Array<{
     id: string;
+    runId?: string;
     time: string;
     score: number;
     status: "healthy" | "warning" | "critical" | "unknown";
@@ -527,6 +531,19 @@ function renderAlertsSubTab(props: TechOpsDomainProps) {
                         </div>
                       `
                     : nothing}
+                  ${activeGroup.runId && props.onOpenJobRun
+                    ? html`
+                        <div class="detail-section">
+                          <button
+                            type="button"
+                            class="ops-btn ops-btn--ghost"
+                            @click=${() => props.onOpenJobRun!(activeGroup.runId!)}
+                          >
+                            ${icons.historyClock} 查看执行链路
+                          </button>
+                        </div>
+                      `
+                    : nothing}
                   <div class="detail-section">
                     <div class="detail-section__header">${icons.scrollText} 降噪说明</div>
                     <div class="detail-section__content">
@@ -669,6 +686,20 @@ function renderInspectionsSubTab(props: TechOpsDomainProps) {
                           <ul class="error-list">
                             ${(activeInspection as any).result.errors.map((err: string) => html`<li>${err}</li>`)}
                           </ul>
+                        </div>
+                      `
+                    : nothing}
+
+                  ${activeInspection.runId && props.onOpenJobRun
+                    ? html`
+                        <div class="detail-section">
+                          <button
+                            type="button"
+                            class="ops-btn ops-btn--ghost"
+                            @click=${() => props.onOpenJobRun!(activeInspection.runId!)}
+                          >
+                            ${icons.historyClock} 查看执行链路
+                          </button>
                         </div>
                       `
                     : nothing}

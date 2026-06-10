@@ -16,6 +16,7 @@ import (
 
 	"github.com/openocta/openocta/pkg/config"
 	"github.com/openocta/openocta/pkg/paths"
+	"github.com/openocta/openocta/pkg/rbac"
 	octasecurity "github.com/openocta/openocta/pkg/security"
 	"github.com/stellarlinkco/agentsdk-go/pkg/api"
 	agentsdkConfg "github.com/stellarlinkco/agentsdk-go/pkg/config"
@@ -237,6 +238,10 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 
 	var mw []middleware.Middleware
 
+	if opts.UserSession != nil {
+		mw = append(mw, toolRBACMiddleware(opts.UserSession))
+	}
+
 	if opts.Config != nil && opts.Config.Gateway != nil && opts.Config.Gateway.LlmTrace != nil &&
 		opts.Config.Gateway.LlmTrace.Enabled != nil && *opts.Config.Gateway.LlmTrace.Enabled {
 		mw = append(mw, middleware.NewTraceMiddleware(filepath.Join(projectRoot, ".trace")))
@@ -384,6 +389,8 @@ type Options struct {
 	SessionHistoryTransform api.SessionHistoryTransform
 	// TokenLimit is api.Options.TokenLimit: when > 0, trims conversation history to an estimated token budget (e.g. from models.providers.*.models[].contextWindow).
 	TokenLimit int
+	// UserSession when set enables RBAC checks before tool execution; nil skips (cron/internal/gateway token).
+	UserSession *rbac.UserSession
 }
 
 func resolveApprovalQueueStorePath(s *config.SandboxConfig, env func(string) string) string {

@@ -21,6 +21,8 @@ import (
 	"github.com/openocta/openocta/pkg/config"
 	"github.com/openocta/openocta/pkg/db"
 	"github.com/openocta/openocta/pkg/cron"
+	"github.com/openocta/openocta/pkg/employees"
+	"github.com/openocta/openocta/pkg/jobrun"
 	"github.com/openocta/openocta/pkg/gateway/handlers"
 	"github.com/openocta/openocta/pkg/gateway/protocol"
 	"github.com/openocta/openocta/pkg/gateway/swarmsvc"
@@ -102,11 +104,11 @@ func isTruthyEnv(env func(string) string, key string) bool {
 
 // initStores initializes all SQLite database and ops stores.
 func initStores(stateDir string) error {
-	if err := rbac.InitDB(stateDir); err != nil {
-		return fmt.Errorf("failed to initialize RBAC database: %w", err)
-	}
 	if err := db.InitDB(stateDir); err != nil {
 		return fmt.Errorf("failed to initialize unified database: %w", err)
+	}
+	if err := rbac.InitDB(stateDir); err != nil {
+		return fmt.Errorf("failed to initialize RBAC database: %w", err)
 	}
 	if err := ops.InitStore(stateDir); err != nil {
 		return fmt.Errorf("failed to initialize ops cluster store: %w", err)
@@ -116,6 +118,12 @@ func initStores(stateDir string) error {
 	}
 	if err := ops.InitHealthStore(stateDir); err != nil {
 		return fmt.Errorf("failed to initialize ops health facts store: %w", err)
+	}
+	if err := employees.InitTaskStore(stateDir); err != nil {
+		return fmt.Errorf("failed to initialize employee task store: %w", err)
+	}
+	if err := jobrun.Init(); err != nil {
+		return fmt.Errorf("failed to initialize job run service: %w", err)
 	}
 	return nil
 }
@@ -180,29 +188,7 @@ func initChannels(chReg *channels.Registry, outReg *outbound.AdapterRegistry) {
 	}
 }
 
-// NewServer creates a new HTTP server with WebSocket hub and handlers.
-func NewServer(addr string, version string) *Server {
-	mux := http.NewServeMux()
-	env := func(k string) string { return os.Getenv(k) }
-	stateDir := paths.ResolveStateDir(env)
-
-	// Initialize stores
-	if err := initStores(stateDir); err != nil {
-		slog.Error("Failed to initialize database and stores", "error", err)
-	}
-
-	// Wire tools hooks
-	wireToolsHooks()
-
-	skipCron := isTruthyEnv(env, "OPENOCTA_SKIP_CRON")
-	skipChannels := isTruthyEnv(env, "OPENOCTA_SKIP_CHANNELS") || isTruthyEnv(env, "OPENOCTA_SKIP_PROVIDERS")
-
-	// Initialize Cron
-	cronSvc, err := initCron(stateDir, skipCron)
-	if err != nil {
-		slog.Error("Failed to initialize Cron service", "error", err)
-	}
-
+func buildGatewayContext(version, stateDir string, env func(string) string, cfg *config.OpenOctaConfig, hub *ws.Hub, chReg *channels.Registry, outReg *outbound.AdapterRegistry, chRuntimeMgr *channels.Manager, cronSvc *cron.Service) *handlers.Context {
 	var cronSvcIf interface {
 		List(bool) ([]cron.CronJob, error)
 		Add(cron.JobCreate) (cron.CronJob, error)
@@ -212,46 +198,7 @@ func NewServer(addr string, version string) *Server {
 		cronSvcIf = cronSvc
 	}
 
-	// Initialize Channels
-	chReg := channels.NewRegistry()
-	chRuntimeMgr := channels.NewManager()
-	outReg := outbound.NewAdapterRegistry()
-	initChannels(chReg, outReg)
-
-	hub := ws.NewHub(version, nil, nil) // Create hub first to get broadcast functions
-
-	// Load configuration at startup
-	cfg, err := config.Load(env)
-	if err != nil {
-		// Log error but continue with default config
-		cfg = &config.OpenOctaConfig{}
-	}
-
-	// Apply environment variables from config.env.vars
-	if cfg != nil && cfg.Env != nil && cfg.Env.Vars != nil {
-		for k, v := range cfg.Env.Vars {
-			if os.Getenv(k) == "" {
-				os.Setenv(k, v)
-			}
-		}
-	}
-
-	// Initialize built-in employees (e.g. skill-creator) if not already present in state dir
-	if err := initpkg.InitEmployee(cfg); err != nil {
-		slog.Warn("init employees at startup failed", "error", err)
-	}
-
-	// MCP: connect to configured MCP servers and expose tools to the agent
-	//var mcpManager *mcp.Manager
-	//if cfg != nil && cfg.Mcp != nil && len(cfg.Mcp.Servers) > 0 {
-	//	mgr, err := mcp.NewManager(context.Background(), cfg)
-	//	if err != nil {
-	//		slog.Warn("mcp: failed to start MCP manager, agent will run without MCP tools", "error", err)
-	//	} else {
-	//		mcpManager = mgr
-	//	}
-	//}
-	ctx := &handlers.Context{
+	return &handlers.Context{
 		Version:             version,
 		GetStatusSummary:    func() (interface{}, error) { return handlers.DefaultStatusSummary(), nil },
 		LoadConfigSnapshot:  func() (*handlers.ConfigSnapshot, error) { return handlers.LoadConfigSnapshot(env) },
@@ -261,14 +208,12 @@ func NewServer(addr string, version string) *Server {
 		OutboundRegistry:    outReg,
 		CronService:         cronSvcIf,
 		GetCronStorePath:    func() string { return filepath.Join(stateDir, "cron", "jobs.json") },
-		AgentRunSeq:         make(map[string]int64), // Initialize sequence counter
-		Config:              cfg,                    // Store loaded config
+		AgentRunSeq:         make(map[string]int64),
+		Config:              cfg,
 		ChannelManager:      chRuntimeMgr,
 		Broadcast: func(event string, payload interface{}, opts *handlers.BroadcastOptions) {
 			if opts == nil {
-				opts = &handlers.BroadcastOptions{
-					DropIfSlow: false,
-				}
+				opts = &handlers.BroadcastOptions{DropIfSlow: false}
 			}
 			hub.Broadcast(event, payload, &ws.BroadcastOptions{
 				DropIfSlow:   opts != nil && opts.DropIfSlow,
@@ -281,21 +226,11 @@ func NewServer(addr string, version string) *Server {
 				StateVersion: opts.StateVersion,
 			})
 		},
-		NodeSendToSession: func(sessionKey string, event string, payload interface{}) {
-			// TODO: Implement node subscription and forwarding.
-			// For now this is a no-op: broadcast functions already send to all
-			// connected clients via ctx.Broadcast. Re-broadcasting here would
-			// duplicate events and cause seq gaps on the frontend.
-		},
-		//MCPTools: func(ctx context.Context) ([]tool.Tool, error) {
-		//	if mcpManager == nil {
-		//		return nil, nil
-		//	}
-		//	return mcpManager.Tools(ctx)
-		//},
+		NodeSendToSession: func(sessionKey string, event string, payload interface{}) {},
 	}
+}
 
-	// Update hub with context and create registry
+func setupGatewayHandlers(ctx *handlers.Context, hub *ws.Hub, cfg *config.OpenOctaConfig, env func(string) string) {
 	hub.SetContext(ctx)
 	if err := swarmsvc.Init(&handlers.SwarmGatewayRunner{Ctx: ctx}, func(event string, payload interface{}) {
 		if ctx.Broadcast != nil {
@@ -305,7 +240,6 @@ func NewServer(addr string, version string) *Server {
 		slog.Warn("swarm: init failed", "error", err)
 	}
 	reg := handlers.NewRegistry(ctx)
-	// Allow agent tools to synchronously invoke gateway methods
 	ctx.InvokeMethod = func(method string, params map[string]interface{}) (ok bool, payload interface{}, err *protocol.ErrorShape) {
 		var resultOk bool
 		var resultPayload interface{}
@@ -326,17 +260,13 @@ func NewServer(addr string, version string) *Server {
 	}
 	hub.SetHandlers(&reg)
 
-	// HooksWake / HooksAgent: 参考 openclaw createGatewayHooksRequestHandler
-	// EnqueueSystemEvent 向主会话广播 system-event；RequestHeartbeatNow 暂为 no-op
 	mainKey := handlers.ResolveMainSessionKey(cfg)
 	enqueueSystemEvent := func(text string) {
 		hub.Broadcast("system-event", map[string]interface{}{"text": text, "sessionKey": mainKey}, nil)
 	}
-	requestHeartbeatNow := func(reason string) {} // no-op: OpenOcta 无独立心跳循环
 
 	ctx.HooksWake = func(text string, mode string) {
 		enqueueSystemEvent(text)
-		// 同时将系统事件写入主会话，使其在 Web 界面可见
 		if strings.TrimSpace(text) != "" {
 			go func(eventText string) {
 				handlers.InvokeChatSend(ctx, handlers.ChatSendParams{
@@ -346,19 +276,17 @@ func NewServer(addr string, version string) *Server {
 				})
 			}(text)
 		}
-		if mode == "now" {
-			requestHeartbeatNow("hook:wake")
-		}
 	}
 
 	ctx.HooksAgent = func(p handlers.HooksAgentParams) string {
 		sessionKey := strings.TrimSpace(p.SessionKey)
-		runID := uuid.New().String()
-
+		runID := strings.TrimSpace(p.RunID)
+		if runID == "" {
+			runID = uuid.New().String()
+		}
 		if sessionKey == "" {
 			sessionKey = fmt.Sprintf("hook:%s", runID)
 		}
-		// 不再每次重置 session，保留多轮对话上下文
 		timeoutMs := 0
 		if p.TimeoutSeconds != nil && *p.TimeoutSeconds > 0 {
 			timeoutMs = *p.TimeoutSeconds * 1000
@@ -379,51 +307,50 @@ func NewServer(addr string, version string) *Server {
 		}
 		return runID
 	}
+}
 
-	if cronSvc != nil {
-		cronSvc.SetDeps(&cron.Deps{
-			EnqueueSystemEvent:  enqueueSystemEvent,
-			RequestHeartbeatNow: requestHeartbeatNow,
-			RunIsolatedAgentJob: func(job cron.CronJob, message string) {
-				agentID := job.AgentID
-				if agentID == "" {
-					agentID = "main"
-				}
-				// 旧路径仍保留，但 sessionKey 统一为 agent:main:cron:<jobId>
-				handlers.RunIsolatedAgentTurn(ctx, agentID, "agent:main:cron:"+job.ID, message)
-			},
-			RunCronChat: func(job cron.CronJob, sessionKey, sessionId, message string) {
-				if sessionKey == "" {
-					sessionKey = "agent:main:cron:" + job.ID
-				}
-				// 对数字员工会话，先确保 sessions.json 中有条目（首次对话构建 sessionId）。
-				// 同时不强制传 sessionId，让 chat.send 走 ResolveChatSessionID 从 store 解析。
-				lowerKey := strings.TrimSpace(strings.ToLower(sessionKey))
-				if strings.HasPrefix(lowerKey, "agent:") && strings.Contains(lowerKey, ":employee:") && !strings.Contains(lowerKey, ":run:") {
-					_, _, _ = ctx.InvokeMethod("sessions.ensure", map[string]interface{}{"key": sessionKey})
-					sessionId = ""
-				} else if sessionId == "" {
-					sessionId = job.ID
-				}
-				handlers.InvokeChatSend(ctx, handlers.ChatSendParams{
-					SessionKey:     sessionKey,
-					Message:        message,
-					SessionID:      sessionId,
-					IdempotencyKey: "cron:" + job.ID,
-				})
-			},
-		})
-		cronSvc.Start()
+func setupCronDeps(cronSvc *cron.Service, ctx *handlers.Context, hub *ws.Hub, cfg *config.OpenOctaConfig) {
+	mainKey := handlers.ResolveMainSessionKey(cfg)
+	enqueueSystemEvent := func(text string) {
+		hub.Broadcast("system-event", map[string]interface{}{"text": text, "sessionKey": mainKey}, nil)
 	}
-	go hub.Run()
+	requestHeartbeatNow := func(reason string) {}
+	cronSvc.SetDeps(&cron.Deps{
+		EnqueueSystemEvent:  enqueueSystemEvent,
+		RequestHeartbeatNow: requestHeartbeatNow,
+		RunIsolatedAgentJob: func(job cron.CronJob, message string) {
+			agentID := job.AgentID
+			if agentID == "" {
+				agentID = "main"
+			}
+			handlers.RunIsolatedAgentTurn(ctx, agentID, "agent:main:cron:"+job.ID, message)
+		},
+		RunCronChat: func(job cron.CronJob, sessionKey, sessionId, message string) {
+			if sessionKey == "" {
+				sessionKey = "agent:main:cron:" + job.ID
+			}
+			lowerKey := strings.TrimSpace(strings.ToLower(sessionKey))
+			if strings.HasPrefix(lowerKey, "agent:") && strings.Contains(lowerKey, ":employee:") && !strings.Contains(lowerKey, ":run:") {
+				_, _, _ = ctx.InvokeMethod("sessions.ensure", map[string]interface{}{"key": sessionKey})
+				sessionId = ""
+			} else if sessionId == "" {
+				sessionId = job.ID
+			}
+			handlers.InvokeChatSend(ctx, handlers.ChatSendParams{
+				SessionKey:     sessionKey,
+				Message:        message,
+				SessionID:      sessionId,
+				IdempotencyKey: "cron:" + job.ID,
+			})
+		},
+	})
+	cronSvc.Start()
+}
 
-	// 构建入站消息下沉器，将 RuntimeChannel 的 InboundMessage 转换为 hooks.agent 调用。
+func startChannelRuntimes(chRuntimeMgr *channels.Manager, cfg *config.OpenOctaConfig, ctx *handlers.Context, skipChannels bool) {
 	inboundSink := &hooksAgentSink{ctx: ctx}
-
-	// 基于配置初始化各通道 Runtime（由统一注册逻辑处理）。
 	registerChannelRuntimesFromConfig(chRuntimeMgr, cfg, inboundSink, skipChannels)
 
-	// 配置热重载：当 channels 配置变更时，停止旧连接并基于新配置重新创建。
 	ctx.ReloadChannelRuntimes = func() {
 		if chRuntimeMgr == nil {
 			return
@@ -442,7 +369,6 @@ func NewServer(addr string, version string) *Server {
 		}
 	}
 
-	// 异步启动所有 RuntimeChannel。
 	go func() {
 		results := chRuntimeMgr.Start(context.Background())
 		for _, r := range results {
@@ -451,6 +377,62 @@ func NewServer(addr string, version string) *Server {
 			}
 		}
 	}()
+}
+
+// NewServer creates a new HTTP server with WebSocket hub and handlers.
+func NewServer(addr string, version string) *Server {
+	mux := http.NewServeMux()
+	env := func(k string) string { return os.Getenv(k) }
+	stateDir := paths.ResolveStateDir(env)
+
+	if err := initStores(stateDir); err != nil {
+		slog.Error("Failed to initialize database and stores", "error", err)
+	}
+
+	wireToolsHooks()
+
+	skipCron := isTruthyEnv(env, "OPENOCTA_SKIP_CRON")
+	skipChannels := isTruthyEnv(env, "OPENOCTA_SKIP_CHANNELS") || isTruthyEnv(env, "OPENOCTA_SKIP_PROVIDERS")
+
+	cronSvc, err := initCron(stateDir, skipCron)
+	if err != nil {
+		slog.Error("Failed to initialize Cron service", "error", err)
+	}
+
+	chReg := channels.NewRegistry()
+	chRuntimeMgr := channels.NewManager()
+	outReg := outbound.NewAdapterRegistry()
+	initChannels(chReg, outReg)
+
+	hub := ws.NewHub(version, nil, nil)
+
+	cfg, err := config.Load(env)
+	if err != nil {
+		cfg = &config.OpenOctaConfig{}
+	}
+
+	if cfg != nil && cfg.Env != nil && cfg.Env.Vars != nil {
+		for k, v := range cfg.Env.Vars {
+			if os.Getenv(k) == "" {
+				os.Setenv(k, v)
+			}
+		}
+	}
+
+	if err := initpkg.InitEmployee(cfg); err != nil {
+		slog.Warn("init employees at startup failed", "error", err)
+	}
+
+	ctx := buildGatewayContext(version, stateDir, env, cfg, hub, chReg, outReg, chRuntimeMgr, cronSvc)
+	setupGatewayHandlers(ctx, hub, cfg, env)
+
+	if cronSvc != nil {
+		setupCronDeps(cronSvc, ctx, hub, cfg)
+	}
+
+	go hub.Run()
+
+	startChannelRuntimes(chRuntimeMgr, cfg, ctx, skipChannels)
 
 	s := &Server{
 		addr:    addr,
@@ -458,7 +440,6 @@ func NewServer(addr string, version string) *Server {
 		mux:     mux,
 		hub:     hub,
 		ctx:     ctx,
-		//mcpManager: mcpManager,
 	}
 	s.registerRoutes()
 	return s
@@ -545,8 +526,12 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /.well-known/agent.json", s.handleWellKnownAgentJSON)
 	s.mux.HandleFunc("HEAD /.well-known/agent.json", s.handleWellKnownAgentJSON)
 	// Auth & RBAC API Routes
+	s.mux.HandleFunc("GET /api/auth/setup-status", s.handleSetupStatus)
+	s.mux.HandleFunc("POST /api/auth/setup", s.handleSetup)
 	s.mux.HandleFunc("POST /api/auth/login", s.handleLogin)
 	s.mux.HandleFunc("POST /api/auth/logout", s.handleLogout)
+	s.mux.HandleFunc("POST /api/auth/logout-all", s.requirePermission("", s.handleLogoutAll))
+	s.mux.HandleFunc("GET /api/auth/sessions", s.requirePermission("", s.handleListSessions))
 	s.mux.HandleFunc("GET /api/auth/me", s.requirePermission("", s.handleGetMe))
 	s.mux.HandleFunc("GET /api/rbac/users", s.requirePermission("menu:config", s.handleListUsers))
 	s.mux.HandleFunc("POST /api/rbac/users", s.requirePermission("menu:config", s.handleCreateUser))
@@ -568,6 +553,8 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/ops/alerts/groups/{id}", s.requireRbacOrGatewayToken("", s.handleOpsGetAlertGroup))
 	s.mux.HandleFunc("PATCH /api/ops/alerts/groups/{id}", s.requireRbacOrGatewayToken("ops:ack", s.handleOpsPatchAlertGroup))
 	s.mux.HandleFunc("GET /api/ops/inspection/im-status", s.requireRbacOrGatewayToken("", s.handleOpsInspectionIMStatus))
+	s.mux.HandleFunc("GET /api/ops/job-runs", s.requireRbacOrGatewayToken("", s.handleOpsListJobRuns))
+	s.mux.HandleFunc("GET /api/ops/job-runs/{id}", s.requireRbacOrGatewayToken("", s.handleOpsGetJobRun))
 
 	// Ops: BCH Big Data Ecosystem Scenarios
 	s.mux.HandleFunc("GET /api/ops/bch/clusters/health", s.requireRbacOrGatewayToken("menu:hadoop", s.handleBchClustersHealth))
@@ -920,17 +907,10 @@ func (s *Server) requirePprofAuth(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
-		// Check RBAC admin session
-		authHeader := r.Header.Get("Authorization")
-		if authHeader != "" && strings.HasPrefix(strings.ToLower(authHeader), "bearer ") {
-			parts := strings.Split(authHeader, " ")
-			if len(parts) == 2 {
-				token := parts[1]
-				if session, err := rbac.ValidateToken(token); err == nil && session.RoleName == "admin" {
-					next(w, r)
-					return
-				}
-			}
+		// Check RBAC admin session (cookie or bearer)
+		if session, err := validateRBACSession(r); err == nil && session.RoleName == "admin" {
+			next(w, r)
+			return
 		}
 
 		w.Header().Set("Content-Type", "application/json")

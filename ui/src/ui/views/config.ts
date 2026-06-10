@@ -39,7 +39,6 @@ export type ConfigProps = {
   rbacUsersList?: any[];
   rbacRolesList?: any[];
   rbacUsersLoading?: boolean;
-  rbacToken?: string | null;
   rbacUser?: any | null;
   onCreateUser?: (username: string, password: string, roleId: number) => Promise<void>;
   onDeleteUser?: (id: number) => Promise<void>;

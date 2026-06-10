@@ -1,7 +1,6 @@
 package ops
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/url"
 	"os"
@@ -43,11 +42,24 @@ type InspectionResult struct {
 	PresentSources  []string               `json:"presentSources,omitempty"`
 	Errors          []string               `json:"errors,omitempty"`
 	ReportMarkdown  string                 `json:"reportMarkdown,omitempty"`
-	ScoreSource     string                 `json:"scoreSource,omitempty"` // structured | legacy_text | none
+	ScoreSource     string                 `json:"scoreSource,omitempty"` // structured | invalid_structured | legacy_text | none
 	SourceKind      string                 `json:"sourceKind,omitempty"`  // "chat", "platform_tool", "collector", "mcp"
 	TriggerType     string                 `json:"triggerType,omitempty"` // "chat_intent", "manual_confirm", "cron", "alert_hook"
+	Confidence      string                 `json:"confidence,omitempty"`
+	Summary         string                 `json:"summary,omitempty"`
+	Risks           []string               `json:"risks,omitempty"`
+	RecommendedActions []string            `json:"recommendedActions,omitempty"`
+	RequiresApproval   *bool               `json:"requiresApproval,omitempty"`
+	ValidationStatus   string              `json:"validationStatus,omitempty"` // valid | invalid | missing
+	ValidationErrors   []string            `json:"validationErrors,omitempty"`
 	StartedAt       int64                  `json:"startedAt"`
 	FinishedAt      int64                  `json:"finishedAt"`
+}
+
+// ParseInspectionOptions controls commercial parsing behavior.
+type ParseInspectionOptions struct {
+	// AllowLegacyTextScore enables regex score extraction from natural language (deprecated).
+	AllowLegacyTextScore bool
 }
 
 // ParseInspectionResult extracts the score, status, tool runs, and errors for a completed session.
@@ -57,6 +69,11 @@ func ParseInspectionResult(sessionID string, jobID string, summary string, statu
 
 // ParseInspectionResultWithContext extracts the score, status, tool runs, errors, and selected ops scope.
 func ParseInspectionResultWithContext(sessionID string, jobID string, summary string, status string, runAtMs int64, durationMs int64, inspectCtx InspectionContext) InspectionResult {
+	return ParseInspectionResultWithOptions(sessionID, jobID, summary, status, runAtMs, durationMs, inspectCtx, DefaultParseInspectionOptions())
+}
+
+// ParseInspectionResultWithOptions parses inspection output with explicit commercial validation options.
+func ParseInspectionResultWithOptions(sessionID string, jobID string, summary string, status string, runAtMs int64, durationMs int64, inspectCtx InspectionContext, opts ParseInspectionOptions) InspectionResult {
 	domain := strings.TrimSpace(inspectCtx.Domain)
 	if domain == "" {
 		domain = DomainFromInspectJobID(jobID)
@@ -72,10 +89,25 @@ func ParseInspectionResultWithContext(sessionID string, jobID string, summary st
 		FinishedAt:  runAtMs + durationMs,
 	}
 
-	// 1. Prefer a structured InspectionReport payload if the model produced one.
-	if structured, ok := parseStructuredInspectionReport(summary); ok {
-		applyStructuredInspectionReport(&res, structured)
-		res.ScoreSource = "structured"
+	// 1. Structured InspectionReport: validate strictly; invalid payloads must not fall back to regex.
+	structured := parseStructuredInspectionReportStrict(summary)
+	switch {
+	case structured.valid:
+		applyStructuredInspectionReport(&res, structured.report)
+		res.ScoreSource = ScoreSourceStructured
+		res.ValidationStatus = ValidationStatusValid
+	case structured.found:
+		applyStructuredInspectionReport(&res, structured.report)
+		res.Score = nil
+		res.ScoreStatus = ScoreStatusDegraded
+		res.ScoreSource = ScoreSourceInvalidStructured
+		res.ValidationStatus = ValidationStatusInvalid
+		res.ValidationErrors = append([]string{}, structured.errors...)
+		for _, msg := range structured.errors {
+			res.Errors = append(res.Errors, "structured report invalid: "+msg)
+		}
+	default:
+		res.ValidationStatus = ValidationStatusMissing
 	}
 
 	// 2. Parse ToolRuns from transcript
@@ -144,25 +176,26 @@ func ParseInspectionResultWithContext(sessionID string, jobID string, summary st
 		}
 	}
 
-	// 3. Legacy fallback: parse text score only when no structured score exists.
-	if res.Score == nil {
+	// 3. Legacy fallback: regex score extraction is opt-in only (commercial path rejects silent guessing).
+	if res.Score == nil && res.ValidationStatus != ValidationStatusInvalid && opts.AllowLegacyTextScore {
 		scoreMatch := regexp.MustCompile(`(?i)(?:健康得分|健康度|Score)\s*[：:]\s*(\d+)`).FindStringSubmatch(summary)
 		if len(scoreMatch) > 1 {
 			var s int
 			if _, err := fmt.Sscanf(scoreMatch[1], "%d", &s); err == nil {
 				res.Score = &s
 				res.ScoreStatus = scoreStatusFromScore(s)
-				res.ScoreSource = "legacy_text"
+				res.ScoreSource = ScoreSourceLegacyText
+				res.ValidationErrors = append(res.ValidationErrors, "score extracted via legacy_text regex fallback")
 			}
 		}
 	}
 
-	// 4. Fallback for ScoreStatus and Errors if no score is generated
-	if res.Score == nil {
+	// 4. Fallback for ScoreStatus when no score/status was derived.
+	if res.Score == nil && strings.TrimSpace(res.ScoreStatus) == "" {
 		if len(res.Errors) > 0 || status == "error" {
-			res.ScoreStatus = "degraded"
+			res.ScoreStatus = ScoreStatusDegraded
 		} else {
-			res.ScoreStatus = "unknown"
+			res.ScoreStatus = ScoreStatusUnknown
 		}
 	}
 
@@ -170,7 +203,7 @@ func ParseInspectionResultWithContext(sessionID string, jobID string, summary st
 		res.Errors = append(res.Errors, "巡检执行遇到系统错误")
 	}
 	if res.ScoreSource == "" {
-		res.ScoreSource = "none"
+		res.ScoreSource = ScoreSourceNone
 	}
 	if strings.TrimSpace(res.ScenarioKey) == "" {
 		res.ScenarioKey = ScenarioKeyForInspection(res)
@@ -181,13 +214,9 @@ func ParseInspectionResultWithContext(sessionID string, jobID string, summary st
 }
 
 func parseStructuredInspectionReport(text string) (InspectionResult, bool) {
-	for _, candidate := range structuredJSONCandidates(text) {
-		var parsed InspectionResult
-		if err := json.Unmarshal([]byte(candidate), &parsed); err == nil {
-			if parsed.Score != nil || parsed.ScoreStatus != "" || len(parsed.ToolRuns) > 0 || parsed.MetricsEvidence != nil {
-				return parsed, true
-			}
-		}
+	parsed := parseStructuredInspectionReportStrict(text)
+	if parsed.valid {
+		return parsed.report, true
 	}
 	return InspectionResult{}, false
 }
@@ -250,6 +279,28 @@ func applyStructuredInspectionReport(dst *InspectionResult, src InspectionResult
 	}
 	if src.TriggerType != "" {
 		dst.TriggerType = src.TriggerType
+	}
+	if strings.TrimSpace(src.Confidence) != "" {
+		dst.Confidence = strings.TrimSpace(strings.ToLower(src.Confidence))
+	}
+	if strings.TrimSpace(src.Summary) != "" {
+		dst.Summary = strings.TrimSpace(src.Summary)
+	}
+	if len(src.Risks) > 0 {
+		dst.Risks = append([]string{}, src.Risks...)
+	}
+	if len(src.RecommendedActions) > 0 {
+		dst.RecommendedActions = append([]string{}, src.RecommendedActions...)
+	}
+	if src.RequiresApproval != nil {
+		v := *src.RequiresApproval
+		dst.RequiresApproval = &v
+	}
+	if len(src.MissingSources) > 0 {
+		dst.MissingSources = append([]string{}, src.MissingSources...)
+	}
+	if len(src.PresentSources) > 0 {
+		dst.PresentSources = append([]string{}, src.PresentSources...)
 	}
 }
 

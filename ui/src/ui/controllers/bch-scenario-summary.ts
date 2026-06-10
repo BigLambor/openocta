@@ -8,11 +8,10 @@ import {
   type HdfsFsImageStats,
   type SparkJob,
 } from "./bch-client.ts";
+import type { AuthFetchHost } from "../auth-http.ts";
 
-type BchScenarioSummaryHost = {
+type BchScenarioSummaryHost = AuthFetchHost & {
   gatewayHttpUrl: string;
-  rbacToken: string | null;
-  settings: { token: string };
 };
 
 export type BchScenarioStatus = "healthy" | "warning" | "critical" | "unknown";

@@ -1,5 +1,7 @@
 /** Ops cluster assets API (P1). */
 
+import { authFetch, type AuthFetchHost } from "../auth-http.ts";
+
 export type OpsClusterRecord = {
   id: string;
   name: string;
@@ -45,21 +47,9 @@ export type OpsDashboardSummary = {
   }>;
 };
 
-type OpsClusterHost = {
+type OpsClusterHost = AuthFetchHost & {
   gatewayHttpUrl: string;
-  rbacToken: string | null;
-  settings: { token: string };
 };
-
-function authHeaders(host: OpsClusterHost): Record<string, string> {
-  const headers: Record<string, string> = { Accept: "application/json" };
-  if (host.rbacToken) {
-    headers.Authorization = `Bearer ${host.rbacToken}`;
-  } else if (host.settings.token.trim()) {
-    headers.Authorization = `Bearer ${host.settings.token.trim()}`;
-  }
-  return headers;
-}
 
 function baseUrl(host: OpsClusterHost): string {
   return host.gatewayHttpUrl.replace(/\/$/, "");
@@ -70,9 +60,7 @@ export async function fetchOpsClusters(
   domain?: string,
 ): Promise<OpsClusterRecord[]> {
   const q = domain ? `?domain=${encodeURIComponent(domain)}` : "";
-  const res = await fetch(`${baseUrl(host)}/api/ops/clusters${q}`, {
-    headers: authHeaders(host),
-  });
+  const res = await authFetch(host, `${baseUrl(host)}/api/ops/clusters${q}`);
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as { error?: string };
     throw new Error(body.error || `加载集群列表失败 (${res.status})`);
@@ -82,9 +70,7 @@ export async function fetchOpsClusters(
 }
 
 export async function fetchOpsDashboardSummary(host: OpsClusterHost): Promise<OpsDashboardSummary> {
-  const res = await fetch(`${baseUrl(host)}/api/ops/dashboard/summary`, {
-    headers: authHeaders(host),
-  });
+  const res = await authFetch(host, `${baseUrl(host)}/api/ops/dashboard/summary`);
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as { error?: string };
     throw new Error(body.error || `加载运维概览失败 (${res.status})`);
@@ -108,9 +94,7 @@ export type OpsHealthSnapshot = {
 };
 
 export async function fetchOpsHealthSnapshots(host: OpsClusterHost): Promise<OpsHealthSnapshot[]> {
-  const res = await fetch(`${baseUrl(host)}/api/ops/health/snapshots`, {
-    headers: authHeaders(host),
-  });
+  const res = await authFetch(host, `${baseUrl(host)}/api/ops/health/snapshots`);
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as { error?: string };
     throw new Error(body.error || `加载健康快照失败 (${res.status})`);
@@ -132,9 +116,9 @@ export type OpsCMDBSyncResult = {
 };
 
 export async function syncOpsClustersFromCMDB(host: OpsClusterHost): Promise<OpsCMDBSyncResult> {
-  const res = await fetch(`${baseUrl(host)}/api/ops/clusters/sync-cmdb`, {
+  const res = await authFetch(host, `${baseUrl(host)}/api/ops/clusters/sync-cmdb`, {
     method: "POST",
-    headers: { ...authHeaders(host), "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({}),
   });
   if (!res.ok) {
@@ -164,9 +148,9 @@ export async function createOpsCluster(
     credentialsRef?: string;
   },
 ): Promise<OpsClusterRecord> {
-  const res = await fetch(`${baseUrl(host)}/api/ops/clusters`, {
+  const res = await authFetch(host, `${baseUrl(host)}/api/ops/clusters`, {
     method: "POST",
-    headers: { ...authHeaders(host), "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
   if (!res.ok) {
@@ -197,9 +181,9 @@ export async function updateOpsCluster(
     credentialsRef: string;
   }>,
 ): Promise<OpsClusterRecord> {
-  const res = await fetch(`${baseUrl(host)}/api/ops/clusters/${encodeURIComponent(id)}`, {
+  const res = await authFetch(host, `${baseUrl(host)}/api/ops/clusters/${encodeURIComponent(id)}`, {
     method: "PATCH",
-    headers: { ...authHeaders(host), "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
   if (!res.ok) {
@@ -210,9 +194,8 @@ export async function updateOpsCluster(
 }
 
 export async function deleteOpsCluster(host: OpsClusterHost, id: string): Promise<void> {
-  const res = await fetch(`${baseUrl(host)}/api/ops/clusters/${encodeURIComponent(id)}`, {
+  const res = await authFetch(host, `${baseUrl(host)}/api/ops/clusters/${encodeURIComponent(id)}`, {
     method: "DELETE",
-    headers: authHeaders(host),
   });
   if (!res.ok) {
     const err = (await res.json().catch(() => ({}))) as { error?: string };

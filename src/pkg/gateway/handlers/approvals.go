@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,11 +11,6 @@ import (
 	"github.com/openocta/openocta/pkg/paths"
 	octasecurity "github.com/openocta/openocta/pkg/security"
 )
-
-type approvalSnapshot struct {
-	Records   []approvalRecord     `json:"records"`
-	Whitelist map[string]time.Time `json:"whitelist"`
-}
 
 // approvalRecord mirrors agentsdk-go security.ApprovalRecord JSON fields.
 type approvalRecord struct {
@@ -59,24 +53,6 @@ func resolveApprovalStoreFile(cfg *config.OpenOctaConfig, env func(string) strin
 	return filepath.Join(stateDir, "agents", "approvals", "approvals.json"), timeoutSeconds
 }
 
-func loadApprovalSnapshot(path string) (*approvalSnapshot, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return &approvalSnapshot{Records: nil, Whitelist: map[string]time.Time{}}, nil
-		}
-		return nil, err
-	}
-	var snap approvalSnapshot
-	if err := json.Unmarshal(data, &snap); err != nil {
-		return nil, err
-	}
-	if snap.Whitelist == nil {
-		snap.Whitelist = map[string]time.Time{}
-	}
-	return &snap, nil
-}
-
 func toListEntry(rec approvalRecord, now time.Time, timeoutSeconds int) map[string]interface{} {
 	createdAt := rec.RequestedAt
 	timeoutAt := createdAt.Add(time.Duration(timeoutSeconds) * time.Second)
@@ -107,7 +83,6 @@ func toListEntry(rec approvalRecord, now time.Time, timeoutSeconds int) map[stri
 		out["autoApproved"] = true
 	}
 
-	// 过期时间与 TTL
 	var expiresAt time.Time
 	switch status {
 	case string(octasecurity.ApprovalPending):
@@ -115,8 +90,6 @@ func toListEntry(rec approvalRecord, now time.Time, timeoutSeconds int) map[stri
 	case string(octasecurity.ApprovalApproved):
 		if rec.ExpiresAt != nil {
 			expiresAt = *rec.ExpiresAt
-		} else {
-			expiresAt = time.Time{}
 		}
 	default:
 		expiresAt = time.Time{}
@@ -146,23 +119,40 @@ func toWhitelistEntry(sessionID string, expiresAt time.Time, now time.Time) map[
 			out["status"] = "whitelist_expired"
 		}
 	} else {
-		out["ttlSeconds"] = -1 // 永久免审
+		out["ttlSeconds"] = -1
 		out["expiresAt"] = int64(0)
 	}
 	return out
+}
+
+func approvalRecordToListEntry(rec *octasecurity.ApprovalRecord, now time.Time, timeoutSeconds int) map[string]interface{} {
+	if rec == nil {
+		return nil
+	}
+	wrapped := approvalRecord{
+		ID:           rec.ID,
+		SessionID:    rec.SessionID,
+		Command:      rec.Command,
+		Paths:        rec.Paths,
+		State:        string(rec.State),
+		RequestedAt:  rec.RequestedAt,
+		ApprovedAt:   rec.ApprovedAt,
+		Approver:     rec.Approver,
+		Reason:       rec.Reason,
+		ExpiresAt:    rec.ExpiresAt,
+		AutoApproved: rec.AutoApproved,
+	}
+	return toListEntry(wrapped, now, timeoutSeconds)
 }
 
 // ApprovalsListHandler handles "approvals.list".
 // Returns approved, pending, denied records and session whitelist, each with status, expiresAt, ttlSeconds.
 func ApprovalsListHandler(opts HandlerOpts) error {
 	cfg := loadConfigFromContext(opts.Context)
-	env := func(k string) string {
-		// Prefer OS env for path resolution
-		return os.Getenv(k)
-	}
+	env := func(k string) string { return os.Getenv(k) }
 	storeFile, timeoutSeconds := resolveApprovalStoreFile(cfg, env)
 
-	snap, err := loadApprovalSnapshot(storeFile)
+	q, err := octasecurity.GetApprovalQueue(storeFile)
 	if err != nil {
 		opts.Respond(false, nil, &protocol.ErrorShape{
 			Code:    protocol.ErrCodeInternal,
@@ -173,19 +163,19 @@ func ApprovalsListHandler(opts HandlerOpts) error {
 
 	now := time.Now()
 	var approved, pendingActive, pendingExpired, denied []map[string]interface{}
-	for _, rec := range snap.Records {
-		entry := toListEntry(rec, now, timeoutSeconds)
+	for _, rec := range q.ListAll() {
+		entry := approvalRecordToListEntry(rec, now, timeoutSeconds)
 		switch rec.State {
-		case string(octasecurity.ApprovalApproved):
+		case octasecurity.ApprovalApproved:
 			approved = append(approved, entry)
-		case string(octasecurity.ApprovalPending):
+		case octasecurity.ApprovalPending:
 			status, _ := entry["status"].(string)
 			if status == "expired" {
 				pendingExpired = append(pendingExpired, entry)
 			} else {
 				pendingActive = append(pendingActive, entry)
 			}
-		case string(octasecurity.ApprovalDenied):
+		case octasecurity.ApprovalDenied:
 			denied = append(denied, entry)
 		default:
 			status, _ := entry["status"].(string)
@@ -197,12 +187,11 @@ func ApprovalsListHandler(opts HandlerOpts) error {
 		}
 	}
 
-	whitelisted := make([]map[string]interface{}, 0, len(snap.Whitelist))
-	for sessionID, expiresAt := range snap.Whitelist {
+	whitelisted := make([]map[string]interface{}, 0)
+	for sessionID, expiresAt := range q.WhitelistSnapshot() {
 		whitelisted = append(whitelisted, toWhitelistEntry(sessionID, expiresAt, now))
 	}
 
-	// entries：全量展示（含已过期待清理项）；pending：仅真实待人工审批且在超时窗口内的记录
 	entries := append([]map[string]interface{}{}, approved...)
 	entries = append(entries, pendingActive...)
 	entries = append(entries, pendingExpired...)
@@ -210,6 +199,7 @@ func ApprovalsListHandler(opts HandlerOpts) error {
 
 	opts.Respond(true, map[string]interface{}{
 		"storePath":      storeFile,
+		"storeBackend":   q.StoreBackend(),
 		"approved":       approved,
 		"pending":        pendingActive,
 		"pendingExpired": pendingExpired,
@@ -218,6 +208,20 @@ func ApprovalsListHandler(opts HandlerOpts) error {
 		"entries":        entries,
 	}, nil, nil)
 	return nil
+}
+
+func ensureApprovalPendingAndNotExpired(q *octasecurity.ApprovalQueue, requestID string, timeoutSeconds int) (*octasecurity.ApprovalRecord, *protocol.ErrorShape) {
+	rec, ok := q.GetRecord(requestID)
+	if !ok {
+		return nil, &protocol.ErrorShape{Code: protocol.ErrCodeNotFound, Message: "approval request not found"}
+	}
+	if rec.State != octasecurity.ApprovalPending {
+		return nil, &protocol.ErrorShape{Code: protocol.ErrCodeInvalidRequest, Message: "approval not pending"}
+	}
+	if timeoutSeconds > 0 && time.Now().After(rec.RequestedAt.Add(time.Duration(timeoutSeconds)*time.Second)) {
+		return nil, &protocol.ErrorShape{Code: protocol.ErrCodeInvalidRequest, Message: "approval request expired"}
+	}
+	return rec, nil
 }
 
 // ApprovalsApproveHandler handles "approvals.approve".
@@ -236,35 +240,19 @@ func ApprovalsApproveHandler(opts HandlerOpts) error {
 	cfg := loadConfigFromContext(opts.Context)
 	env := func(k string) string { return os.Getenv(k) }
 	storeFile, timeoutSeconds := resolveApprovalStoreFile(cfg, env)
-	snap, err := loadApprovalSnapshot(storeFile)
-	if err != nil {
-		opts.Respond(false, nil, &protocol.ErrorShape{Code: protocol.ErrCodeInternal, Message: err.Error()}, nil)
-		return nil
-	}
-	now := time.Now()
-	for _, rec := range snap.Records {
-		if rec.ID == requestID && rec.State == string(octasecurity.ApprovalPending) && timeoutSeconds > 0 {
-			if now.After(rec.RequestedAt.Add(time.Duration(timeoutSeconds) * time.Second)) {
-				opts.Respond(false, nil, &protocol.ErrorShape{
-					Code:    protocol.ErrCodeInvalidRequest,
-					Message: "approval request expired",
-				}, nil)
-				return nil
-			}
-			break
-		}
-	}
-
 	q, err := octasecurity.GetApprovalQueue(storeFile)
 	if err != nil {
 		opts.Respond(false, nil, &protocol.ErrorShape{Code: protocol.ErrCodeInternal, Message: err.Error()}, nil)
 		return nil
 	}
-	// Approve once: mark record approved with optional ExpiresAt for UI (same window as pending timeout).
-	// Does not add the session to the whitelist (that is approvals.whitelistSession only).
+	if _, errShape := ensureApprovalPendingAndNotExpired(q, requestID, timeoutSeconds); errShape != nil {
+		opts.Respond(false, nil, errShape, nil)
+		return nil
+	}
+
 	var recordTTL time.Duration
-	if opts.Context.Config.Security != nil && opts.Context.Config.Security.ApprovalQueue != nil && opts.Context.Config.Security.ApprovalQueue.TimeoutSeconds != nil {
-		recordTTL = time.Duration(int64(*opts.Context.Config.Security.ApprovalQueue.TimeoutSeconds)) * time.Second
+	if cfg != nil && cfg.Security != nil && cfg.Security.ApprovalQueue != nil && cfg.Security.ApprovalQueue.TimeoutSeconds != nil {
+		recordTTL = time.Duration(int64(*cfg.Security.ApprovalQueue.TimeoutSeconds)) * time.Second
 	} else {
 		recordTTL = time.Minute * 5
 	}
@@ -296,28 +284,13 @@ func ApprovalsDenyHandler(opts HandlerOpts) error {
 	cfg := loadConfigFromContext(opts.Context)
 	env := func(k string) string { return os.Getenv(k) }
 	storeFile, timeoutSeconds := resolveApprovalStoreFile(cfg, env)
-	snap, err := loadApprovalSnapshot(storeFile)
+	q, err := octasecurity.GetApprovalQueue(storeFile)
 	if err != nil {
 		opts.Respond(false, nil, &protocol.ErrorShape{Code: protocol.ErrCodeInternal, Message: err.Error()}, nil)
 		return nil
 	}
-	now := time.Now()
-	for _, rec := range snap.Records {
-		if rec.ID == requestID && rec.State == string(octasecurity.ApprovalPending) && timeoutSeconds > 0 {
-			if now.After(rec.RequestedAt.Add(time.Duration(timeoutSeconds) * time.Second)) {
-				opts.Respond(false, nil, &protocol.ErrorShape{
-					Code:    protocol.ErrCodeInvalidRequest,
-					Message: "approval request expired",
-				}, nil)
-				return nil
-			}
-			break
-		}
-	}
-
-	q, err := octasecurity.GetApprovalQueue(storeFile)
-	if err != nil {
-		opts.Respond(false, nil, &protocol.ErrorShape{Code: protocol.ErrCodeInternal, Message: err.Error()}, nil)
+	if _, errShape := ensureApprovalPendingAndNotExpired(q, requestID, timeoutSeconds); errShape != nil {
+		opts.Respond(false, nil, errShape, nil)
 		return nil
 	}
 	if _, err := q.Deny(requestID, strings.TrimSpace(approverID), strings.TrimSpace(reason)); err != nil {
@@ -349,54 +322,20 @@ func ApprovalsWhitelistSessionHandler(opts HandlerOpts) error {
 	cfg := loadConfigFromContext(opts.Context)
 	env := func(k string) string { return os.Getenv(k) }
 	storeFile, timeoutSeconds := resolveApprovalStoreFile(cfg, env)
-	snap, err := loadApprovalSnapshot(storeFile)
-	if err != nil {
-		opts.Respond(false, nil, &protocol.ErrorShape{Code: protocol.ErrCodeInternal, Message: err.Error()}, nil)
-		return nil
-	}
-
-	now := time.Now()
-	var rec *approvalRecord
-	for i := range snap.Records {
-		r := &snap.Records[i]
-		if r.ID == requestID {
-			// Only allow whitelisting pending, non-expired approvals
-			if r.State != string(octasecurity.ApprovalPending) {
-				opts.Respond(false, nil, &protocol.ErrorShape{
-					Code:    protocol.ErrCodeInvalidRequest,
-					Message: "approval not pending",
-				}, nil)
-				return nil
-			}
-			if timeoutSeconds > 0 && now.After(r.RequestedAt.Add(time.Duration(timeoutSeconds)*time.Second)) {
-				opts.Respond(false, nil, &protocol.ErrorShape{
-					Code:    protocol.ErrCodeInvalidRequest,
-					Message: "approval request expired",
-				}, nil)
-				return nil
-			}
-			rec = r
-			break
-		}
-	}
-	if rec == nil {
-		opts.Respond(false, nil, &protocol.ErrorShape{
-			Code:    protocol.ErrCodeNotFound,
-			Message: "approval request not found",
-		}, nil)
-		return nil
-	}
-
 	q, err := octasecurity.GetApprovalQueue(storeFile)
 	if err != nil {
 		opts.Respond(false, nil, &protocol.ErrorShape{Code: protocol.ErrCodeInternal, Message: err.Error()}, nil)
 		return nil
 	}
+	rec, errShape := ensureApprovalPendingAndNotExpired(q, requestID, timeoutSeconds)
+	if errShape != nil {
+		opts.Respond(false, nil, errShape, nil)
+		return nil
+	}
 
-	// Whitelist the session indefinitely (ttl=0 means no expiry).
 	var ttl time.Duration
-	if opts.Context.Config.Security != nil && opts.Context.Config.Security.ApprovalQueue != nil && opts.Context.Config.Security.ApprovalQueue.TimeoutSeconds != nil {
-		ttl = time.Duration(int64(*opts.Context.Config.Security.ApprovalQueue.TimeoutSeconds)) * time.Second
+	if cfg != nil && cfg.Security != nil && cfg.Security.ApprovalQueue != nil && cfg.Security.ApprovalQueue.TimeoutSeconds != nil {
+		ttl = time.Duration(int64(*cfg.Security.ApprovalQueue.TimeoutSeconds)) * time.Second
 	} else {
 		ttl = time.Minute * 5
 	}
@@ -409,7 +348,6 @@ func ApprovalsWhitelistSessionHandler(opts HandlerOpts) error {
 		return nil
 	}
 
-	// Also mark this pending approval as approved with configured TTL.
 	if _, err := q.Approve(requestID, strings.TrimSpace(approverID), ttl); err != nil {
 		opts.Respond(false, nil, &protocol.ErrorShape{
 			Code:    protocol.ErrCodeInternal,

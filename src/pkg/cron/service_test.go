@@ -204,12 +204,21 @@ func TestCronMigration(t *testing.T) {
 		t.Errorf("expected migrated job name 'Migrated Job', got %q", fetched.Name)
 	}
 
-	// Verify old JSON file has been renamed to .bak
+	// Verify old JSON file has been backed up
 	if _, err := os.Stat(storePath); err == nil {
 		t.Errorf("old JSON file should have been renamed/deleted, but still exists")
 	}
-	if _, err := os.Stat(storePath + ".bak"); err != nil {
-		t.Errorf("bak file does not exist: %v", err)
+	if !hasBackupWithPrefix(t, filepath.Dir(storePath), "jobs.json.bak.") {
+		t.Errorf("expected jobs.json backup with timestamp prefix")
+	}
+
+	// Verify normalized jobs table contains migrated job
+	var jobCount int
+	if err := db.GetDB().QueryRow(`SELECT COUNT(*) FROM jobs WHERE id = ? AND kind = 'cron'`, job1.ID).Scan(&jobCount); err != nil {
+		t.Fatalf("query jobs: %v", err)
+	}
+	if jobCount != 1 {
+		t.Fatalf("expected migrated job in jobs table, got count=%d", jobCount)
 	}
 }
 

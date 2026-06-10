@@ -27,10 +27,7 @@ func TestAggregateGBaseMissingRequiredSourceIsDegraded(t *testing.T) {
 }
 
 func TestCollectAlertSignalDeduplicatesAndScores(t *testing.T) {
-	dir := t.TempDir()
-	if err := InitAlertsStore(dir); err != nil {
-		t.Fatal(err)
-	}
+	initTestAlertsStore(t)
 	cluster := Cluster{ID: "cluster-gbase-alert", Domain: DomainGBase, Status: "healthy"}
 	_, err := RecordMergedAlertGroup("gbase-monitor", "session", "run", []MergedAlertInput{
 		{Title: "pool exhausted", Severity: "critical", Alertname: "PoolFull", Service: "GBase", Instance: "db-1", ClusterID: cluster.ID, Component: "pool"},

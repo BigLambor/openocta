@@ -309,9 +309,9 @@ export class OpenClawApp extends LitElement implements NativeDialogInvoker {
   @state() presenceError: string | null = null;
   @state() presenceStatus: string | null = null;
 
-  @state() rbacToken: string | null = localStorage.getItem("openocta_rbac_token");
   @state() rbacUser: { userId: number; username: string; roleName: string; permissions: string[] } | null = null;
   @state() rbacChecked = false;
+  @state() rbacNeedsSetup = false;
   @state() rbacLoginError: string | null = null;
   @state() rbacLoginLoading = false;
   @state() rbacUsersList: Array<Record<string, unknown>> = [];
@@ -613,10 +613,16 @@ export class OpenClawApp extends LitElement implements NativeDialogInvoker {
   @state() cronForm: CronFormState = { ...DEFAULT_CRON_FORM };
   @state() cronRunsJobId: string | null = null;
   @state() cronRuns: CronRunLogEntry[] = [];
+  @state() cronJobRuns: import("./controllers/ops-job-runs.ts").OpsJobRunRecord[] = [];
   @state() cronBusy = false;
   @state() cronAddModalOpen = false;
   @state() cronEditModalOpen = false;
   @state() cronEditJobId: string | null = null;
+
+  @state() jobRunDetailOpen = false;
+  @state() jobRunDetailLoading = false;
+  @state() jobRunDetail: import("./controllers/ops-job-runs.ts").OpsJobRunDetail | null = null;
+  @state() jobRunDetailError: string | null = null;
 
   @state() skillsLoading = false;
   @state() skillsReport: SkillStatusReport | null = null;
@@ -1198,6 +1204,33 @@ export class OpenClawApp extends LitElement implements NativeDialogInvoker {
     }
   }
 
+  async openJobRunDetail(runId: string) {
+    const id = runId.trim();
+    if (!id) {
+      return;
+    }
+    this.jobRunDetailOpen = true;
+    this.jobRunDetailLoading = true;
+    this.jobRunDetail = null;
+    this.jobRunDetailError = null;
+    this.requestUpdate();
+    try {
+      const { fetchOpsJobRunDetail } = await import("./controllers/ops-job-runs.ts");
+      this.jobRunDetail = await fetchOpsJobRunDetail(this, id);
+    } catch (err) {
+      this.jobRunDetailError = err instanceof Error ? err.message : String(err);
+    } finally {
+      this.jobRunDetailLoading = false;
+      this.requestUpdate();
+    }
+  }
+
+  closeJobRunDetail() {
+    this.jobRunDetailOpen = false;
+    this.jobRunDetail = null;
+    this.jobRunDetailError = null;
+  }
+
   openPendingAlertsFromDashboard() {
     const summary = this.opsDashboardSummary;
     this.applySettings({ ...this.settings, opsDomain: "all" });
@@ -1657,22 +1690,24 @@ export class OpenClawApp extends LitElement implements NativeDialogInvoker {
 
   // RBAC State and Authentication Handlers
   async checkRbacSession() {
-    if (!this.rbacToken) {
-      this.rbacUser = null;
-      this.rbacChecked = true;
-      return;
-    }
     try {
+      const setupRes = await fetch(`${this.gatewayHttpUrl}/api/auth/setup-status`, {
+        credentials: "include",
+      });
+      if (setupRes.ok) {
+        const setup = (await setupRes.json()) as { needsSetup?: boolean };
+        this.rbacNeedsSetup = setup.needsSetup === true;
+      }
+      if (this.rbacNeedsSetup) {
+        this.rbacUser = null;
+        return;
+      }
       const res = await fetch(`${this.gatewayHttpUrl}/api/auth/me`, {
-        headers: {
-          "Authorization": `Bearer ${this.rbacToken}`
-        }
+        credentials: "include",
       });
       if (res.ok) {
         this.rbacUser = await res.json();
       } else {
-        localStorage.removeItem("openocta_rbac_token");
-        this.rbacToken = null;
         this.rbacUser = null;
       }
     } catch (e) {
@@ -1683,12 +1718,46 @@ export class OpenClawApp extends LitElement implements NativeDialogInvoker {
     }
   }
 
+  async handleRbacSetup(username: string, password: string) {
+    this.rbacLoginLoading = true;
+    this.rbacLoginError = null;
+    try {
+      const res = await fetch(`${this.gatewayHttpUrl}/api/auth/setup`, {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ username, password }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        this.rbacNeedsSetup = false;
+        this.rbacUser = data.user;
+        connectGatewayInternal(this as any);
+        startNodesPollingInternal(this as any);
+        if (this.tab === "overview" || this.tab === "domainInsight") {
+          void this.loadOpsDashboard();
+        }
+        if (this.tab === "logs") startLogsPollingInternal(this as any);
+        if (this.tab === "debug") startDebugPollingInternal(this as any);
+      } else {
+        this.rbacLoginError = data.error || "初始化失败";
+      }
+    } catch (e: any) {
+      this.rbacLoginError = e.message || "初始化请求失败，请检查网络";
+    } finally {
+      this.rbacLoginLoading = false;
+    }
+  }
+
   async handleRbacLogin(username, password) {
     this.rbacLoginLoading = true;
     this.rbacLoginError = null;
     try {
       const res = await fetch(`${this.gatewayHttpUrl}/api/auth/login`, {
         method: "POST",
+        credentials: "include",
         headers: {
           "Content-Type": "application/json"
         },
@@ -1696,9 +1765,7 @@ export class OpenClawApp extends LitElement implements NativeDialogInvoker {
       });
       const data = await res.json();
       if (res.ok) {
-        this.rbacToken = data.token;
         this.rbacUser = data.user;
-        localStorage.setItem("openocta_rbac_token", data.token);
         
         // Trigger connect and polling
         connectGatewayInternal(this as any);
@@ -1720,19 +1787,14 @@ export class OpenClawApp extends LitElement implements NativeDialogInvoker {
 
   async handleRbacLogout() {
     try {
-      if (this.rbacToken) {
-        await fetch(`${this.gatewayHttpUrl}/api/auth/logout`, {
-          method: "POST",
-          headers: {
-            "Authorization": `Bearer ${this.rbacToken}`
-          }
-        });
-      }
+      await fetch(`${this.gatewayHttpUrl}/api/auth/logout`, {
+        method: "POST",
+        credentials: "include",
+      });
     } catch (e) {
       console.error("Logout request failed", e);
     } finally {
       localStorage.removeItem("openocta_rbac_token");
-      this.rbacToken = null;
       this.rbacUser = null;
       
       // Stop connection & polling
@@ -1748,14 +1810,9 @@ export class OpenClawApp extends LitElement implements NativeDialogInvoker {
   async loadRbacData() {
     this.rbacUsersLoading = true;
     try {
-      const headers: Record<string, string> = {};
-      if (this.rbacToken) {
-        headers["Authorization"] = `Bearer ${this.rbacToken}`;
-      }
-      
       const [usersRes, rolesRes] = await Promise.all([
-        fetch(`${this.gatewayHttpUrl}/api/rbac/users`, { headers }),
-        fetch(`${this.gatewayHttpUrl}/api/rbac/roles`, { headers })
+        fetch(`${this.gatewayHttpUrl}/api/rbac/users`, { credentials: "include" }),
+        fetch(`${this.gatewayHttpUrl}/api/rbac/roles`, { credentials: "include" }),
       ]);
       
       if (usersRes.ok && rolesRes.ok) {
@@ -1772,9 +1829,9 @@ export class OpenClawApp extends LitElement implements NativeDialogInvoker {
   async handleCreateUser(username, password, roleId) {
     const res = await fetch(`${this.gatewayHttpUrl}/api/rbac/users`, {
       method: "POST",
+      credentials: "include",
       headers: {
         "Content-Type": "application/json",
-        "Authorization": `Bearer ${this.rbacToken}`
       },
       body: JSON.stringify({ username, password, roleId })
     });
@@ -1788,9 +1845,7 @@ export class OpenClawApp extends LitElement implements NativeDialogInvoker {
   async handleDeleteUser(id) {
     const res = await fetch(`${this.gatewayHttpUrl}/api/rbac/users/${id}`, {
       method: "DELETE",
-      headers: {
-        "Authorization": `Bearer ${this.rbacToken}`
-      }
+      credentials: "include",
     });
     const data = await res.json();
     if (!res.ok) {

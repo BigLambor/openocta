@@ -1,233 +1,315 @@
 package rbac
 
 import (
-	"crypto/sha256"
+	cryptorand "crypto/rand"
 	"database/sql"
 	"encoding/hex"
-	"math/rand"
+	"fmt"
 	"os"
 	"path/filepath"
 	"time"
 
-	_ "modernc.org/sqlite"
+	openoctadb "github.com/openocta/openocta/pkg/db"
 )
 
-var db *sql.DB
-
-// GetDB returns the underlying database connection.
+// GetDB returns the unified openocta.db connection used for RBAC migrations and legacy tooling.
 func GetDB() *sql.DB {
-	return db
+	return sqlDB
 }
 
-// InitDB initializes the RBAC database and pre-seeds it if empty.
+// InitDB attaches RBAC to openocta.db, migrates legacy rbac.db once, and seeds defaults when empty.
+// db.InitDB must be called before InitDB.
 func InitDB(stateDir string) error {
-	dbPath := filepath.Join(stateDir, "rbac.db")
-	dir := filepath.Dir(dbPath)
-	if err := os.MkdirAll(dir, 0750); err != nil {
+	unified := openoctadb.GetDB()
+	if unified == nil {
+		return fmt.Errorf("openocta.db 未初始化，请先调用 db.InitDB")
+	}
+	initRepositories(unified)
+
+	if err := migrateLegacyRBACDB(stateDir, unified); err != nil {
 		return err
 	}
-
-	var err error
-	db, err = sql.Open("sqlite", dbPath)
-	if err != nil {
-		return err
-	}
-
-	if err := db.Ping(); err != nil {
-		return err
-	}
-
-	_, _ = db.Exec("PRAGMA journal_mode=WAL;")
-
-	if err := createTables(); err != nil {
-		return err
-	}
-
 	if err := seedDefaultData(); err != nil {
 		return err
 	}
-
+	StartSessionJanitor()
 	return nil
 }
 
-func createTables() error {
-	// 1. users table
-	_, err := db.Exec(`
-		CREATE TABLE IF NOT EXISTS users (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			username TEXT UNIQUE NOT NULL,
-			password_hash TEXT NOT NULL,
-			salt TEXT NOT NULL,
-			role_id INTEGER NOT NULL,
-			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-		);
-	`)
-	if err != nil {
+func migrateLegacyRBACDB(stateDir string, target *sql.DB) error {
+	if target == nil {
+		return fmt.Errorf("nil database")
+	}
+	legacyPath := filepath.Join(stateDir, "rbac.db")
+	if _, err := os.Stat(legacyPath); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
 		return err
 	}
 
-	// 2. roles table
-	_, err = db.Exec(`
-		CREATE TABLE IF NOT EXISTS roles (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			name TEXT UNIQUE NOT NULL,
-			description TEXT
-		);
-	`)
+	var userCount int
+	if userRepo != nil {
+		var countErr error
+		userCount, countErr = userRepo.Count()
+		if countErr != nil {
+			return countErr
+		}
+	} else if err := target.QueryRow(`SELECT COUNT(*) FROM users`).Scan(&userCount); err != nil {
+		return err
+	}
+	if userCount > 0 {
+		return backupLegacyRBACDB(legacyPath)
+	}
+
+	legacyDB, err := sql.Open("sqlite", legacyPath+"?_pragma=busy_timeout(5000)&mode=ro")
 	if err != nil {
 		return err
 	}
-
-	// 3. permissions table
-	_, err = db.Exec(`
-		CREATE TABLE IF NOT EXISTS permissions (
-			code TEXT PRIMARY KEY,
-			name TEXT NOT NULL,
-			type TEXT NOT NULL
-		);
-	`)
-	if err != nil {
+	defer legacyDB.Close()
+	if err := legacyDB.Ping(); err != nil {
 		return err
 	}
 
-	// 4. role_permissions table
-	_, err = db.Exec(`
-		CREATE TABLE IF NOT EXISTS role_permissions (
-			role_id INTEGER NOT NULL,
-			permission_code TEXT NOT NULL,
-			PRIMARY KEY (role_id, permission_code)
-		);
-	`)
+	tx, err := target.Begin()
 	if err != nil {
 		return err
 	}
+	defer tx.Rollback()
 
-	// 5. user_tokens table
-	_, err = db.Exec(`
-		CREATE TABLE IF NOT EXISTS user_tokens (
-			token TEXT PRIMARY KEY,
-			user_id INTEGER NOT NULL,
-			expires_at DATETIME NOT NULL
-		);
-	`)
-	return err
+	if err := copyLegacyRoles(legacyDB, tx); err != nil {
+		return err
+	}
+	if err := copyLegacyPermissions(legacyDB, tx); err != nil {
+		return err
+	}
+	if err := copyLegacyRolePermissions(legacyDB, tx); err != nil {
+		return err
+	}
+	if err := copyLegacyUsers(legacyDB, tx); err != nil {
+		return err
+	}
+	if err := copyLegacyUserTokens(legacyDB, tx); err != nil {
+		return err
+	}
+	if err := syncSQLiteSequence(tx, "roles"); err != nil {
+		return err
+	}
+	if err := syncSQLiteSequence(tx, "users"); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	return backupLegacyRBACDB(legacyPath)
 }
 
-func seedDefaultData() error {
-	// Seed roles
-	roles := []struct {
-		id   int
-		name string
-		desc string
-	}{
-		{1, "admin", "超级管理员 - 拥有全量管理与各运维域执行权限"},
-		{2, "hadoop_operator", "Hadoop生态运维员 - 具备Hadoop域的巡检与交互权限"},
-		{3, "fi_operator", "FI商业版运维员 - 具备FI域的巡检与交互权限"},
-		{4, "gbase_operator", "GBase数据库运维员 - 具备GBase域的巡检与交互权限"},
-		{5, "viewer", "只读访客 - 仅有大盘和系统巡检查看权限，无法交互与手动巡检"},
-	}
-
-	for _, r := range roles {
-		_, _ = db.Exec(`INSERT OR IGNORE INTO roles (id, name, description) VALUES (?, ?, ?)`, r.id, r.name, r.desc)
-	}
-
-	// Seed permissions
-	permissions := []struct {
-		code string
-		name string
-		ptype string
-	}{
-		{"menu:overview", "主导航: 运维大屏", "menu"},
-		{"menu:hadoop", "主导航: Hadoop生态", "menu"},
-		{"menu:fi", "主导航: FI商业生态", "menu"},
-		{"menu:gbase", "主导航: GBase数据库", "menu"},
-		{"menu:governance", "主导航: 开发治理平台", "menu"},
-		{"menu:dataapps", "主导航: 数据App运维", "menu"},
-		{"menu:config", "主导航: 系统设置", "menu"},
-		{"ops:inspect", "操作: 执行深度巡检", "ops"},
-		{"ops:diagnose", "操作: 发起智能诊断", "ops"},
-		{"ops:ack", "操作: 确认处理告警组", "ops"},
-		{"ops:wework_conf", "操作: 企业微信通道配置", "ops"},
-	}
-
-	for _, p := range permissions {
-		_, _ = db.Exec(`INSERT OR IGNORE INTO permissions (code, name, type) VALUES (?, ?, ?)`, p.code, p.name, p.ptype)
-	}
-
-	// Bind permissions to Admin (role_id = 1 gets everything)
-	for _, p := range permissions {
-		_, _ = db.Exec(`INSERT OR IGNORE INTO role_permissions (role_id, permission_code) VALUES (?, ?)`, 1, p.code)
-	}
-	// Ensure newly added ops permissions are granted on existing databases
-	for _, code := range []string{"ops:ack"} {
-		_, _ = db.Exec(`INSERT OR IGNORE INTO role_permissions (role_id, permission_code) VALUES (1, ?)`, code)
-	}
-
-	// Bind permissions to GBase Operator (role_id = 4 gets overview, gbase, diagnose, inspect)
-	gbasePerms := []string{"menu:overview", "menu:gbase", "ops:diagnose", "ops:inspect", "ops:ack"}
-	for _, p := range gbasePerms {
-		_, _ = db.Exec(`INSERT OR IGNORE INTO role_permissions (role_id, permission_code) VALUES (?, ?)`, 4, p)
-	}
-
-	// Bind permissions to Viewer (role_id = 5 gets overview, hadoop, fi, gbase, governance, dataapps only)
-	viewerPerms := []string{"menu:overview", "menu:hadoop", "menu:fi", "menu:gbase", "menu:governance", "menu:dataapps"}
-	for _, p := range viewerPerms {
-		_, _ = db.Exec(`INSERT OR IGNORE INTO role_permissions (role_id, permission_code) VALUES (?, ?)`, 5, p)
-	}
-
-	// Seed default Admin User (admin / admin888) if no users exist
-	var count int
-	err := db.QueryRow(`SELECT COUNT(*) FROM users`).Scan(&count)
+func copyLegacyRoles(legacy *sql.DB, tx *sql.Tx) error {
+	rows, err := legacy.Query(`SELECT id, name, description FROM roles ORDER BY id`)
 	if err != nil {
 		return err
 	}
-
-	if count == 0 {
-		salt := generateSalt()
-		passwordHash := HashPassword("admin888", salt)
-		_, err = db.Exec(`
-			INSERT INTO users (username, password_hash, salt, role_id)
-			VALUES (?, ?, ?, ?)
-		`, "admin", passwordHash, salt, 1) // role_id = 1 (admin)
+	defer rows.Close()
+	for rows.Next() {
+		var id int
+		var name, description sql.NullString
+		if err := rows.Scan(&id, &name, &description); err != nil {
+			return err
+		}
+		_, err = tx.Exec(`
+			INSERT INTO roles (id, name, description) VALUES (?, ?, ?)
+			ON CONFLICT(id) DO UPDATE SET
+				name = excluded.name,
+				description = excluded.description
+		`, id, name.String, description.String)
 		if err != nil {
 			return err
 		}
+	}
+	return rows.Err()
+}
 
-		// Also seed a test GBase Operator (gbase_op / op123456)
-		saltOp := generateSalt()
-		opHash := HashPassword("op123456", saltOp)
-		_, _ = db.Exec(`
-			INSERT INTO users (username, password_hash, salt, role_id)
-			VALUES (?, ?, ?, ?)
-		`, "gbase_op", opHash, saltOp, 4) // role_id = 4 (gbase_operator)
+func copyLegacyPermissions(legacy *sql.DB, tx *sql.Tx) error {
+	rows, err := legacy.Query(`SELECT code, name, type FROM permissions ORDER BY code`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var code, name, ptype string
+		if err := rows.Scan(&code, &name, &ptype); err != nil {
+			return err
+		}
+		_, err = tx.Exec(`
+			INSERT INTO permissions (code, name, type) VALUES (?, ?, ?)
+			ON CONFLICT(code) DO UPDATE SET
+				name = excluded.name,
+				type = excluded.type
+		`, code, name, ptype)
+		if err != nil {
+			return err
+		}
+	}
+	return rows.Err()
+}
+
+func copyLegacyRolePermissions(legacy *sql.DB, tx *sql.Tx) error {
+	rows, err := legacy.Query(`SELECT role_id, permission_code FROM role_permissions ORDER BY role_id, permission_code`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var roleID int
+		var code string
+		if err := rows.Scan(&roleID, &code); err != nil {
+			return err
+		}
+		_, err = tx.Exec(`
+			INSERT OR IGNORE INTO role_permissions (role_id, permission_code) VALUES (?, ?)
+		`, roleID, code)
+		if err != nil {
+			return err
+		}
+	}
+	return rows.Err()
+}
+
+func copyLegacyUsers(legacy *sql.DB, tx *sql.Tx) error {
+	rows, err := legacy.Query(`SELECT id, username, password_hash, salt, role_id, created_at FROM users ORDER BY id`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, roleID int
+		var username, passwordHash, salt string
+		var createdAt sql.NullString
+		if err := rows.Scan(&id, &username, &passwordHash, &salt, &roleID, &createdAt); err != nil {
+			return err
+		}
+		_, err = tx.Exec(`
+			INSERT INTO users (id, username, password_hash, salt, role_id, created_at)
+			VALUES (?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))
+			ON CONFLICT(id) DO UPDATE SET
+				username = excluded.username,
+				password_hash = excluded.password_hash,
+				salt = excluded.salt,
+				role_id = excluded.role_id,
+				created_at = excluded.created_at
+		`, id, username, passwordHash, salt, roleID, nullStringValue(createdAt))
+		if err != nil {
+			return err
+		}
+	}
+	return rows.Err()
+}
+
+func copyLegacyUserTokens(legacy *sql.DB, tx *sql.Tx) error {
+	rows, err := legacy.Query(`SELECT token, user_id, expires_at FROM user_tokens ORDER BY token`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var token string
+		var userID int
+		var expiresAt string
+		if err := rows.Scan(&token, &userID, &expiresAt); err != nil {
+			return err
+		}
+		_, err = tx.Exec(`
+			INSERT INTO user_tokens (token, user_id, expires_at) VALUES (?, ?, ?)
+			ON CONFLICT(token) DO UPDATE SET
+				user_id = excluded.user_id,
+				expires_at = excluded.expires_at
+		`, token, userID, expiresAt)
+		if err != nil {
+			return err
+		}
+	}
+	return rows.Err()
+}
+
+func syncSQLiteSequence(tx *sql.Tx, table string) error {
+	var maxID sql.NullInt64
+	if err := tx.QueryRow(fmt.Sprintf(`SELECT MAX(id) FROM %s`, table)).Scan(&maxID); err != nil {
+		return err
+	}
+	if !maxID.Valid || maxID.Int64 <= 0 {
+		return nil
+	}
+	_, err := tx.Exec(`UPDATE sqlite_sequence SET seq = ? WHERE name = ?`, maxID.Int64, table)
+	if err != nil {
+		_, err = tx.Exec(`INSERT INTO sqlite_sequence (name, seq) VALUES (?, ?)`, table, maxID.Int64)
+	}
+	return err
+}
+
+func nullStringValue(v sql.NullString) interface{} {
+	if v.Valid {
+		return v.String
+	}
+	return nil
+}
+
+func backupLegacyRBACDB(legacyPath string) error {
+	if stringsTrim := filepath.Clean(legacyPath); stringsTrim == "" {
+		return nil
+	}
+	if _, err := os.Stat(legacyPath); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	backupPath := fmt.Sprintf("%s.bak.%d", legacyPath, time.Now().UnixMilli())
+	return os.Rename(legacyPath, backupPath)
+}
+
+func seedDefaultData() error {
+	roles, err := requireRoleRepo()
+	if err != nil {
+		return err
+	}
+	if err := roles.SeedDefaults(); err != nil {
+		return err
 	}
 
+	users, err := requireUserRepo()
+	if err != nil {
+		return err
+	}
+	count, err := users.Count()
+	if err != nil {
+		return err
+	}
+	if count > 0 {
+		return nil
+	}
 	return nil
 }
 
 func generateSalt() string {
 	b := make([]byte, 16)
-	rand.Seed(time.Now().UnixNano())
-	rand.Read(b)
+	if _, err := cryptorand.Read(b); err != nil {
+		return hex.EncodeToString([]byte("openocta-fallback-salt"))
+	}
 	return hex.EncodeToString(b)
 }
 
-// HashPassword hashes plain password with SHA256 using salt.
-func HashPassword(password, salt string) string {
-	hasher := sha256.New()
-	hasher.Write([]byte(password + salt))
-	return hex.EncodeToString(hasher.Sum(nil))
-}
-
-// IsAdminPasswordDefault checks if the default admin user is still using the default password "admin888".
+// IsAdminPasswordDefault reports whether admin still uses a known weak default (legacy installs only).
 func IsAdminPasswordDefault() bool {
-	if db == nil {
-		return false
-	}
-	var passwordHash, salt string
-	err := db.QueryRow(`SELECT password_hash, salt FROM users WHERE username = ?`, "admin").Scan(&passwordHash, &salt)
+	users, err := requireUserRepo()
 	if err != nil {
 		return false
 	}
-	return passwordHash == HashPassword("admin888", salt)
+	passwordHash, salt, ok, err := users.AdminCredentials()
+	if err != nil || !ok {
+		return false
+	}
+	if IsArgon2Hash(passwordHash) {
+		return false
+	}
+	return passwordHash == HashPasswordLegacy("admin888", salt)
 }

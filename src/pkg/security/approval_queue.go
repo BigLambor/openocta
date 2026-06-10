@@ -33,12 +33,13 @@ func GetApprovalQueue(storePath string) (*ApprovalQueue, error) {
 	if storePath == "" {
 		return nil, fmt.Errorf("security: store path required")
 	}
+	key := approvalStoreKey(storePath)
 
 	m := getManager()
 
 	// 先尝试读锁获取已存在的实例
 	m.mu.RLock()
-	if q, ok := m.queues[storePath]; ok {
+	if q, ok := m.queues[key]; ok {
 		m.mu.RUnlock()
 		return q, nil
 	}
@@ -49,7 +50,7 @@ func GetApprovalQueue(storePath string) (*ApprovalQueue, error) {
 	defer m.mu.Unlock()
 
 	// 双重检查，防止并发创建
-	if q, ok := m.queues[storePath]; ok {
+	if q, ok := m.queues[key]; ok {
 		return q, nil
 	}
 
@@ -58,7 +59,7 @@ func GetApprovalQueue(storePath string) (*ApprovalQueue, error) {
 		return nil, err
 	}
 
-	m.queues[storePath] = q
+	m.queues[key] = q
 	return q, nil
 }
 

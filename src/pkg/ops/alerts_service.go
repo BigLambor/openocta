@@ -2,7 +2,6 @@ package ops
 
 import (
 	"encoding/json"
-	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/openocta/openocta/pkg/agent/tools"
+	"github.com/openocta/openocta/pkg/db"
 	"github.com/openocta/openocta/pkg/session"
 )
 
@@ -20,6 +20,7 @@ var (
 	alertsMu     sync.RWMutex
 	alertsPath   string
 	alertGroups  []AlertGroup
+	alertRepo    *alertRepository
 	stateDirRoot string
 )
 
@@ -27,11 +28,14 @@ func loadAlertsLocked() error {
 	if alertsPath == "" {
 		return fmt.Errorf("ops alerts store 未初始化")
 	}
-	store, err := loadAlertsStore(alertsPath)
+	if alertRepo == nil {
+		return fmt.Errorf("alert repository 未初始化")
+	}
+	groups, err := alertRepo.List()
 	if err != nil {
 		return err
 	}
-	alertGroups = store.Groups
+	alertGroups = groups
 	return nil
 }
 
@@ -39,21 +43,32 @@ func persistAlertsLocked() error {
 	if alertsPath == "" {
 		return fmt.Errorf("ops alerts store 未初始化")
 	}
-	return saveAlertsStore(alertsPath, &alertsStoreFile{Version: 1, Groups: alertGroups})
+	if alertRepo == nil {
+		return fmt.Errorf("alert repository 未初始化")
+	}
+	return alertRepo.ReplaceAll(alertGroups)
 }
 
-// InitAlertsStore loads alert groups from stateDir/ops/alerts.json.
+// InitAlertsStore loads alert groups into openocta.db and keeps an in-memory read cache.
 func InitAlertsStore(stateDir string) error {
 	alertsMu.Lock()
 	defer alertsMu.Unlock()
 
 	stateDirRoot = stateDir
 	alertsPath = filepath.Join(stateDir, "ops", "alerts.json")
+	alertRepo = newAlertRepository(db.GetDB())
+	if alertRepo == nil {
+		alertGroups = []AlertGroup{}
+		return fmt.Errorf("openocta.db 未初始化")
+	}
+	if _, err := alertRepo.ImportJSON(alertsPath); err != nil {
+		return err
+	}
 	if err := loadAlertsLocked(); err != nil {
 		return err
 	}
 
-	if len(alertGroups) == 0 && flag.Lookup("test.v") == nil {
+	if len(alertGroups) == 0 && seedDemoDataEnabled() {
 		now := nowMs()
 		alertGroups = []AlertGroup{
 			{
@@ -283,6 +298,10 @@ func RecordMergedAlertGroup(source, sessionKey, runID string, raw []MergedAlertI
 		},
 		DiagnosticStatus: "analyzing",
 	}
+	g = appendDiagnosisStartedTimeline(g)
+	if err := StartAlertDiagnosisRun(g); err != nil {
+		return AlertGroup{}, err
+	}
 	alertGroups = append([]AlertGroup{g}, alertGroups...)
 	const maxGroups = 500
 	if len(alertGroups) > maxGroups {
@@ -366,6 +385,12 @@ func GetAlertGroup(id string) (AlertGroup, error) {
 			continue
 		}
 		enriched := enrichAlertGroupFromSession(g)
+		if finished, changed := MaybeFinishAlertDiagnosisRun(g, enriched); changed {
+			g = finished
+			alertGroups[i] = g
+			enriched = enrichAlertGroupFromSession(g)
+			_ = persistAlertsLocked()
+		}
 		if enriched.RootCauseMarkdown != "" && enriched.Status == AlertStatusAnalyzing {
 			enriched.Status = AlertStatusActive
 			enriched.UpdatedAtMs = nowMs()

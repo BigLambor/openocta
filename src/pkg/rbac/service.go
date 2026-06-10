@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -14,6 +15,9 @@ type UserSession struct {
 	RoleName    string   `json:"roleName"`
 	Permissions []string `json:"permissions"`
 }
+
+// ErrNoSessionToken indicates no RBAC session token was provided.
+var ErrNoSessionToken = fmt.Errorf("no session token")
 
 type UserResponse struct {
 	ID        int       `json:"id"`
@@ -30,17 +34,18 @@ type RoleResponse struct {
 }
 
 // AuthenticateUser checks credentials and returns a secure token on success.
+// Legacy SHA256 hashes are upgraded to Argon2id after a successful login.
 func AuthenticateUser(username, password string) (string, error) {
-	var userID int
-	var passwordHash, salt string
-	var roleID int
+	users, err := requireUserRepo()
+	if err != nil {
+		return "", err
+	}
+	tokens, err := requireTokenRepo()
+	if err != nil {
+		return "", err
+	}
 
-	err := db.QueryRow(`
-		SELECT id, password_hash, salt, role_id 
-		FROM users 
-		WHERE username = ?
-	`, username).Scan(&userID, &passwordHash, &salt, &roleID)
-
+	rec, err := users.FindByUsername(username)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return "", fmt.Errorf("用户名或密码错误")
@@ -48,117 +53,149 @@ func AuthenticateUser(username, password string) (string, error) {
 		return "", err
 	}
 
-	calculatedHash := HashPassword(password, salt)
-	if calculatedHash != passwordHash {
+	if !VerifyPassword(password, rec.PasswordHash, rec.Salt) {
 		return "", fmt.Errorf("用户名或密码错误")
 	}
 
-	// Generate UUID-like secure token
+	if !IsArgon2Hash(rec.PasswordHash) {
+		hash, salt := HashPasswordArgon2id(password)
+		if err := users.UpdatePassword(rec.ID, hash, salt); err != nil {
+			return "", err
+		}
+	}
+
 	token, err := generateSecureToken()
 	if err != nil {
 		return "", err
 	}
-
-	// Persist token (valid for 24 hours)
 	expiresAt := time.Now().Add(24 * time.Hour)
-	_, err = db.Exec(`
-		INSERT INTO user_tokens (token, user_id, expires_at)
-		VALUES (?, ?, ?)
-	`, token, userID, expiresAt)
-
-	if err != nil {
+	if err := tokens.Create(token, rec.ID, expiresAt); err != nil {
 		return "", err
 	}
-
 	return token, nil
 }
 
 // ValidateToken returns UserSession if token is valid and not expired.
 func ValidateToken(token string) (*UserSession, error) {
-	var userID int
-	var expiresAt time.Time
-	var username, roleName string
-	var roleID int
+	tokens, err := requireTokenRepo()
+	if err != nil {
+		return nil, err
+	}
+	roles, err := requireRoleRepo()
+	if err != nil {
+		return nil, err
+	}
 
-	err := db.QueryRow(`
-		SELECT t.user_id, t.expires_at, u.username, u.role_id, r.name
-		FROM user_tokens t
-		JOIN users u ON t.user_id = u.id
-		JOIN roles r ON u.role_id = r.id
-		WHERE t.token = ?
-	`, token).Scan(&userID, &expiresAt, &username, &roleID, &roleName)
-
+	rec, err := tokens.Lookup(token)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("invalid token")
 		}
 		return nil, err
 	}
-
-	if time.Now().After(expiresAt) {
-		// Clean up expired token
-		_, _ = db.Exec(`DELETE FROM user_tokens WHERE token = ?`, token)
+	if time.Now().After(rec.ExpiresAt) {
+		_ = tokens.Delete(token)
 		return nil, fmt.Errorf("token expired")
 	}
 
-	permissions, err := GetRolePermissions(roleID)
+	permissions, err := roles.Permissions(rec.RoleID)
 	if err != nil {
 		return nil, err
 	}
 
 	return &UserSession{
-		UserID:      userID,
-		Username:    username,
-		RoleName:    roleName,
+		UserID:      rec.UserID,
+		Username:    rec.Username,
+		RoleName:    rec.RoleName,
 		Permissions: permissions,
 	}, nil
 }
 
 // InvalidateToken revokes the session.
 func InvalidateToken(token string) error {
-	_, err := db.Exec(`DELETE FROM user_tokens WHERE token = ?`, token)
-	return err
+	tokens, err := requireTokenRepo()
+	if err != nil {
+		return err
+	}
+	return tokens.Delete(token)
 }
 
 // GetRolePermissions returns all permission codes linked to a role.
 func GetRolePermissions(roleID int) ([]string, error) {
-	rows, err := db.Query(`
-		SELECT permission_code 
-		FROM role_permissions 
-		WHERE role_id = ?
-	`, roleID)
+	roles, err := requireRoleRepo()
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
-	var permissions []string
-	for rows.Next() {
-		var code string
-		if err := rows.Scan(&code); err != nil {
-			return nil, err
-		}
-		permissions = append(permissions, code)
-	}
-	return permissions, nil
+	return roles.Permissions(roleID)
 }
 
-// CreateUser registers a new user with a hashed password.
-func CreateUser(username, password string, roleID int) error {
-	salt := generateSalt()
-	passwordHash := HashPassword(password, salt)
+// EnsureRolePermission grants a permission to a role if missing.
+func EnsureRolePermission(roleID int, permissionCode string) error {
+	roles, err := requireRoleRepo()
+	if err != nil {
+		return err
+	}
+	return roles.EnsureRolePermission(roleID, permissionCode)
+}
 
-	_, err := db.Exec(`
-		INSERT INTO users (username, password_hash, salt, role_id)
-		VALUES (?, ?, ?, ?)
-	`, username, passwordHash, salt, roleID)
-	return err
+// NeedsSetup reports whether the system has no users and requires initial admin setup.
+func NeedsSetup() (bool, error) {
+	users, err := requireUserRepo()
+	if err != nil {
+		return false, err
+	}
+	count, err := users.Count()
+	if err != nil {
+		return false, err
+	}
+	return count == 0, nil
+}
+
+// SetupInitialAdmin creates the first admin user when the database has no users.
+func SetupInitialAdmin(username, password string) (string, error) {
+	needs, err := NeedsSetup()
+	if err != nil {
+		return "", err
+	}
+	if !needs {
+		return "", fmt.Errorf("系统已完成初始化")
+	}
+	username = strings.TrimSpace(username)
+	password = strings.TrimSpace(password)
+	if username == "" || password == "" {
+		return "", fmt.Errorf("用户名和密码不能为空")
+	}
+	if len(password) < 8 {
+		return "", fmt.Errorf("密码长度至少 8 位")
+	}
+	hash, salt := HashPasswordArgon2id(password)
+	users, err := requireUserRepo()
+	if err != nil {
+		return "", err
+	}
+	if err := users.Create(username, hash, salt, 1); err != nil {
+		return "", err
+	}
+	return AuthenticateUser(username, password)
+}
+
+// CreateUser registers a new user with an Argon2id hashed password.
+func CreateUser(username, password string, roleID int) error {
+	users, err := requireUserRepo()
+	if err != nil {
+		return err
+	}
+	hash, salt := HashPasswordArgon2id(password)
+	return users.Create(username, hash, salt, roleID)
 }
 
 // UpdateUserRole updates role of a user.
 func UpdateUserRole(userID int, roleID int) error {
-	_, err := db.Exec(`UPDATE users SET role_id = ? WHERE id = ?`, roleID, userID)
-	return err
+	users, err := requireUserRepo()
+	if err != nil {
+		return err
+	}
+	return users.UpdateRole(userID, roleID)
 }
 
 // DeleteUser deletes a user and cleans up their tokens.
@@ -166,58 +203,39 @@ func DeleteUser(userID int) error {
 	if userID == 1 {
 		return fmt.Errorf("cannot delete default admin user")
 	}
-	_, _ = db.Exec(`DELETE FROM user_tokens WHERE user_id = ?`, userID)
-	_, err := db.Exec(`DELETE FROM users WHERE id = ?`, userID)
-	return err
+	users, err := requireUserRepo()
+	if err != nil {
+		return err
+	}
+	tokens, err := requireTokenRepo()
+	if err != nil {
+		return err
+	}
+	_ = tokens.DeleteByUserID(userID)
+	return users.Delete(userID)
 }
 
 // ListUsers returns all users in system.
 func ListUsers() ([]UserResponse, error) {
-	rows, err := db.Query(`
-		SELECT u.id, u.username, u.role_id, r.name, u.created_at
-		FROM users u
-		JOIN roles r ON u.role_id = r.id
-		ORDER BY u.created_at DESC
-	`)
+	users, err := requireUserRepo()
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
-	var users []UserResponse
-	for rows.Next() {
-		var u UserResponse
-		if err := rows.Scan(&u.ID, &u.Username, &u.RoleID, &u.RoleName, &u.CreatedAt); err != nil {
-			return nil, err
-		}
-		users = append(users, u)
-	}
-	return users, nil
+	return users.List()
 }
 
 // ListRoles returns all roles in system.
 func ListRoles() ([]RoleResponse, error) {
-	rows, err := db.Query(`SELECT id, name, description FROM roles`)
+	roles, err := requireRoleRepo()
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
-	var roles []RoleResponse
-	for rows.Next() {
-		var r RoleResponse
-		if err := rows.Scan(&r.ID, &r.Name, &r.Description); err != nil {
-			return nil, err
-		}
-		roles = append(roles, r)
-	}
-	return roles, nil
+	return roles.List()
 }
 
 func generateSecureToken() (string, error) {
 	b := make([]byte, 24)
-	_, err := rand.Read(b)
-	if err != nil {
+	if _, err := rand.Read(b); err != nil {
 		return "", err
 	}
 	return hex.EncodeToString(b), nil

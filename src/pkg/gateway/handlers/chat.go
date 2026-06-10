@@ -25,8 +25,10 @@ import (
 	"github.com/openocta/openocta/pkg/config"
 	"github.com/openocta/openocta/pkg/employees"
 	"github.com/openocta/openocta/pkg/gateway/protocol"
+	"github.com/openocta/openocta/pkg/jobrun"
 	"github.com/openocta/openocta/pkg/logging"
 	"github.com/openocta/openocta/pkg/ops"
+	"github.com/openocta/openocta/pkg/rbac"
 	"github.com/openocta/openocta/pkg/session"
 	"github.com/stellarlinkco/agentsdk-go/pkg/api"
 	"github.com/stellarlinkco/agentsdk-go/pkg/model"
@@ -42,6 +44,35 @@ func xunfeiProviderName(modelRef string) string {
 		return strings.TrimSpace(modelRef[:idx])
 	}
 	return ""
+}
+
+func splitModelRef(modelRef string) (provider, model string) {
+	modelRef = strings.TrimSpace(modelRef)
+	if modelRef == "" {
+		return "", ""
+	}
+	if idx := strings.IndexByte(modelRef, '/'); idx >= 0 {
+		return strings.TrimSpace(modelRef[:idx]), strings.TrimSpace(modelRef[idx+1:])
+	}
+	return "", modelRef
+}
+
+func recordChatJobRunModelUsage(runID, sessionID, modelRef string, usage *api.Usage, latencyMs int64) {
+	if usage == nil {
+		return
+	}
+	provider, model := splitModelRef(modelRef)
+	jobrun.RecordModelUsage(jobrun.ModelUsageInput{
+		RunID:        runID,
+		SessionID:    sessionID,
+		Provider:     provider,
+		Model:        model,
+		InputTokens:  usage.InputTokens,
+		OutputTokens: usage.OutputTokens,
+		TotalTokens:  usage.InputTokens + usage.OutputTokens,
+		LatencyMs:    latencyMs,
+		Status:       jobrun.StatusSucceeded,
+	})
 }
 
 func extractAlertGroupID(s string) string {
@@ -1554,6 +1585,9 @@ func ChatSendHandler(opts HandlerOpts) error {
 		if err := ops.UpdateAlertGroupSessionKey(opsContext.ObjectID, sessionKey); err != nil {
 			chatLog.Warn("failed to update alert group session key: %v", err)
 		}
+		if err := ops.BindAlertDiagnosisChatRun(opsContext.ObjectID, runId, sessionKey); err != nil {
+			chatLog.Warn("failed to bind alert diagnosis job run: %v", err)
+		}
 	}
 
 	// Append user message to transcript (include image blocks so they persist across turns)
@@ -1642,6 +1676,20 @@ func ChatSendHandler(opts HandlerOpts) error {
 
 	// When deliver is true, trigger agent run asynchronously
 	if message != "" {
+		var chatUserSession *rbac.UserSession
+		if opts.Client != nil {
+			chatUserSession = opts.Client.Session
+		}
+		if chatUserSession != nil {
+			if err := rbac.CheckToolExecutePermission(chatUserSession); err != nil {
+				opts.Respond(false, nil, &protocol.ErrorShape{
+					Code:    protocol.ErrCodeForbidden,
+					Message: "chat.send: " + err.Error(),
+				}, nil)
+				return nil
+			}
+		}
+
 		// Create abort controller for this run（须在 Respond 之前注册，避免客户端收到 started 后立即 chat.abort 时 map 中尚无 runId）
 		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutMs)*time.Millisecond)
 		now := time.Now().UnixMilli()
@@ -1680,6 +1728,14 @@ func ChatSendHandler(opts HandlerOpts) error {
 		go func() {
 			ctxForBroadcast := opts.Context // Capture context for broadcast
 			deliverForGoroutine := deliverCtx
+			userSessionForTools := chatUserSession
+			chatSucceeded := false
+			var chatErrMsg string
+			defer func() {
+				if opsContext.ObjectType == "alert" {
+					ops.SyncAlertDiagnosisAfterChat(sessionKey, runId, chatSucceeded, chatErrMsg)
+				}
+			}()
 			defer func() {
 				chatAbortControllers.Delete(runId)
 				cancel()
@@ -1710,10 +1766,12 @@ func ChatSendHandler(opts HandlerOpts) error {
 			// Create runtime with model factory from config
 			var modelFactory api.ModelFactory
 			var isXunfeiProvider bool
+			usageModelRef := ""
 			if cfg := loadConfigFromContext(ctxForBroadcast); cfg != nil {
 				agentID := agent.ResolveSessionAgentID(sessionKey)
 				modelRefOverride, _ := opts.Params["modelRef"].(string)
 				modelRefOverride = strings.TrimSpace(modelRefOverride)
+				usageModelRef = modelRefOverride
 				// Extract provider name for image format detection
 				providerName := xunfeiProviderName(modelRefOverride)
 				// If no explicit modelRef, resolve from agent's default config
@@ -1736,6 +1794,7 @@ func ChatSendHandler(opts HandlerOpts) error {
 				if modelRefOverride != "" {
 					factory, factoryErr = agent.CreateModelFactoryForModelRef(cfg, modelRefOverride)
 				} else {
+					usageModelRef = agent.ResolveAgentModelRef(cfg, agentID)
 					factory, factoryErr = agent.CreateModelFactoryFromConfig(cfg, agentID)
 				}
 				if factoryErr != nil {
@@ -1890,6 +1949,7 @@ func ChatSendHandler(opts HandlerOpts) error {
 				AgentID:               sessionAgentID, // 与 sessions jsonl 目录 ~/.openocta/agents/<agentId>/sessions 一致
 				Env:                   os.Getenv,
 				TokenLimit:            tokenLimit,
+				UserSession:           userSessionForTools,
 			}
 			ctx = context.WithValue(ctx, session.ContextKeySessionID, sessionID)
 			ctx = context.WithValue(ctx, session.ContextKeySessionKey, sessionKey)
@@ -2033,6 +2093,7 @@ func ChatSendHandler(opts HandlerOpts) error {
 					appendErrorToTranscript(transcriptPath, "模型未返回任何输出", runId, sessionKey, ctxForBroadcast)
 				}
 				snapshot := &SessionRunSnapshot{SkillsSnapshot: buildSkillsSnapshotForSession(projectRoot, runtimeConfig, sessionKey)}
+				chatSucceeded = true
 				updateSessionAfterRun(ctxForBroadcast, sessionKey, sessionID, sessionFile, runId, snapshot)
 				return
 			}
@@ -2049,7 +2110,12 @@ func ChatSendHandler(opts HandlerOpts) error {
 
 			var firstTokenTime time.Time
 			var totalToolDurationMs int64
-			toolStartTimes := make(map[string]time.Time)
+			type trackedToolCall struct {
+				Name      string
+				Input     string
+				StartedAt time.Time
+			}
+			trackedTools := make(map[string]trackedToolCall)
 
 			for evt := range eventChan {
 				if ctx.Err() != nil {
@@ -2078,7 +2144,12 @@ func ChatSendHandler(opts HandlerOpts) error {
 					}
 					if evt.ContentBlock != nil {
 						if evt.ContentBlock.Type == "tool_use" {
-							toolStartTimes[evt.ContentBlock.ID] = time.Now()
+							inputStr := string(evt.ContentBlock.Input)
+							trackedTools[evt.ContentBlock.ID] = trackedToolCall{
+								Name:      evt.ContentBlock.Name,
+								Input:     inputStr,
+								StartedAt: time.Now(),
+							}
 							tc := map[string]interface{}{
 								"type":      "toolCall",
 								"id":        evt.ContentBlock.ID,
@@ -2102,8 +2173,16 @@ func ChatSendHandler(opts HandlerOpts) error {
 						}
 					}
 				case api.EventToolExecutionResult:
-					if startTime, ok := toolStartTimes[evt.ToolUseID]; ok {
-						totalToolDurationMs += time.Since(startTime).Milliseconds()
+					var durationMs int64
+					toolName := strings.TrimSpace(evt.Name)
+					inputStr := ""
+					if tc, ok := trackedTools[evt.ToolUseID]; ok {
+						durationMs = time.Since(tc.StartedAt).Milliseconds()
+						totalToolDurationMs += durationMs
+						if toolName == "" {
+							toolName = tc.Name
+						}
+						inputStr = tc.Input
 					}
 					isErr := evt.IsError != nil && *evt.IsError
 					outputStr := ""
@@ -2115,6 +2194,22 @@ func ChatSendHandler(opts HandlerOpts) error {
 							outputStr = string(b)
 						}
 					}
+					stepStatus := jobrun.StatusSucceeded
+					stepErr := ""
+					if isErr {
+						stepStatus = jobrun.StatusFailed
+						stepErr = outputStr
+					}
+					jobrun.RecordToolExecution(jobrun.ToolExecutionInput{
+						RunID:      runId,
+						SessionID:  sessionID,
+						ToolName:   toolName,
+						Input:      inputStr,
+						Output:     outputStr,
+						Status:     stepStatus,
+						Error:      stepErr,
+						DurationMs: durationMs,
+					})
 					broadcastAgentEvent(ctxForBroadcast, runId, sessionKey, "tool_result", map[string]interface{}{
 						"toolCallId": evt.ToolUseID,
 						"toolName":   evt.Name,
@@ -2346,6 +2441,8 @@ func ChatSendHandler(opts HandlerOpts) error {
 			}
 
 			snapshot := &SessionRunSnapshot{SkillsSnapshot: buildSkillsSnapshotForSession(projectRoot, runtimeConfig, sessionKey)}
+			recordChatJobRunModelUsage(runId, sessionID, usageModelRef, usageSnapshot, time.Since(runStart).Milliseconds())
+			chatSucceeded = true
 			updateSessionAfterRun(ctxForBroadcast, sessionKey, sessionID, sessionFile, runId, snapshot)
 		}()
 	}

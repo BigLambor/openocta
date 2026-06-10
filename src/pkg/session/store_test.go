@@ -60,6 +60,7 @@ func TestSessionSQLiteStore(t *testing.T) {
 		t.Fatalf("InitDB: %v", err)
 	}
 	defer func() {
+		ResetSessionRepositoryForTest()
 		_ = db.CloseDB()
 	}()
 
@@ -98,8 +99,8 @@ func TestSessionSQLiteStore(t *testing.T) {
 }
 
 func TestSessionMigration(t *testing.T) {
-	// First run in JSON mode
 	_ = db.CloseDB()
+	ResetSessionRepositoryForTest()
 
 	tempDir := t.TempDir()
 	storePath := filepath.Join(tempDir, "sessions.json")
@@ -121,6 +122,7 @@ func TestSessionMigration(t *testing.T) {
 		t.Fatalf("InitDB: %v", err)
 	}
 	defer func() {
+		ResetSessionRepositoryForTest()
 		_ = db.CloseDB()
 	}()
 
@@ -138,12 +140,13 @@ func TestSessionMigration(t *testing.T) {
 		t.Errorf("expected label 'Migrated Session', got %q", entry.Label)
 	}
 
-	// Verify old JSON file has been renamed to .bak
+	// Verify old JSON file has been removed after import
 	if _, err := os.Stat(storePath); err == nil {
-		t.Errorf("old JSON file should have been renamed/deleted, but still exists")
+		t.Errorf("old JSON file should have been removed after import, but still exists")
 	}
-	if _, err := os.Stat(storePath + ".bak"); err != nil {
-		t.Errorf("bak file does not exist: %v", err)
+	backups, _ := filepath.Glob(storePath + ".bak.*")
+	if len(backups) == 0 {
+		t.Errorf("expected timestamped JSON backup after import")
 	}
 }
 
@@ -154,6 +157,7 @@ func TestSessionConcurrentWrite(t *testing.T) {
 		t.Fatalf("InitDB: %v", err)
 	}
 	defer func() {
+		ResetSessionRepositoryForTest()
 		_ = db.CloseDB()
 	}()
 
@@ -219,6 +223,7 @@ func TestSessionSQLiteIsolation(t *testing.T) {
 		t.Fatalf("InitDB: %v", err)
 	}
 	defer func() {
+		ResetSessionRepositoryForTest()
 		_ = db.CloseDB()
 	}()
 
@@ -265,7 +270,8 @@ func TestSessionSQLiteIsolation(t *testing.T) {
 		t.Error("did not expect session-a in path B (isolation leak)")
 	}
 
-	// 5. Test table structure migration from old schema (with only session_key primary key)
+	// 5. Test legacy blob table migration into sessions_v1
+	ResetSessionRepositoryForTest()
 	_ = db.CloseDB()
 	sqliteDB, err := sql.Open("sqlite", filepath.Join(tempDir, "openocta.db"))
 	if err != nil {
@@ -274,27 +280,28 @@ func TestSessionSQLiteIsolation(t *testing.T) {
 	_, _ = sqliteDB.Exec("DROP TABLE IF EXISTS sessions")
 	_, err = sqliteDB.Exec(`
 		CREATE TABLE sessions (
-			session_key TEXT PRIMARY KEY,
-			detail_json TEXT
+			store_path TEXT,
+			session_key TEXT,
+			detail_json TEXT,
+			PRIMARY KEY (store_path, session_key)
 		);
 	`)
 	if err != nil {
 		sqliteDB.Close()
 		t.Fatalf("failed to create legacy sessions table: %v", err)
 	}
-	_, err = sqliteDB.Exec("INSERT INTO sessions (session_key, detail_json) VALUES (?, ?)", "legacy-key", `{"sessionId":"legacy-id","label":"Legacy"}`)
+	_, err = sqliteDB.Exec(`INSERT INTO sessions (store_path, session_key, detail_json) VALUES (?, ?, ?)`, "", "legacy-key", `{"sessionId":"legacy-id","label":"Legacy","updatedAt":1000}`)
 	if err != nil {
 		sqliteDB.Close()
 		t.Fatalf("failed to insert legacy data: %v", err)
 	}
 	sqliteDB.Close()
 
-	// Re-initialize DB
 	if err := db.InitDB(tempDir); err != nil {
 		t.Fatalf("re-InitDB: %v", err)
 	}
+	ResetSessionRepositoryForTest()
 
-	// Loading should trigger table check and migration
 	loadedLegacy, err := LoadSessionStore("")
 	if err != nil {
 		t.Fatalf("failed to load after schema migration: %v", err)
@@ -305,5 +312,12 @@ func TestSessionSQLiteIsolation(t *testing.T) {
 	}
 	if entry.Label != "Legacy" {
 		t.Errorf("expected label 'Legacy', got %q", entry.Label)
+	}
+	var legacyLeft int
+	if err := db.GetDB().QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='sessions'`).Scan(&legacyLeft); err != nil {
+		t.Fatal(err)
+	}
+	if legacyLeft != 0 {
+		t.Errorf("expected legacy sessions table dropped, still present")
 	}
 }

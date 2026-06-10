@@ -428,6 +428,7 @@ import "./components/category-tree-sidebar.ts";
 import { renderExecApprovalPrompt } from "./views/exec-approval.ts";
 import { renderGatewayUrlConfirmation } from "./views/gateway-url-confirmation.ts";
 import { renderNativeDialogOverlay } from "./views/native-dialog-overlay.ts";
+import { renderJobRunDetailOverlay } from "./components/job-run-detail-overlay.ts";
 import { renderLogs } from "./views/logs.ts";
 import { renderNodes } from "./views/nodes.ts";
 import { renderOverview } from "./views/overview.ts";
@@ -2876,6 +2877,8 @@ export function renderApp(state: AppViewState) {
                 channelMeta: state.channelsSnapshot?.channelMeta ?? [],
                 runsJobId: state.cronRunsJobId,
                 runs: state.cronRuns,
+                jobRuns: state.cronJobRuns,
+                onOpenJobRun: (runId) => void state.openJobRunDetail(runId),
                 onFormChange: (patch) => (state.cronForm = { ...state.cronForm, ...patch }),
                 onRefresh: () => state.loadCron(),
                 onOpenAddModal: () => (state.cronAddModalOpen = true),
@@ -2938,6 +2941,8 @@ export function renderApp(state: AppViewState) {
                 channelMeta: state.channelsSnapshot?.channelMeta ?? [],
                 runsJobId: state.cronRunsJobId,
                 runs: state.cronRuns,
+                jobRuns: state.cronJobRuns,
+                onOpenJobRun: (runId) => void state.openJobRunDetail(runId),
                 onFormChange: (patch) => (state.cronForm = { ...state.cronForm, ...patch }),
                 onRefresh: () => state.loadCron(),
                 onAdd: () => addCronJob(state),
@@ -4317,6 +4322,7 @@ export function renderApp(state: AppViewState) {
 
                   return {
                     id: entry.sessionId || `ins-${state.tab}-${idx}`,
+                    runId: entry.runId?.trim() || "",
                     time: timeStr,
                     score: score,
                     status: status,
@@ -4354,7 +4360,6 @@ export function renderApp(state: AppViewState) {
                 );
                 const clientHost = {
                   gatewayHttpUrl: state.gatewayHttpUrl,
-                  rbacToken: state.rbacUser?.token ?? null,
                   settings: { token: state.settings?.token ?? "" },
                   setTab: (tab: any) => state.setTab(tab),
                 };
@@ -4425,6 +4430,7 @@ export function renderApp(state: AppViewState) {
                     );
                   },
                   isInspecting: state.opsIsInspecting[state.tab] || false,
+                  onOpenJobRun: (runId) => void state.openJobRunDetail(runId),
                 });
               })()
             : nothing
@@ -5165,7 +5171,6 @@ export function renderApp(state: AppViewState) {
                 rbacUsersList: (state as any).rbacUsersList,
                 rbacRolesList: (state as any).rbacRolesList,
                 rbacUsersLoading: (state as any).rbacUsersLoading,
-                rbacToken: (state as any).rbacToken,
                 rbacUser: (state as any).rbacUser,
                 onCreateUser: (username, password, roleId) => (state as any).handleCreateUser(username, password, roleId),
                 onDeleteUser: (id) => (state as any).handleDeleteUser(id),
@@ -5596,6 +5601,13 @@ export function renderApp(state: AppViewState) {
       onPromptInput: (v) => state.handleNativePromptInput(v),
       onConfirm: () => state.handleNativeDialogConfirm(),
       onCancel: () => state.handleNativeDialogCancel(),
+    })}
+    ${renderJobRunDetailOverlay({
+      open: state.jobRunDetailOpen,
+      loading: state.jobRunDetailLoading,
+      error: state.jobRunDetailError,
+      detail: state.jobRunDetail,
+      onClose: () => state.closeJobRunDetail(),
     })}
     ${renderSessionOverflowFlyout(state, basePath)}
   `;

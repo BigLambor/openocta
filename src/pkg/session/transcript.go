@@ -1,4 +1,7 @@
 // Package session provides transcript file handling for chat sessions.
+//
+// Transcript JSONL is append-only archive storage. Session list/query metadata lives in
+// openocta.db (sessions_v1). See docs/session-transcript-strategy.md.
 package session
 
 import (

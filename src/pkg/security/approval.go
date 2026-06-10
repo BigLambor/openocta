@@ -4,9 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -42,15 +40,17 @@ type ApprovalQueue struct {
 	mu        sync.Mutex
 	cond      *sync.Cond
 	storePath string
+	store     approvalStore
 	records   map[string]*ApprovalRecord
 	whitelist map[string]time.Time
 	clock     func() time.Time
 }
 
-// NewApprovalQueue restores queue state from disk or creates a fresh one.
+// NewApprovalQueue restores queue state from disk or DB, or creates a fresh one.
 func NewApprovalQueue(storePath string) (*ApprovalQueue, error) {
 	q := &ApprovalQueue{
 		storePath: storePath,
+		store:     resolveApprovalStore(storePath),
 		records:   make(map[string]*ApprovalRecord),
 		whitelist: make(map[string]time.Time),
 		clock:     time.Now,
@@ -102,7 +102,7 @@ func (q *ApprovalQueue) Request(sessionID, command string, paths []string) (*App
 	}
 
 	q.records[record.ID] = record
-	if err := q.persistLocked(); err != nil {
+	if err := q.store.SaveRecord(record); err != nil {
 		return nil, err
 	}
 	return cloneRecord(record), nil
@@ -138,7 +138,7 @@ func (q *ApprovalQueue) Approve(id, approver string, recordTTL time.Duration) (*
 		rec.ExpiresAt = nil
 	}
 
-	if err := q.persistLocked(); err != nil {
+	if err := q.store.SaveRecord(rec); err != nil {
 		return nil, err
 	}
 	q.cond.Broadcast()
@@ -164,7 +164,7 @@ func (q *ApprovalQueue) Deny(id, approver, reason string) (*ApprovalRecord, erro
 	rec.Reason = reason
 	rec.ApprovedAt = nil
 
-	if err := q.persistLocked(); err != nil {
+	if err := q.store.SaveRecord(rec); err != nil {
 		return nil, err
 	}
 	q.cond.Broadcast()
@@ -185,6 +185,52 @@ func (q *ApprovalQueue) ListPending() []*ApprovalRecord {
 	return pending
 }
 
+// ListAll returns all approval records for UI listing.
+func (q *ApprovalQueue) ListAll() []*ApprovalRecord {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	out := make([]*ApprovalRecord, 0, len(q.records))
+	for _, rec := range q.records {
+		out = append(out, cloneRecord(rec))
+	}
+	return out
+}
+
+// WhitelistSnapshot returns a copy of the session whitelist map.
+func (q *ApprovalQueue) WhitelistSnapshot() map[string]time.Time {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	out := make(map[string]time.Time, len(q.whitelist))
+	for sessionID, expiry := range q.whitelist {
+		out[sessionID] = expiry
+	}
+	return out
+}
+
+// GetRecord returns a cloned approval record by id.
+func (q *ApprovalQueue) GetRecord(id string) (*ApprovalRecord, bool) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	rec, ok := q.records[id]
+	if !ok {
+		return nil, false
+	}
+	return cloneRecord(rec), true
+}
+
+// StoreBackend reports the active persistence backend for UI/diagnostics.
+func (q *ApprovalQueue) StoreBackend() string {
+	if q == nil {
+		return "unknown"
+	}
+	if useJSONApprovalStore() || defaultApprovalRepository() == nil {
+		return "json"
+	}
+	return "db"
+}
+
 // IsWhitelisted reports whether the session currently bypasses manual review.
 func (q *ApprovalQueue) IsWhitelisted(sessionID string) bool {
 	q.mu.Lock()
@@ -197,7 +243,7 @@ func (q *ApprovalQueue) IsWhitelisted(sessionID string) bool {
 	}
 	if expiry.Before(q.clock()) {
 		delete(q.whitelist, sessionID)
-		if err := q.persistLocked(); err != nil {
+		if err := q.store.SaveWhitelist(q.whitelist); err != nil {
 			_ = err
 		}
 		return false
@@ -226,7 +272,7 @@ func (q *ApprovalQueue) AddSessionToWhitelist(sessionID string, ttl time.Duratio
 	}
 	q.whitelist[sessionID] = expiry
 	q.cond.Broadcast()
-	return q.persistLocked()
+	return q.store.SaveWhitelist(q.whitelist)
 }
 
 // Wait blocks until the approval is resolved or the context is cancelled.
@@ -273,61 +319,20 @@ func (q *ApprovalQueue) Wait(ctx context.Context, id string) (*ApprovalRecord, e
 }
 
 func (q *ApprovalQueue) load() error {
-	if q.storePath == "" {
+	if q.store == nil {
 		return nil
 	}
-	if err := os.MkdirAll(filepath.Dir(q.storePath), 0o755); err != nil {
-		return fmt.Errorf("security: create approval dir: %w", err)
-	}
-
-	data, err := os.ReadFile(q.storePath)
+	records, whitelist, err := q.store.Load()
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return fmt.Errorf("security: load approvals: %w", err)
+		return err
 	}
-
-	var snapshot approvalSnapshot
-	if err := json.Unmarshal(data, &snapshot); err != nil {
-		return fmt.Errorf("security: parse approvals: %w", err)
+	q.records = records
+	if q.records == nil {
+		q.records = make(map[string]*ApprovalRecord)
 	}
-
-	for _, rec := range snapshot.Records {
-		q.records[rec.ID] = rec
-	}
-	for session, expiry := range snapshot.Whitelist {
-		q.whitelist[session] = expiry
-	}
-	return nil
-}
-
-func (q *ApprovalQueue) persistLocked() error {
-	if q.storePath == "" {
-		return nil
-	}
-	snapshot := approvalSnapshot{
-		Records:   make([]*ApprovalRecord, 0, len(q.records)),
-		Whitelist: make(map[string]time.Time, len(q.whitelist)),
-	}
-	for _, rec := range q.records {
-		snapshot.Records = append(snapshot.Records, rec)
-	}
-	for session, expiry := range q.whitelist {
-		snapshot.Whitelist[session] = expiry
-	}
-
-	data, err := json.MarshalIndent(snapshot, "", "  ")
-	if err != nil {
-		return fmt.Errorf("security: encode approvals: %w", err)
-	}
-
-	tmp := q.storePath + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
-		return fmt.Errorf("security: write approvals: %w", err)
-	}
-	if err := os.Rename(tmp, q.storePath); err != nil {
-		return fmt.Errorf("security: atomically replace approvals: %w", err)
+	q.whitelist = whitelist
+	if q.whitelist == nil {
+		q.whitelist = make(map[string]time.Time)
 	}
 	return nil
 }

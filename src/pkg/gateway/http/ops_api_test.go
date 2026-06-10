@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/openocta/openocta/pkg/db"
+	"github.com/openocta/openocta/pkg/jobrun"
 	"github.com/openocta/openocta/pkg/ops"
 	"github.com/openocta/openocta/pkg/rbac"
 )
@@ -20,8 +22,12 @@ func TestOpsAPIPermissionIsolation(t *testing.T) {
 	t.Setenv("OPENOCTA_SKIP_CRON", "1")
 
 	// Ensure DB & Store Init
+	if err := db.InitDB(tempDir); err != nil {
+		t.Fatalf("openocta InitDB: %v", err)
+	}
+	t.Cleanup(func() { _ = db.CloseDB() })
 	if err := rbac.InitDB(tempDir); err != nil {
-		t.Fatalf("InitDB: %v", err)
+		t.Fatalf("rbac InitDB: %v", err)
 	}
 	if err := ops.InitStore(tempDir); err != nil {
 		t.Fatalf("InitStore: %v", err)
@@ -78,8 +84,16 @@ func TestOpsAPIPermissionIsolation(t *testing.T) {
 		t.Fatalf("Record GBase alert: %v", err)
 	}
 
+	// Seed admin and operator users for permission tests
+	if _, err := rbac.SetupInitialAdmin("admin", "admin888!"); err != nil {
+		t.Fatalf("SetupInitialAdmin: %v", err)
+	}
+	if err := rbac.CreateUser("gbase_op", "op123456", 4); err != nil {
+		t.Fatalf("CreateUser gbase_op: %v", err)
+	}
+
 	// Authenticate users to get tokens
-	adminToken, err := rbac.AuthenticateUser("admin", "admin888")
+	adminToken, err := rbac.AuthenticateUser("admin", "admin888!")
 	if err != nil {
 		t.Fatalf("Auth admin: %v", err)
 	}
@@ -212,19 +226,26 @@ func TestBCHAPIPermissionEnforcement(t *testing.T) {
 	t.Setenv("OPENOCTA_SKIP_CHANNELS", "1")
 	t.Setenv("OPENOCTA_SKIP_CRON", "1")
 
-	if err := rbac.InitDB(tempDir); err != nil {
+	if err := db.InitDB(tempDir); err != nil {
 		t.Fatalf("InitDB: %v", err)
+	}
+	if err := rbac.InitDB(tempDir); err != nil {
+		t.Fatalf("rbac InitDB: %v", err)
+	}
+
+	if _, err := rbac.SetupInitialAdmin("admin", "admin888!"); err != nil {
+		t.Fatalf("SetupInitialAdmin: %v", err)
 	}
 
 	// Seed hadoop operator
-	// Role 2 is hadoop_operator, seed hadoop user
-	salt := "test_salt"
-	opHash := rbac.HashPassword("op123456", salt)
-	db := rbac.GetDB()
-	if db != nil {
-		_, _ = db.Exec(`INSERT INTO users (username, password_hash, salt, role_id) VALUES (?, ?, ?, ?)`, "hadoop_op", opHash, salt, 2)
-		// Bind permissions
-		_, _ = db.Exec(`INSERT OR IGNORE INTO role_permissions (role_id, permission_code) VALUES (?, ?)`, 2, "menu:hadoop")
+	if err := rbac.EnsureRolePermission(2, "menu:hadoop"); err != nil {
+		t.Fatalf("EnsureRolePermission: %v", err)
+	}
+	if err := rbac.CreateUser("hadoop_op", "op123456", 2); err != nil {
+		t.Fatalf("CreateUser hadoop_op: %v", err)
+	}
+	if err := rbac.CreateUser("gbase_op", "op123456", 4); err != nil {
+		t.Fatalf("CreateUser gbase_op: %v", err)
 	}
 
 	hadoopToken, err := rbac.AuthenticateUser("hadoop_op", "op123456")
@@ -367,5 +388,99 @@ func TestBCHAPIPermissionEnforcement(t *testing.T) {
 	}
 	if testQueue.CurrentCapacity != originalCapacity {
 		t.Errorf("Expected root.test currentCapacity to rollback to %v, got %v", originalCapacity, testQueue.CurrentCapacity)
+	}
+}
+
+func TestOpsJobRunsAPI(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("OPENOCTA_STATE_DIR", tempDir)
+	t.Setenv("OPENOCTA_RUN_MODE", "service")
+	t.Setenv("OPENOCTA_SKIP_CHANNELS", "1")
+	t.Setenv("OPENOCTA_SKIP_CRON", "1")
+
+	if err := db.InitDB(tempDir); err != nil {
+		t.Fatalf("InitDB: %v", err)
+	}
+	t.Cleanup(func() { _ = db.CloseDB() })
+	if err := rbac.InitDB(tempDir); err != nil {
+		t.Fatalf("rbac InitDB: %v", err)
+	}
+	if err := jobrun.Init(); err != nil {
+		t.Fatalf("jobrun.Init: %v", err)
+	}
+
+	if _, err := rbac.SetupInitialAdmin("admin", "admin888!"); err != nil {
+		t.Fatalf("SetupInitialAdmin: %v", err)
+	}
+
+	svc := jobrun.Default()
+	run, err := svc.Start(jobrun.StartInput{
+		JobID:       "job-inspect-hadoop",
+		TriggerType: jobrun.TriggerInspection,
+		TriggerRef:  "ops-bch-health",
+		Input:       map[string]interface{}{"domain": "hadoop"},
+	})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if _, err := svc.AddStep(run.ID, jobrun.StepInput{
+		Kind:          "tool",
+		Name:          "query_vm_metrics",
+		Status:        jobrun.StatusSucceeded,
+		OutputSummary: "ok",
+	}); err != nil {
+		t.Fatalf("AddStep: %v", err)
+	}
+	if err := svc.Succeed(run.ID, jobrun.FinishInput{Output: map[string]interface{}{"score": 90}}); err != nil {
+		t.Fatalf("Succeed: %v", err)
+	}
+
+	adminToken, err := rbac.AuthenticateUser("admin", "admin888!")
+	if err != nil {
+		t.Fatalf("Auth admin: %v", err)
+	}
+
+	srv := NewServer(":0", "test-1.0.0")
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+	client := &http.Client{}
+
+	req, _ := http.NewRequest("GET", ts.URL+"/api/ops/job-runs?jobId=job-inspect-hadoop", nil)
+	req.Header.Set("Authorization", "Bearer "+adminToken)
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("list status = %d", resp.StatusCode)
+	}
+	var listResp struct {
+		Runs  []jobrun.JobRun `json:"runs"`
+		Total int             `json:"total"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&listResp); err != nil {
+		t.Fatal(err)
+	}
+	if listResp.Total != 1 || len(listResp.Runs) != 1 || listResp.Runs[0].ID != run.ID {
+		t.Fatalf("unexpected list response: %+v", listResp)
+	}
+
+	req, _ = http.NewRequest("GET", ts.URL+"/api/ops/job-runs/"+run.ID, nil)
+	req.Header.Set("Authorization", "Bearer "+adminToken)
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("get status = %d", resp.StatusCode)
+	}
+	var detail jobrun.RunDetail
+	if err := json.NewDecoder(resp.Body).Decode(&detail); err != nil {
+		t.Fatal(err)
+	}
+	if detail.Run.ID != run.ID || len(detail.Steps) != 1 || detail.Steps[0].Name != "query_vm_metrics" {
+		t.Fatalf("unexpected detail: %+v", detail)
 	}
 }

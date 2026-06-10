@@ -1,6 +1,8 @@
 # Ops 集群资产 API
 
-存储路径：`{OPENOCTA_STATE_DIR}/ops/clusters.json`（随网关启动由 `ops.InitStore` 加载）。
+主存储：`{OPENOCTA_STATE_DIR}/openocta.db` 中的 `assets`、`clusters`、`asset_relations` 表。
+
+兼容导入：若启动时发现旧 `{OPENOCTA_STATE_DIR}/ops/clusters.json`，`ops.InitStore` 会导入到 DB 并重命名为 `clusters.json.bak.<timestamp>`；后续 CRUD 不再写回该 JSON 文件。
 
 认证：与网关其他 API 相同，支持 **RBAC Bearer Token** 或 **Gateway Token**。  
 写操作（POST/PATCH/DELETE）需要 `menu:config` 权限（`admin` 角色豁免）。
@@ -310,7 +312,9 @@
 
 ## 告警组（P2-B）
 
-存储路径：`{OPENOCTA_STATE_DIR}/ops/alerts.json`。`POST /hooks/alert` 滑动窗口合并触发分析时自动写入。
+主存储：`{OPENOCTA_STATE_DIR}/openocta.db` 中的 `alert_groups`、`alert_events`、`incident_timeline` 表。
+
+兼容导入：若启动时发现旧 `{OPENOCTA_STATE_DIR}/ops/alerts.json`，`ops.InitAlertsStore` 会导入到 DB 并重命名为 `alerts.json.bak.<timestamp>`；后续告警写入、状态流转和 timeline 更新不再写回该 JSON 文件。
 
 ### `GET /api/ops/alerts/groups`
 

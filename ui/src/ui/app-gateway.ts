@@ -142,7 +142,7 @@ export function connectGateway(host: GatewayHost) {
   host.execApprovalError = null;
 
   host.client?.stop();
-  const connToken = (host as any).rbacToken || (host.settings.token.trim() ? host.settings.token : undefined);
+  const connToken = host.settings.token.trim() ? host.settings.token : undefined;
   host.client = new GatewayBrowserClient({
     url: gatewayWebSocketUrl(host.settings.gatewayUrl),
     token: connToken,

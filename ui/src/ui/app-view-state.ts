@@ -40,7 +40,7 @@ export type AppViewState = {
   settings: UiSettings;
   password: string;
   tab: Tab;
-  rbacToken: string | null;
+  rbacNeedsSetup?: boolean;
   rbacUser: { userId: number; username: string; roleName: string; permissions: string[] } | null;
   rbacChecked: boolean;
   rbacLoginError: string | null;

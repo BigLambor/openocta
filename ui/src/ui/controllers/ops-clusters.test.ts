@@ -9,7 +9,6 @@ import {
 
 const host = {
   gatewayHttpUrl: "http://127.0.0.1:1455",
-  rbacToken: "token",
   settings: { token: "" },
 };
 

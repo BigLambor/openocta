@@ -1,6 +1,7 @@
 /** Ops dashboard feed: alert highlights + recent global inspections. */
 
 import type { GatewayBrowserClient } from "../gateway.ts";
+import { type AuthFetchHost } from "../auth-http.ts";
 import { opsDomainLabel } from "../components/domain-filter.ts";
 import {
   fetchOpsAlertGroups,
@@ -40,12 +41,10 @@ export type DashboardInspectionRun = {
   summary: string;
 };
 
-type FeedHost = {
+type FeedHost = AuthFetchHost & {
   connected: boolean;
   client: GatewayBrowserClient | null;
   gatewayHttpUrl: string;
-  rbacToken: string | null;
-  settings: { token: string };
 };
 
 type CronRunEntry = {

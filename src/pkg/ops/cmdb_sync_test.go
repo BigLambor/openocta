@@ -10,17 +10,14 @@ import (
 )
 
 func TestSyncClustersFromCMDBBody(t *testing.T) {
-	dir := t.TempDir()
-	if err := InitStore(dir); err != nil {
-		t.Fatal(err)
-	}
+	initTestOpsStore(t)
 
 	rows := []map[string]interface{}{
 		{
-			"name":       "CMDB-A",
-			"domain":     DomainHadoop,
-			"nodeCount":  5,
-			"components": json.RawMessage(`"HDFS,YARN"`),
+			"name":          "CMDB-A",
+			"domain":        DomainHadoop,
+			"nodeCount":     5,
+			"components":    json.RawMessage(`"HDFS,YARN"`),
 			"status":        "healthy",
 			"monitorLabels": `job="hadoop-prod"`,
 		},
@@ -49,10 +46,7 @@ func TestSyncClustersFromCMDBBody(t *testing.T) {
 }
 
 func TestSyncClustersFromCMDBWebhook(t *testing.T) {
-	dir := t.TempDir()
-	if err := InitStore(dir); err != nil {
-		t.Fatal(err)
-	}
+	initTestOpsStore(t)
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
@@ -82,10 +76,7 @@ func TestSyncClustersFromCMDBMissingConfig(t *testing.T) {
 }
 
 func TestSyncClustersMappingAndStrategy(t *testing.T) {
-	dir := t.TempDir()
-	if err := InitStore(dir); err != nil {
-		t.Fatal(err)
-	}
+	initTestOpsStore(t)
 
 	// 1. Test Field Mapping
 	customMapping := CMDBMapping{
@@ -210,16 +201,13 @@ func TestSyncClustersMappingAndStrategy(t *testing.T) {
 }
 
 func TestSyncClustersFromCMDBDryRunDoesNotMutateStore(t *testing.T) {
-	dir := t.TempDir()
-	if err := InitStore(dir); err != nil {
-		t.Fatal(err)
-	}
+	initTestOpsStore(t)
 
 	rows := []map[string]interface{}{
 		{
-			"name":      "Preview-Only",
-			"domain":    DomainHadoop,
-			"nodeCount": 5,
+			"name":          "Preview-Only",
+			"domain":        DomainHadoop,
+			"nodeCount":     5,
 			"status":        "healthy",
 			"monitorLabels": `job="hadoop-prod"`,
 		},

@@ -604,6 +604,7 @@ func triggerMergedAlertAnalysis(ctx *handlers.Context, batch *alertBatch) {
 		Deliver:    true,
 		Channel:    channel,
 		To:         to,
+		RunID:      batch.RunID,
 	})
 }
 

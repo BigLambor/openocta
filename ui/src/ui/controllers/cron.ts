@@ -2,6 +2,7 @@ import type { GatewayBrowserClient } from "../gateway.ts";
 import type { CronJob, CronRunLogEntry, CronStatus } from "../types.ts";
 import type { CronFormState } from "../ui-types.ts";
 import { toNumber } from "../format.ts";
+import { fetchOpsJobRuns, type OpsJobRunRecord } from "./ops-job-runs.ts";
 
 export type CronState = {
   client: GatewayBrowserClient | null;
@@ -13,7 +14,10 @@ export type CronState = {
   cronForm: CronFormState;
   cronRunsJobId: string | null;
   cronRuns: CronRunLogEntry[];
+  cronJobRuns?: OpsJobRunRecord[];
   cronBusy: boolean;
+  gatewayHttpUrl?: string;
+  settings?: { token: string };
 };
 
 function normalizeEmployeeIdForCron(raw: string): string {
@@ -335,6 +339,20 @@ export async function loadCronRuns(state: CronState, jobId: string) {
     });
     state.cronRunsJobId = jobId;
     state.cronRuns = Array.isArray(res.entries) ? res.entries : [];
+    if (state.gatewayHttpUrl) {
+      try {
+        const jobRuns = await fetchOpsJobRuns(
+          {
+            gatewayHttpUrl: state.gatewayHttpUrl,
+            settings: state.settings ?? { token: "" },
+          },
+          { jobId, limit: 200 },
+        );
+        state.cronJobRuns = jobRuns.runs;
+      } catch {
+        state.cronJobRuns = [];
+      }
+    }
   } catch (err) {
     state.cronError = String(err);
   }

@@ -6,8 +6,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/stellarlinkco/agentsdk-go/pkg/tool"
+	"github.com/google/uuid"
+	"github.com/openocta/openocta/pkg/jobrun"
 	agentTools "github.com/openocta/openocta/pkg/agent/tools"
+	"github.com/stellarlinkco/agentsdk-go/pkg/tool"
 )
 
 // RunOpts configuration for running a scenario
@@ -15,8 +17,11 @@ type RunOpts struct {
 	SessionID  string
 	RunID      string
 	EmployeeID string
+	JobID      string
+	TriggerType string
+	TriggerRef  string
 	// Params can be used to pass arbitrary parameters to the tools (e.g. cluster limits, queries).
-	Params     map[string]interface{}
+	Params map[string]interface{}
 }
 
 // toolSourceMapping maps platform tools to the SignalSource types they provide
@@ -30,10 +35,42 @@ var toolSourceMapping = map[string][]string{
 // It loads Platform Tools, runs them, verifies required/optional sources, and persists the results.
 func RunScenario(ctx context.Context, scenarioKey string, objectID string, opts RunOpts) (InspectionResult, error) {
 	start := time.Now()
+	runID := strings.TrimSpace(opts.RunID)
+	if runID == "" {
+		runID = uuid.New().String()
+	}
+	runSvc := jobrun.Default()
+	startedHere := false
+	if runSvc != nil {
+		if _, err := runSvc.Get(runID); err != nil {
+			triggerType := strings.TrimSpace(opts.TriggerType)
+			if triggerType == "" {
+				triggerType = jobrun.TriggerInspection
+			}
+			_, err = runSvc.Start(jobrun.StartInput{
+				RunID:       runID,
+				JobID:       strings.TrimSpace(opts.JobID),
+				TriggerType: triggerType,
+				TriggerRef:  firstNonEmpty(strings.TrimSpace(opts.TriggerRef), scenarioKey),
+				Input: map[string]interface{}{
+					"scenarioKey": scenarioKey,
+					"objectId":    objectID,
+					"employeeId":  opts.EmployeeID,
+				},
+			})
+			if err == nil {
+				startedHere = true
+			}
+		}
+	}
 
 	scenario, ok := GetOpsScenario(scenarioKey)
 	if !ok {
-		return InspectionResult{}, fmt.Errorf("scenario %s not found", scenarioKey)
+		err := fmt.Errorf("scenario %s not found", scenarioKey)
+		if startedHere && runSvc != nil {
+			_ = runSvc.Fail(runID, err.Error(), nil)
+		}
+		return InspectionResult{}, err
 	}
 
 	var executedTools []string
@@ -66,6 +103,29 @@ func RunScenario(ctx context.Context, scenarioKey string, objectID string, opts 
 			// Here we assume it executes generically.
 			res, err := t.Execute(ctx, params)
 			executedTools = append(executedTools, tk)
+			if runSvc != nil {
+				stepStatus := jobrun.StatusSucceeded
+				stepErr := ""
+				outputSummary := "ok"
+				if err != nil || res == nil || !res.Success {
+					stepStatus = jobrun.StatusFailed
+					if err != nil {
+						stepErr = err.Error()
+					} else if res != nil {
+						stepErr = truncateString(res.Output, 200)
+					}
+					outputSummary = stepErr
+				} else if res != nil {
+					outputSummary = truncateString(res.Output, 200)
+				}
+				jobrun.RecordToolExecution(jobrun.ToolExecutionInput{
+					RunID:    runID,
+					ToolName: tk,
+					Output:   outputSummary,
+					Status:   stepStatus,
+					Error:    stepErr,
+				})
+			}
 
 			if err == nil && res != nil && res.Success {
 				combinedTextBuilder.WriteString(fmt.Sprintf("#### [%s] Success\n%s\n", tk, truncateString(res.Output, 500)))
@@ -163,7 +223,28 @@ func RunScenario(ctx context.Context, scenarioKey string, objectID string, opts 
 	}
 	RecordRunAudit(audit)
 
+	if startedHere && runSvc != nil {
+		output := map[string]interface{}{
+			"scenarioKey":    scenarioKey,
+			"objectId":         objectID,
+			"scoreStatus":      finalScoreStatus,
+			"signalsWritten":   signalsWritten,
+			"missingSources":   missingSources,
+			"durationMs":       durationMs,
+		}
+		_ = runSvc.Succeed(runID, jobrun.FinishInput{Output: output})
+	}
+
 	return res, nil
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func truncateString(s string, max int) string {

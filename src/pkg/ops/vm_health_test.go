@@ -38,6 +38,18 @@ func TestDomainHealthScoreFromVM(t *testing.T) {
 	}))
 	defer srv.Close()
 
+	t.Setenv(envSeedDemoData, "")
+	initTestOpsStore(t)
+	if _, err := CreateCluster(ClusterCreate{
+		Name:           "hadoop-vm-test",
+		Domain:         DomainHadoop,
+		Status:         "healthy",
+		MonitorLabels:  `job="hadoop-prod"`,
+		MetricsBaseUrl: srv.URL,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
 	t.Setenv("VICTORIAMETRICS_URL", srv.URL)
 	client := newVMClient()
 	score, note := domainHealthScore(context.Background(), client, DomainHadoop)

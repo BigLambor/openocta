@@ -11,6 +11,7 @@ import {
   formatNextRun,
 } from "../presenter.ts";
 import { t } from "../strings.js";
+import { resolveJobRunIdForCronEntry } from "../controllers/ops-job-runs.ts";
 
 export type CronProps = {
   basePath: string;
@@ -30,6 +31,8 @@ export type CronProps = {
   channelMeta?: ChannelUiMetaEntry[];
   runsJobId: string | null;
   runs: CronRunLogEntry[];
+  jobRuns?: import("../controllers/ops-job-runs.ts").OpsJobRunRecord[];
+  onOpenJobRun?: (runId: string) => void;
   onFormChange: (patch: Partial<CronFormState>) => void;
   onRefresh: () => void;
   onOpenAddModal: () => void;
@@ -525,7 +528,7 @@ export function renderCronHistory(props: CronProps) {
               ? html`<div class="muted" style="margin-top: 12px">${t("cronNoRunsYet")}</div>`
               : html`
                   <div class="list" style="margin-top: 12px;">
-                    ${orderedRuns.map((entry) => renderRun(entry, props.basePath))}
+                    ${orderedRuns.map((entry) => renderRun(entry, props))}
                   </div>
                 `
         }
@@ -808,11 +811,12 @@ function cronRunChatSessionKey(entry: CronRunLogEntry): string | null {
   return jid ? `agent:main:cron:${jid}` : null;
 }
 
-function renderRun(entry: CronRunLogEntry, basePath: string) {
+function renderRun(entry: CronRunLogEntry, props: CronProps) {
   const chatSessionKey = cronRunChatSessionKey(entry);
   const chatUrl = chatSessionKey
-    ? `${pathForTab("message", basePath)}?session=${encodeURIComponent(chatSessionKey)}`
+    ? `${pathForTab("message", props.basePath)}?session=${encodeURIComponent(chatSessionKey)}`
     : null;
+  const jobRunId = resolveJobRunIdForCronEntry(entry, props.jobRuns ?? []);
   return html`
     <div class="list-item">
       <div class="list-main">
@@ -822,6 +826,11 @@ function renderRun(entry: CronRunLogEntry, basePath: string) {
       <div class="list-meta">
         <div>${formatMs(entry.ts)}</div>
         <div class="muted">${entry.durationMs ?? 0}ms</div>
+        ${
+          jobRunId && props.onOpenJobRun
+            ? html`<div><button type="button" class="btn btn--link session-link" @click=${() => props.onOpenJobRun?.(jobRunId)}>执行链路</button></div>`
+            : nothing
+        }
         ${
           chatUrl
             ? html`<div><a class="session-link" href=${chatUrl}>Open run chat</a></div>`

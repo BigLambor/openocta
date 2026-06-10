@@ -32,28 +32,28 @@ type CMDBSyncResult struct {
 
 // CMDBMapping defines external field mappings for CMDB import.
 type CMDBMapping struct {
-	Name        string `json:"name"`
-	Domain      string `json:"domain"`
-	Region      string `json:"region"`
-	NodeCount   string `json:"nodeCount"`
-	Components  string `json:"components"`
-	Owner       string `json:"owner"`
-	Status      string `json:"status"`
-	Description    string `json:"description"`
-	MonitorLabels  string `json:"monitorLabels"`
+	Name          string `json:"name"`
+	Domain        string `json:"domain"`
+	Region        string `json:"region"`
+	NodeCount     string `json:"nodeCount"`
+	Components    string `json:"components"`
+	Owner         string `json:"owner"`
+	Status        string `json:"status"`
+	Description   string `json:"description"`
+	MonitorLabels string `json:"monitorLabels"`
 }
 
 // DefaultMapping is the default fallback mapping configuration.
 var DefaultMapping = CMDBMapping{
-	Name:        "name",
-	Domain:      "domain",
-	Region:      "region",
-	NodeCount:   "nodeCount",
-	Components:  "components",
-	Owner:       "owner",
-	Status:      "status",
-	Description:    "description",
-	MonitorLabels:  "monitorLabels",
+	Name:          "name",
+	Domain:        "domain",
+	Region:        "region",
+	NodeCount:     "nodeCount",
+	Components:    "components",
+	Owner:         "owner",
+	Status:        "status",
+	Description:   "description",
+	MonitorLabels: "monitorLabels",
 }
 
 // LoadCMDBMappingFromEnv loads mapping properties from individual environment overrides or JSON.
@@ -94,15 +94,15 @@ func LoadCMDBMappingFromEnv() CMDBMapping {
 
 // CMDBClusterImport is one row from CMDB webhook or manual POST body.
 type CMDBClusterImport struct {
-	Name        string          `json:"name"`
-	Domain      string          `json:"domain"`
-	Region      string          `json:"region"`
-	NodeCount   int             `json:"nodeCount"`
-	Components  json.RawMessage `json:"components"`
-	Owner       string          `json:"owner"`
-	Status      string          `json:"status"`
-	Description    string          `json:"description"`
-	MonitorLabels  string          `json:"monitorLabels"`
+	Name          string          `json:"name"`
+	Domain        string          `json:"domain"`
+	Region        string          `json:"region"`
+	NodeCount     int             `json:"nodeCount"`
+	Components    json.RawMessage `json:"components"`
+	Owner         string          `json:"owner"`
+	Status        string          `json:"status"`
+	Description   string          `json:"description"`
+	MonitorLabels string          `json:"monitorLabels"`
 }
 
 func parseComponentsField(raw json.RawMessage) []string {
@@ -126,13 +126,13 @@ func (r CMDBClusterImport) toCreate() (ClusterCreate, error) {
 		return ClusterCreate{}, fmt.Errorf("CMDB 行缺少 name")
 	}
 	return ClusterCreate{
-		Name:        name,
-		Domain:      r.Domain,
-		Region:      r.Region,
-		NodeCount:   r.NodeCount,
-		Components:  parseComponentsField(r.Components),
-		Owner:       r.Owner,
-		Status:      r.Status,
+		Name:          name,
+		Domain:        r.Domain,
+		Region:        r.Region,
+		NodeCount:     r.NodeCount,
+		Components:    parseComponentsField(r.Components),
+		Owner:         r.Owner,
+		Status:        r.Status,
 		Description:   r.Description,
 		MonitorLabels: r.MonitorLabels,
 	}, nil
@@ -422,9 +422,10 @@ func findClusterByDomainName(domain, name string) (Cluster, bool) {
 
 	serviceMu.RLock()
 	defer serviceMu.RUnlock()
-	for _, c := range clusters {
-		if c.Domain == domain && strings.EqualFold(c.Name, name) {
-			return c, true
+	if clusterRepo != nil {
+		c, ok, err := clusterRepo.FindByDomainName(domain, name)
+		if err == nil {
+			return c, ok
 		}
 	}
 	return Cluster{}, false

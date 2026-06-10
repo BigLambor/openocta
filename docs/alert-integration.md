@@ -18,7 +18,7 @@
 }
 ```
 
-4. 同一 `source` 在 15s 滑动窗口内合并；满 20 条或超时后触发 Agent 分析并写入 `ops/alerts.json`。
+4. 同一 `source` 在 15s 滑动窗口内合并；满 20 条或超时后触发 Agent 分析并写入 `openocta.db` 的 `alert_groups`、`alert_events`、`incident_timeline` 表。
 
 ## UI 深链（IM 卡片）
 

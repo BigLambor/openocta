@@ -4,7 +4,7 @@
 
 | 变量 | 用途 |
 |------|------|
-| `OPENOCTA_STATE_DIR` | 状态目录（含 `ops/clusters.json`、`ops/alerts.json`） |
+| `OPENOCTA_STATE_DIR` | 状态目录（含 `openocta.db`、旧 JSON 导入备份） |
 | `VICTORIAMETRICS_URL` | 大屏健康分 PromQL |
 | `GBASE_DSN` | GBase 慢 SQL 工具 |
 | `GOVERNANCE_API_URL` | 治理血缘 API |

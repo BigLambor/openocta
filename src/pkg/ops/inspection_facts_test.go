@@ -6,10 +6,7 @@ import (
 )
 
 func TestPersistInspectionFactsCreatesGBaseSQLSignalAndSnapshot(t *testing.T) {
-	dir := t.TempDir()
-	if err := InitStore(dir); err != nil {
-		t.Fatal(err)
-	}
+	dir := initTestOpsStore(t)
 	if err := InitAlertsStore(dir); err != nil {
 		t.Fatal(err)
 	}

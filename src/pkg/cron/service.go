@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/openocta/openocta/pkg/agent/tools"
 	"github.com/openocta/openocta/pkg/db"
+	"github.com/openocta/openocta/pkg/jobrun"
 	"github.com/openocta/openocta/pkg/ops"
 )
 
@@ -22,9 +23,10 @@ type Service struct {
 	storePath string
 	mu        sync.RWMutex
 	store     *StoreFile
-	db        *sql.DB
+	repo      *jobRepository
 	deps      *Deps
 	done      chan struct{}
+	wg        sync.WaitGroup
 }
 
 func normalizeDigitalEmployeeID(raw string) string {
@@ -43,6 +45,7 @@ func normalizeDigitalEmployeeID(raw string) string {
 type cronRunLogEntry struct {
 	Ts          int64                 `json:"ts"`
 	JobID       string                `json:"jobId"`
+	RunID       string                `json:"runId,omitempty"`
 	Action      string                `json:"action"`
 	Status      string                `json:"status,omitempty"`
 	Error       string                `json:"error,omitempty"`
@@ -66,10 +69,11 @@ func (s *Service) resolveRunLogPath(jobID string) string {
 }
 
 // appendRunLogEntry appends one finished-action entry to the job's run log.
-func (s *Service) appendRunLogEntry(job CronJob, status, errMsg, summary, sessionKey, sessionID string, runAtMs, durationMs, nextRunAtMs *int64, domain, clusterID, component, scenarioKey string, result *ops.InspectionResult) {
+func (s *Service) appendRunLogEntry(job CronJob, runID, status, errMsg, summary, sessionKey, sessionID string, runAtMs, durationMs, nextRunAtMs *int64, domain, clusterID, component, scenarioKey string, result *ops.InspectionResult) {
 	entry := cronRunLogEntry{
 		Ts:          time.Now().UnixMilli(),
 		JobID:       job.ID,
+		RunID:       strings.TrimSpace(runID),
 		Action:      "finished",
 		Status:      status,
 		Error:       errMsg,
@@ -116,15 +120,19 @@ func NewService(storePath string) (*Service, error) {
 
 	sqliteDB := db.GetDB()
 	if sqliteDB != nil {
-		if err := createCronTables(sqliteDB); err != nil {
-			return nil, fmt.Errorf("failed to create cron tables: %w", err)
+		repo := newJobRepository(sqliteDB)
+		if repo == nil {
+			return nil, fmt.Errorf("cron job repository 未初始化")
 		}
-		if err := migrateCronJSONToSQLite(sqliteDB, storePath); err != nil {
-			fmt.Printf("warning: cron JSON to SQLite migration failed: %v\n", err)
+		if _, err := repo.ImportJSON(storePath); err != nil {
+			fmt.Printf("warning: cron JSON import failed: %v\n", err)
+		}
+		if _, err := repo.ImportLegacyCronJobs(); err != nil {
+			fmt.Printf("warning: cron legacy blob import failed: %v\n", err)
 		}
 		svc := &Service{
 			storePath: storePath,
-			db:        sqliteDB,
+			repo:      repo,
 		}
 		_ = svc.ensureDefaultJobs()
 		return svc, nil
@@ -153,27 +161,8 @@ func NewService(storePath string) (*Service, error) {
 func (s *Service) List(includeDisabled bool) ([]CronJob, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	if s.db != nil {
-		rows, err := s.db.Query(`SELECT detail_json FROM cron_jobs`)
-		if err != nil {
-			return nil, err
-		}
-		defer rows.Close()
-		var out []CronJob
-		for rows.Next() {
-			var detailStr string
-			if err := rows.Scan(&detailStr); err != nil {
-				return nil, err
-			}
-			var j CronJob
-			if err := json.Unmarshal([]byte(detailStr), &j); err != nil {
-				return nil, err
-			}
-			if j.Enabled || includeDisabled {
-				out = append(out, j)
-			}
-		}
-		return out, nil
+	if s.repo != nil {
+		return s.repo.List(includeDisabled)
 	}
 
 	var out []CronJob
@@ -233,13 +222,8 @@ func (s *Service) Add(input JobCreate) (CronJob, error) {
 		j.WakeMode = "next-heartbeat"
 	}
 
-	if s.db != nil {
-		b, err := json.Marshal(j)
-		if err != nil {
-			return CronJob{}, err
-		}
-		_, err = s.db.Exec(`INSERT INTO cron_jobs (id, detail_json) VALUES (?, ?)`, j.ID, string(b))
-		return j, err
+	if s.repo != nil {
+		return j, s.repo.Upsert(j)
 	}
 
 	s.store.Jobs = append(s.store.Jobs, j)
@@ -265,17 +249,12 @@ type JobPatch struct {
 func (s *Service) GetJob(id string) (CronJob, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	if s.db != nil {
-		var detailStr string
-		err := s.db.QueryRow(`SELECT detail_json FROM cron_jobs WHERE id = ?`, id).Scan(&detailStr)
-		if err != nil {
+	if s.repo != nil {
+		job, ok, err := s.repo.Get(id)
+		if err != nil || !ok {
 			return CronJob{}, false
 		}
-		var j CronJob
-		if err := json.Unmarshal([]byte(detailStr), &j); err != nil {
-			return CronJob{}, false
-		}
-		return j, true
+		return job, true
 	}
 
 	for i := range s.store.Jobs {
@@ -290,15 +269,13 @@ func (s *Service) GetJob(id string) (CronJob, bool) {
 func (s *Service) Update(id string, patch JobPatch) (CronJob, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.db != nil {
-		var detailStr string
-		err := s.db.QueryRow(`SELECT detail_json FROM cron_jobs WHERE id = ?`, id).Scan(&detailStr)
+	if s.repo != nil {
+		j, ok, err := s.repo.Get(id)
 		if err != nil {
 			return CronJob{}, err
 		}
-		var j CronJob
-		if err := json.Unmarshal([]byte(detailStr), &j); err != nil {
-			return CronJob{}, err
+		if !ok {
+			return CronJob{}, nil
 		}
 
 		if patch.Enabled != nil {
@@ -335,13 +312,10 @@ func (s *Service) Update(id string, patch JobPatch) (CronJob, error) {
 			j.SessionKey = strings.TrimSpace(*patch.SessionKey)
 		}
 		j.UpdatedAtMs = time.Now().UnixMilli()
-
-		b, err := json.Marshal(j)
-		if err != nil {
+		if err := s.repo.Upsert(j); err != nil {
 			return CronJob{}, err
 		}
-		_, err = s.db.Exec(`UPDATE cron_jobs SET detail_json = ? WHERE id = ?`, string(b), id)
-		return j, err
+		return j, nil
 	}
 
 	for i := range s.store.Jobs {
@@ -391,8 +365,11 @@ func (s *Service) Update(id string, patch JobPatch) (CronJob, error) {
 func (s *Service) Remove(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.db != nil {
-		_, err := s.db.Exec(`DELETE FROM cron_jobs WHERE id = ?`, id)
+	if s.repo != nil {
+		err := s.repo.Delete(id)
+		if err == sql.ErrNoRows {
+			return nil
+		}
 		return err
 	}
 
@@ -413,13 +390,12 @@ func (s *Service) Run(id string, mode string, domain, clusterId, component, scen
 	s.mu.Lock()
 	var jobCopy CronJob
 	var found bool
-	if s.db != nil {
-		var detailStr string
-		err := s.db.QueryRow(`SELECT detail_json FROM cron_jobs WHERE id = ?`, id).Scan(&detailStr)
-		if err == nil {
-			if json.Unmarshal([]byte(detailStr), &jobCopy) == nil {
-				found = true
-			}
+	if s.repo != nil {
+		var err error
+		jobCopy, found, err = s.repo.Get(id)
+		if err != nil {
+			s.mu.Unlock()
+			return err
 		}
 	} else {
 		for i := range s.store.Jobs {
@@ -436,6 +412,9 @@ func (s *Service) Run(id string, mode string, domain, clusterId, component, scen
 	}
 	deps := s.deps
 	s.mu.Unlock()
+
+	runID := uuid.New().String()
+	trackedRunID := startCronJobRun(id, mode, domain, clusterId, component, scenarioKey, runID)
 
 	status := "ok"
 	errMsg := ""
@@ -493,15 +472,18 @@ func (s *Service) Run(id string, mode string, domain, clusterId, component, scen
 			errMsg = "cron deps not configured"
 		} else if hasNativeScenario {
 			// Run native OpsScenario
-			ctx := context.Background() // TODO: use context with timeout
-			runID := uuid.New().String()
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+			defer cancel()
 			if cronSessionID == "" {
 				cronSessionID = runID
 			}
 			res, err := ops.RunScenario(ctx, scenarioKey, clusterId, ops.RunOpts{
-				SessionID:  cronSessionID,
-				RunID:      runID,
-				EmployeeID: jobCopy.DigitalEmployeeID,
+				SessionID:   cronSessionID,
+				RunID:       runID,
+				EmployeeID:  jobCopy.DigitalEmployeeID,
+				JobID:       id,
+				TriggerType: jobrun.TriggerTypeForCronMode(mode),
+				TriggerRef:  scenarioKey,
 			})
 			if err != nil {
 				status = "error"
@@ -546,35 +528,28 @@ func (s *Service) Run(id string, mode string, domain, clusterId, component, scen
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var nextRunAtMs *int64
-	if s.db != nil {
-		var detailStr string
-		err := s.db.QueryRow(`SELECT detail_json FROM cron_jobs WHERE id = ?`, id).Scan(&detailStr)
-		if err == nil {
-			var j CronJob
-			if json.Unmarshal([]byte(detailStr), &j) == nil {
-				j.State.LastRunAtMs = &endMs
-				j.State.LastStatus = status
-				if errMsg != "" {
-					j.State.LastError = errMsg
-				} else {
-					j.State.LastError = ""
-				}
-				j.State.RunningAtMs = nil
-				j.State.LastDurationMs = &durationMs
-				if status == "ok" {
-					j.State.ConsecutiveErrors = 0
-				} else if status == "error" {
-					j.State.ConsecutiveErrors++
-				}
-				next := ComputeNextRunAtMs(j.Schedule, endMs)
-				j.State.NextRunAtMs = &next
-				nextRunAtMs = &next
-
-				if b, mErr := json.Marshal(j); mErr == nil {
-					_, _ = s.db.Exec(`UPDATE cron_jobs SET detail_json = ? WHERE id = ?`, string(b), id)
-				}
-				jobCopy = j
+	if s.repo != nil {
+		j, ok, err := s.repo.Get(id)
+		if err == nil && ok {
+			j.State.LastRunAtMs = &endMs
+			j.State.LastStatus = status
+			if errMsg != "" {
+				j.State.LastError = errMsg
+			} else {
+				j.State.LastError = ""
 			}
+			j.State.RunningAtMs = nil
+			j.State.LastDurationMs = &durationMs
+			if status == "ok" {
+				j.State.ConsecutiveErrors = 0
+			} else if status == "error" {
+				j.State.ConsecutiveErrors++
+			}
+			next := ComputeNextRunAtMs(j.Schedule, endMs)
+			j.State.NextRunAtMs = &next
+			nextRunAtMs = &next
+			_ = s.repo.Upsert(j)
+			jobCopy = j
 		}
 	} else {
 		for i := range s.store.Jobs {
@@ -606,9 +581,55 @@ func (s *Service) Run(id string, mode string, domain, clusterId, component, scen
 
 	// Append run log entry without holding the lock.
 	runAt := startMs
-	s.appendRunLogEntry(jobCopy, status, errMsg, runSummary, sessionKey, cronSessionID, &runAt, &durationMs, nextRunAtMs, domain, clusterId, component, scenarioKey, inspectionResult)
+	finishCronJobRun(trackedRunID, status, errMsg, runSummary, scenarioKey, domain, clusterId, component, mode)
+	s.appendRunLogEntry(jobCopy, trackedRunID, status, errMsg, runSummary, sessionKey, cronSessionID, &runAt, &durationMs, nextRunAtMs, domain, clusterId, component, scenarioKey, inspectionResult)
 
 	return nil
+}
+
+func startCronJobRun(jobID, mode, domain, clusterID, component, scenarioKey, runID string) string {
+	jr := jobrun.Default()
+	if jr == nil {
+		return ""
+	}
+	run, err := jr.Start(jobrun.StartInput{
+		RunID:       runID,
+		JobID:       jobID,
+		TriggerType: jobrun.TriggerTypeForCronMode(mode),
+		TriggerRef:  scenarioKey,
+		Input: map[string]interface{}{
+			"mode":        mode,
+			"domain":      domain,
+			"clusterId":   clusterID,
+			"component":   component,
+			"scenarioKey": scenarioKey,
+		},
+	})
+	if err != nil {
+		return ""
+	}
+	return run.ID
+}
+
+func finishCronJobRun(runID, status, errMsg, summary, scenarioKey, domain, clusterID, component, mode string) {
+	jr := jobrun.Default()
+	if jr == nil || strings.TrimSpace(runID) == "" {
+		return
+	}
+	output := map[string]interface{}{
+		"status":      status,
+		"summary":     summary,
+		"scenarioKey": scenarioKey,
+		"domain":      domain,
+		"clusterId":   clusterID,
+		"component":   component,
+		"mode":        mode,
+	}
+	if status == "error" {
+		_ = jr.Fail(runID, errMsg, output)
+		return
+	}
+	_ = jr.Succeed(runID, jobrun.FinishInput{Output: output})
 }
 
 // RecomputeNextRuns updates NextRunAtMs for all jobs and persists.
@@ -616,46 +637,19 @@ func (s *Service) RecomputeNextRuns() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := time.Now().UnixMilli()
-	if s.db != nil {
-		rows, err := s.db.Query(`SELECT id, detail_json FROM cron_jobs`)
+	if s.repo != nil {
+		jobs, err := s.repo.List(true)
 		if err != nil {
 			return err
 		}
-		defer rows.Close()
-
-		type jobUpdate struct {
-			id         string
-			detailJson string
-		}
-		var updates []jobUpdate
-		for rows.Next() {
-			var id, detailStr string
-			if err := rows.Scan(&id, &detailStr); err == nil {
-				var j CronJob
-				if json.Unmarshal([]byte(detailStr), &j) == nil {
-					next := ComputeNextRunAtMs(j.Schedule, now)
-					j.State.NextRunAtMs = &next
-					if b, err := json.Marshal(j); err == nil {
-						updates = append(updates, jobUpdate{id: id, detailJson: string(b)})
-					}
-				}
+		for _, j := range jobs {
+			next := ComputeNextRunAtMs(j.Schedule, now)
+			j.State.NextRunAtMs = &next
+			if err := s.repo.Upsert(j); err != nil {
+				return err
 			}
 		}
-
-		tx, err := s.db.Begin()
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-		stmt, err := tx.Prepare(`UPDATE cron_jobs SET detail_json = ? WHERE id = ?`)
-		if err != nil {
-			return err
-		}
-		defer stmt.Close()
-		for _, u := range updates {
-			_, _ = stmt.Exec(u.detailJson, u.id)
-		}
-		return tx.Commit()
+		return nil
 	}
 
 	for i := range s.store.Jobs {
@@ -670,21 +664,14 @@ func (s *Service) NextWakeAtMs() int64 {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	var min int64
-	if s.db != nil {
-		rows, err := s.db.Query(`SELECT detail_json FROM cron_jobs`)
+	if s.repo != nil {
+		jobs, err := s.repo.List(true)
 		if err == nil {
-			defer rows.Close()
-			for rows.Next() {
-				var detailStr string
-				if err := rows.Scan(&detailStr); err == nil {
-					var j CronJob
-					if json.Unmarshal([]byte(detailStr), &j) == nil {
-						if j.Enabled && j.State.NextRunAtMs != nil {
-							n := *j.State.NextRunAtMs
-							if n > 0 && (min == 0 || n < min) {
-								min = n
-							}
-						}
+			for _, j := range jobs {
+				if j.Enabled && j.State.NextRunAtMs != nil {
+					n := *j.State.NextRunAtMs
+					if n > 0 && (min == 0 || n < min) {
+						min = n
 					}
 				}
 			}
@@ -709,19 +696,12 @@ func (s *Service) dueJobIDs(nowMs int64) []string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	var ids []string
-	if s.db != nil {
-		rows, err := s.db.Query(`SELECT detail_json FROM cron_jobs`)
+	if s.repo != nil {
+		jobs, err := s.repo.List(true)
 		if err == nil {
-			defer rows.Close()
-			for rows.Next() {
-				var detailStr string
-				if err := rows.Scan(&detailStr); err == nil {
-					var j CronJob
-					if json.Unmarshal([]byte(detailStr), &j) == nil {
-						if j.Enabled && j.State.NextRunAtMs != nil && *j.State.NextRunAtMs <= nowMs {
-							ids = append(ids, j.ID)
-						}
-					}
+			for _, j := range jobs {
+				if j.Enabled && j.State.NextRunAtMs != nil && *j.State.NextRunAtMs <= nowMs {
+					ids = append(ids, j.ID)
 				}
 			}
 		}
@@ -777,7 +757,11 @@ func (s *Service) Start() {
 			nowMs = time.Now().UnixMilli()
 			dueIds := s.dueJobIDs(nowMs)
 			for _, id := range dueIds {
-				_ = s.Run(id, "due", "", "", "", "")
+				s.wg.Add(1)
+				go func(jobID string) {
+					defer s.wg.Done()
+					_ = s.Run(jobID, "due", "", "", "", "")
+				}(id)
 			}
 			// 仅在有任务实际执行时重算下次运行时间，避免覆盖「即将到期」任务的 NextRunAtMs
 			// （例如因时钟偏差未命中 dueJobIDs，RecomputeNextRuns 会错误跳过该次执行）
@@ -797,6 +781,7 @@ func (s *Service) Stop() {
 	if done != nil {
 		close(done)
 	}
+	s.wg.Wait()
 }
 
 // ensureDefaultJobs populates 5 default health inspection cron jobs for Hadoop, FI, GBase, Governance, and DataApps.
@@ -866,62 +851,53 @@ func (s *Service) ensureDefaultJobs() error {
 		},
 	}
 
-	if s.db != nil {
+	if s.repo != nil {
 		for _, dj := range defaultJobs {
-			var detailStr string
-			err := s.db.QueryRow(`SELECT detail_json FROM cron_jobs WHERE id = ?`, dj.ID).Scan(&detailStr)
-			if err == nil {
-				var j CronJob
-				if json.Unmarshal([]byte(detailStr), &j) == nil {
-					empID := ""
-					if dj.ID == "job-inspect-hadoop" || dj.ID == "job-inspect-fi" {
-						empID = "emp_bch_inspect"
-					} else {
-						empID = "emp_bch_diagnose"
-					}
-					if j.DigitalEmployeeID == "" {
-						j.DigitalEmployeeID = empID
-						j.UpdatedAtMs = now
-						b, err := json.Marshal(j)
-						if err == nil {
-							_, _ = s.db.Exec(`UPDATE cron_jobs SET detail_json = ? WHERE id = ?`, string(b), dj.ID)
-						}
+			j, found, err := s.repo.Get(dj.ID)
+			if err != nil {
+				return err
+			}
+			empID := ""
+			if dj.ID == "job-inspect-hadoop" || dj.ID == "job-inspect-fi" {
+				empID = "emp_bch_inspect"
+			} else {
+				empID = "emp_bch_diagnose"
+			}
+			if found {
+				if j.DigitalEmployeeID == "" {
+					j.DigitalEmployeeID = empID
+					j.UpdatedAtMs = now
+					if err := s.repo.Upsert(j); err != nil {
+						return err
 					}
 				}
-			} else if err == sql.ErrNoRows {
-				sched := CronSchedule{Kind: "cron", Expr: "0 8,20 * * *"}
-				next := ComputeNextRunAtMs(sched, now)
-				empID := ""
-				if dj.ID == "job-inspect-hadoop" || dj.ID == "job-inspect-fi" {
-					empID = "emp_bch_inspect"
-				} else {
-					empID = "emp_bch_diagnose"
-				}
-				j := CronJob{
-					ID:                dj.ID,
-					AgentID:           "main",
-					Name:              dj.Name,
-					Description:       dj.Description,
-					Enabled:           true,
-					CreatedAtMs:       now,
-					UpdatedAtMs:       now,
-					DigitalEmployeeID: empID,
-					Schedule:          sched,
-					SessionTarget:     "isolated",
-					SessionKey:        "agent:main:cron:" + dj.ID,
-					WakeMode:          "next-heartbeat",
-					Payload: CronPayload{
-						Kind:    "agentTurn",
-						Message: dj.Message,
-					},
-					State: CronJobState{
-						NextRunAtMs: &next,
-					},
-				}
-				b, err := json.Marshal(j)
-				if err == nil {
-					_, _ = s.db.Exec(`INSERT INTO cron_jobs (id, detail_json) VALUES (?, ?)`, j.ID, string(b))
-				}
+				continue
+			}
+			sched := CronSchedule{Kind: "cron", Expr: "0 8,20 * * *"}
+			next := ComputeNextRunAtMs(sched, now)
+			newJob := CronJob{
+				ID:                dj.ID,
+				AgentID:           "main",
+				Name:              dj.Name,
+				Description:       dj.Description,
+				Enabled:           true,
+				CreatedAtMs:       now,
+				UpdatedAtMs:       now,
+				DigitalEmployeeID: empID,
+				Schedule:          sched,
+				SessionTarget:     "isolated",
+				SessionKey:        "agent:main:cron:" + dj.ID,
+				WakeMode:          "next-heartbeat",
+				Payload: CronPayload{
+					Kind:    "agentTurn",
+					Message: dj.Message,
+				},
+				State: CronJobState{
+					NextRunAtMs: &next,
+				},
+			}
+			if err := s.repo.Upsert(newJob); err != nil {
+				return err
 			}
 		}
 		return nil
@@ -984,51 +960,6 @@ func (s *Service) ensureDefaultJobs() error {
 
 	if changed {
 		return SaveStore(s.storePath, s.store)
-	}
-	return nil
-}
-
-func createCronTables(db *sql.DB) error {
-	_, err := db.Exec(`
-		CREATE TABLE IF NOT EXISTS cron_jobs (
-			id TEXT PRIMARY KEY,
-			detail_json TEXT
-		);
-	`)
-	return err
-}
-
-func migrateCronJSONToSQLite(db *sql.DB, storePath string) error {
-	if _, err := os.Stat(storePath); err == nil {
-		store, err := LoadStore(storePath)
-		if err == nil && len(store.Jobs) > 0 {
-			tx, err := db.Begin()
-			if err != nil {
-				return err
-			}
-			defer tx.Rollback()
-
-			stmt, err := tx.Prepare(`INSERT OR REPLACE INTO cron_jobs (id, detail_json) VALUES (?, ?)`)
-			if err != nil {
-				return err
-			}
-			defer stmt.Close()
-
-			for _, job := range store.Jobs {
-				b, err := json.Marshal(job)
-				if err != nil {
-					return err
-				}
-				_, err = stmt.Exec(job.ID, string(b))
-				if err != nil {
-					return err
-				}
-			}
-
-			if err := tx.Commit(); err == nil {
-				_ = os.Rename(storePath, storePath+".bak")
-			}
-		}
 	}
 	return nil
 }

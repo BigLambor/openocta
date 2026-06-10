@@ -1,9 +1,6 @@
 package ops
 
-import (
-	"path/filepath"
-	"testing"
-)
+import "testing"
 
 func TestParseChatOpsCommand(t *testing.T) {
 	cmd, args, ok := ParseChatOpsCommand("/ack alert-group-abc")
@@ -17,10 +14,7 @@ func TestParseChatOpsCommand(t *testing.T) {
 }
 
 func TestChatOpsAck(t *testing.T) {
-	dir := t.TempDir()
-	if err := InitAlertsStore(dir); err != nil {
-		t.Fatal(err)
-	}
+	initTestAlertsStore(t)
 	_, err := RecordMergedAlertGroup("test", "agent:main:alert:x", "run-1", []MergedAlertInput{
 		{Title: "t", Severity: "warning", Message: "m"},
 	})
@@ -41,6 +35,4 @@ func TestChatOpsAck(t *testing.T) {
 	if err != nil || g.Status != AlertStatusResolved {
 		t.Fatalf("status: %v err=%v", g.Status, err)
 	}
-
-	_ = filepath.Join(dir, "ops", "alerts.json")
 }
